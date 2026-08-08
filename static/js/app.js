@@ -88,6 +88,24 @@ function getCategorySvgIcon(iconEmoji, catName) {
     return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
 }
 
+function getCategoryColorTheme(catName, index) {
+    const themes = [
+        { bg: 'rgba(6, 182, 212, 0.12)', border: 'rgba(6, 182, 212, 0.3)', color: '#06b6d4' }, // Cyan / Blue
+        { bg: 'rgba(245, 158, 11, 0.12)', border: 'rgba(245, 158, 11, 0.3)', color: '#f59e0b' }, // Amber / Yellow
+        { bg: 'rgba(168, 85, 247, 0.12)', border: 'rgba(168, 85, 247, 0.3)', color: '#a855f7' }, // Purple
+        { bg: 'rgba(0, 245, 160, 0.12)', border: 'rgba(0, 245, 160, 0.3)', color: '#00F5A0' }, // Emerald Green
+        { bg: 'rgba(244, 63, 94, 0.12)', border: 'rgba(244, 63, 94, 0.3)', color: '#f43f5e' }   // Rose / Red
+    ];
+    
+    const nameLower = (catName || '').toLowerCase();
+    if (nameLower.includes('smart') || nameLower.includes('telefon')) return themes[0];
+    if (nameLower.includes('noutbuk') || nameLower.includes('kompyuter')) return themes[3];
+    if (nameLower.includes('akses') || nameLower.includes('quloq')) return themes[1];
+    if (nameLower.includes('soat') || nameLower.includes('watch')) return themes[2];
+    
+    return themes[index % themes.length];
+}
+
 function renderCategoriesGrid() {
     const grid = document.getElementById('categories-cards-grid');
     if (!grid) return;
@@ -98,7 +116,7 @@ function renderCategoriesGrid() {
         badge.textContent = `${currentCategories.length} ta kategoriya`;
     }
 
-    currentCategories.forEach(cat => {
+    currentCategories.forEach((cat, idx) => {
         const pCount = cat.product_count || 0;
         const card = document.createElement('div');
         card.className = 'category-card';
@@ -109,12 +127,17 @@ function renderCategoriesGrid() {
         };
 
         const svgIcon = getCategorySvgIcon(cat.icon, cat.name);
+        const theme = getCategoryColorTheme(cat.name, idx);
 
         card.innerHTML = `
             <div class="category-card-header">
-                <div class="category-icon-wrapper">${svgIcon}</div>
+                <div class="category-icon-wrapper" style="background: ${theme.bg}; border: 1px solid ${theme.border}; color: ${theme.color};">
+                    ${svgIcon}
+                </div>
                 <div class="category-card-header-right">
-                    <span class="category-count-pill">${pCount} ta mahsulot</span>
+                    <span class="category-count-pill" style="background: ${theme.bg}; border: 1px solid ${theme.border}; color: ${theme.color};">
+                        ${pCount} ta mahsulot
+                    </span>
                     <button class="btn-delete-cat-icon" onclick="deleteCategory('${cat.id}', '${cat.name}', event)" title="O'chirish">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                             <polyline points="3 6 5 6 21 6"></polyline>
@@ -128,7 +151,7 @@ function renderCategoriesGrid() {
                 <h4 class="category-card-title">${cat.name}</h4>
             </div>
 
-            <div class="category-card-footer">
+            <div class="category-card-footer" style="color: ${theme.color};">
                 <span>Mahsulotlarni ko'rish</span>
                 <span class="arrow">→</span>
             </div>

@@ -214,7 +214,7 @@ body {
     font-weight: 700;
 }
 
-/* Balanced 2D Vector Categories Cards Grid Layout */
+/* Balanced Multi-Color Vibrant Categories Cards Grid Layout */
 .categories-cards-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -241,27 +241,26 @@ body {
 .category-card:hover {
     border-color: var(--card-hover-border);
     transform: translateY(-3px);
-    box-shadow: 0 10px 28px rgba(0, 245, 160, 0.12), 0 16px 36px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
 }
 
 .category-card-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
 }
 
+/* Flushed Top Right Badge Alignment */
 .category-card-header-right {
     display: flex;
     align-items: center;
     gap: 8px;
+    margin-left: auto;
 }
 
 .category-icon-wrapper {
     width: 44px;
     height: 44px;
-    background: rgba(0, 245, 160, 0.1);
-    border: 1px solid rgba(0, 245, 160, 0.25);
-    color: var(--primary);
     border-radius: 12px;
     display: flex;
     align-items: center;
@@ -269,26 +268,20 @@ body {
     transition: var(--transition);
 }
 
-.category-card:hover .category-icon-wrapper {
-    background: rgba(0, 245, 160, 0.2);
-    border-color: var(--primary);
-}
-
-/* Product Count Badge in Top Right Corner */
+/* Product Count Badge Flushed Tight to Corner */
 .category-count-pill {
-    padding: 4px 10px;
-    background: rgba(0, 245, 160, 0.08);
-    border: 1px solid rgba(0, 245, 160, 0.2);
+    padding: 4px 11px;
     border-radius: 12px;
     font-size: 11px;
     font-weight: 700;
-    color: var(--primary);
+    letter-spacing: -0.2px;
+    border: 1px solid transparent;
 }
 
 /* Delete Button on Hover in Top Right */
 .btn-delete-cat-icon {
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
     background: rgba(239, 68, 68, 0.12);
     border: 1px solid rgba(239, 68, 68, 0.25);
     color: #f87171;
@@ -331,7 +324,6 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    color: var(--primary);
     font-size: 12px;
     font-weight: 700;
 }
