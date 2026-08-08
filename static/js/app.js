@@ -438,6 +438,10 @@ async function loadDashboardStats() {
 }
 
 function renderRevenueChart(labels, values) {
+    if (typeof Chart === 'undefined') {
+        console.warn('Chart.js CDN hali yuklanmagan yoki bloklangan.');
+        return;
+    }
     const canvas = document.getElementById('revenueChart');
     if (!canvas) return;
 
