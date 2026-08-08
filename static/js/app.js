@@ -882,7 +882,11 @@ function renderOrdersTable() {
                            o.status === "Yo'lda" ? 'badge-yolda' :
                            o.status === 'Yetkazildi' ? 'badge-yetkazildi' : 'badge-bekor';
 
+        const statusSelected = (val) => o.status === val ? 'selected' : '';
+
         const tr = document.createElement('tr');
+
+        // Build row HTML safely (no inline quotes inside template)
         tr.innerHTML = `
             <td><code>${o.id}</code></td>
             <td style="font-size: 12px; color: var(--text-muted);">${o.created_at}</td>
@@ -892,21 +896,33 @@ function renderOrdersTable() {
             <td><strong>${o.total_amount.toLocaleString()} UZS</strong></td>
             <td>
                 <select class="status-select ${badgeClass}" onchange="updateOrderStatus('${o.id}', this.value)">
-                    <option value="Yangi" ${o.status==='Yangi'?'selected':''}>🔥 Yangi</option>
-                    <option value="Tasdiqlandi" ${o.status==='Tasdiqlandi'?'selected':''}>⚡️ Tasdiqlandi</option>
-                    <option value="Yo'lda" ${o.status==="Yo'lda"?'selected':''}>🚚 Yo'lda</option>
-                    <option value="Yetkazildi" ${o.status==='Yetkazildi'?'selected':''}>✅ Yetkazildi</option>
-                    <option value="Bekor qilindi" ${o.status==='Bekor qilindi'?'selected':''}>❌ Bekor qilindi</option>
+                    <option value="Yangi" ${statusSelected('Yangi')}>🔥 Yangi</option>
+                    <option value="Tasdiqlandi" ${statusSelected('Tasdiqlandi')}>⚡️ Tasdiqlandi</option>
+                    <option value="Yo'lda" ${statusSelected("Yo'lda")}>🚚 Yo'lda</option>
+                    <option value="Yetkazildi" ${statusSelected('Yetkazildi')}>✅ Yetkazildi</option>
+                    <option value="Bekor qilindi" ${statusSelected('Bekor qilindi')}>❌ Bekor qilindi</option>
                 </select>
             </td>
             <td>
-                <button onclick="alert('Buyurtma manzili: ${o.delivery_address || 'Kiritilmagan'}\\nEslatma: ${o.notes || 'Yo\\'q'}')" style="background: rgba(2, 132, 199, 0.1); border: 1px solid rgba(2, 132, 199, 0.25); color: #0284c7; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 700;">
+                <button class="btn-detail" data-id="${o.id}" style="background: rgba(2,132,199,0.1); border: 1px solid rgba(2,132,199,0.25); color: #0284c7; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 700;">
                     👁 Tafsilotlar
                 </button>
             </td>
         `;
+
+        // Attach detail click using data attributes (avoids all quote issues)
+        tr.querySelector('.btn-detail').addEventListener('click', function() {
+            showOrderDetail(o);
+        });
+
         tbody.appendChild(tr);
     });
+}
+
+function showOrderDetail(o) {
+    const addr = o.delivery_address || 'Kiritilmagan';
+    const note = o.notes || "Yo'q";
+    alert(`Buyurtma: ${o.id}\nMijoz: ${o.customer_name}\nTelefon: ${o.customer_phone}\nManzil: ${addr}\nEslatma: ${note}`);
 }
 
 async function updateOrderStatus(orderId, newStatus) {
