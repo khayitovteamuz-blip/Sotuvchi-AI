@@ -1,6 +1,5 @@
 // Sotuvchi AI - Dashboard, Categories & Product Engine Logic
 
-let revenueChartInstance = null;
 let currentProducts = [];
 let currentCategories = [];
 let selectedCategoryFilter = null;
@@ -21,6 +20,7 @@ function showAppDashboard(tenant) {
     document.getElementById('app-container').style.display = 'flex';
     // Show tenant info in sidebar
     if (tenant) {
+        currentTenant = tenant;
         document.getElementById('tenant-biz-name').textContent = tenant.business_name || '—';
         document.getElementById('tenant-email').textContent = tenant.email || '—';
     }
@@ -71,11 +71,7 @@ async function doLogin() {
         }
 
         showAppDashboard(data.tenant);
-        loadDashboardStats();
-        loadCategories();
-        loadProducts();
-        loadOrders();
-        loadSettings();
+        bootApp();
     } catch (e) {
         errEl.textContent = 'Server bilan bog\'lanishda xatolik.';
         errEl.style.display = 'block';
@@ -147,18 +143,26 @@ async function doLogout() {
 // ════════════════════════════════════════════════════════
 // INIT — Check auth on page load
 // ════════════════════════════════════════════════════════
+let navReady = false;
+let currentTenant = null;
+
+/** Boot everything after auth: nav + the data the default screen (Inbox) needs. */
+function bootApp() {
+    if (!navReady) { initNavigation(); navReady = true; }
+    loadInbox();          // Inbox is the default screen
+    loadCategories();     // needed by the product modal's category select
+    loadProducts();
+    loadSettings();
+    startInboxPolling();
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     try {
         const resp = await fetch('/api/auth/me');
         if (resp.ok) {
-            const tenant = await resp.json();
-            showAppDashboard(tenant);
-            initNavigation();
-            loadDashboardStats();
-            loadCategories();
-            loadProducts();
-            loadOrders();
-            loadSettings();
+            currentTenant = await resp.json();
+            showAppDashboard(currentTenant);
+            bootApp();
         } else {
             showAuthOverlay();
             showLoginPanel();
@@ -170,6 +174,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Navigation Tabs
+const TAB_META = {
+    'tab-inbox':        { title: 'Inbox', sub: 'Jonli suhbatlar — AI va operator', btn: false, load: loadInbox },
+    'tab-overview':     { title: 'Dashboard', sub: 'AI KPI va sotuv ko\'rsatkichlari', btn: false, load: loadDashboardStats },
+    'tab-ai-agent':     { title: 'AI Agent', sub: 'Xarakter, qoidalar va sinov', btn: false, load: loadSettings },
+    'tab-products':     { title: 'Katalog', sub: 'Kategoriyalar va ombordagi mahsulotlar', btn: true, load: loadCategories },
+    'tab-orders':       { title: 'Buyurtmalar', sub: 'Barcha buyurtmalar va status workflow', btn: false, load: loadOrders },
+    'tab-customers':    { title: 'Mijozlar', sub: 'Mijoz profillari, LTV va xarid tarixi', btn: false, load: loadCustomers },
+    'tab-integrations': { title: 'Integratsiyalar', sub: 'Telegram, Instagram, to\'lov va CRM', btn: false, load: loadIntegrations },
+    'tab-analytics':    { title: 'Analitika', sub: 'Javob vaqti, eskalatsiya va konversiya', btn: false, load: loadAnalytics },
+    'tab-settings':     { title: 'Sozlamalar', sub: 'Biznes profili, xodimlar va tarif', btn: false, load: loadAccountSettings }
+};
+
 function initNavigation() {
     const navItems = document.querySelectorAll('.nav-item');
     const tabViews = document.querySelectorAll('.tab-view');
@@ -177,16 +193,10 @@ function initNavigation() {
     const headerSubtitle = document.getElementById('page-subtitle');
     const headerActionGroup = document.getElementById('header-action-group');
 
-    const titles = {
-        'tab-overview': { title: 'Boshqaruv Paneli', sub: "Haftalik sotuv ko'rsatkichlari va tushum dinamikasi", btn: false },
-        'tab-products': { title: 'Mahsulot Kategoriyalari', sub: "Kategoriyalar va ombordagi mahsulotlar ro'yxati", btn: true },
-        'tab-orders': { title: 'Buyurtmalar', sub: "Mijozlar tomonidan berilgan barcha buyurtmalar", btn: false },
-        'tab-settings': { title: 'AI Sozlamalari', sub: "AI sotuvchining xarakteri va provider sozlamalari", btn: false }
-    };
-
     navItems.forEach(item => {
         item.addEventListener('click', () => {
             const targetTab = item.getAttribute('data-tab');
+            const meta = TAB_META[targetTab];
 
             navItems.forEach(i => i.classList.remove('active'));
             tabViews.forEach(v => v.classList.remove('active'));
@@ -194,11 +204,12 @@ function initNavigation() {
             item.classList.add('active');
             document.getElementById(targetTab).classList.add('active');
 
-            if (titles[targetTab]) {
+            if (meta) {
                 document.querySelector('.top-header').style.display = 'flex';
-                headerTitle.textContent = titles[targetTab].title;
-                headerSubtitle.textContent = titles[targetTab].sub;
-                headerActionGroup.style.display = titles[targetTab].btn ? 'flex' : 'none';
+                headerTitle.textContent = meta.title;
+                headerSubtitle.textContent = meta.sub;
+                headerActionGroup.style.display = meta.btn ? 'flex' : 'none';
+                if (typeof meta.load === 'function') meta.load();
             }
 
             if (targetTab === 'tab-products') {
@@ -572,98 +583,41 @@ async function deleteCategory(catId, catName, event) {
     }
 }
 
-// Load Dashboard Stats & Render Chart
+// ════════════════════════════════════════════════════════
+// DASHBOARD — AI KPI cards
+// ════════════════════════════════════════════════════════
+function kpiCard(icon, color, label, value, hint) {
+    return `<div class="kpi-card">
+        <div class="kpi-icon" style="background:${color}1a; color:${color};">${icon}</div>
+        <div class="kpi-body">
+            <span class="kpi-label">${label}</span>
+            <h3 class="kpi-value">${value}</h3>
+            ${hint ? `<span class="kpi-hint">${hint}</span>` : ''}
+        </div>
+    </div>`;
+}
+
 async function loadDashboardStats() {
     try {
-        const resp = await fetch('/api/admin/stats');
-        const data = await resp.json();
+        const [statsResp, anResp] = await Promise.all([
+            fetch('/api/admin/stats'),
+            fetch('/api/admin/analytics')
+        ]);
+        const data = await statsResp.json();
+        const an = await anResp.json();
 
-        document.getElementById('stat-revenue').textContent = data.total_revenue.toLocaleString() + ' UZS';
-        document.getElementById('stat-orders').textContent = data.total_orders;
-        document.getElementById('stat-leads').textContent = data.active_leads;
-        document.getElementById('stat-conversion').textContent = data.conversion_rate + '%';
+        document.getElementById('dashboard-kpis').innerHTML =
+            kpiCard('💰', '#00b87c', 'Jami tushum', data.total_revenue.toLocaleString() + ' UZS', null) +
+            kpiCard('🧾', '#06b6d4', 'Buyurtmalar', data.total_orders, null) +
+            kpiCard('💬', '#f59e0b', 'Suhbatlar', an.total_conversations, an.total_messages + ' xabar') +
+            kpiCard('📈', '#a855f7', 'Konversiya', an.conversion_rate + '%', 'suhbat → buyurtma') +
+            kpiCard('⚡️', '#0ea5e9', "O'rtacha javob", an.avg_latency_ms + ' ms', null) +
+            kpiCard('🙋', '#e11d48', 'Eskalatsiya', an.escalation_rate + '%', 'operatorga uzatildi');
 
         renderRecentOrders(data.recent_orders);
-        renderRevenueChart(data.weekly_labels, data.weekly_sales);
     } catch (e) {
         console.error('Stats yuklashda xatolik:', e);
     }
-}
-
-function renderRevenueChart(labels, values) {
-    if (typeof Chart === 'undefined') {
-        console.warn('Chart.js CDN hali yuklanmagan yoki bloklangan.');
-        return;
-    }
-    const canvas = document.getElementById('revenueChart');
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    const gradient = ctx.createLinearGradient(0, 0, 0, 200);
-    gradient.addColorStop(0, 'rgba(0, 184, 124, 0.35)');
-    gradient.addColorStop(1, 'rgba(0, 184, 124, 0.01)');
-
-    if (revenueChartInstance) {
-        revenueChartInstance.destroy();
-    }
-
-    revenueChartInstance = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: "Kunlik Tushum (UZS)",
-                data: values,
-                borderColor: '#00b87c',
-                borderWidth: 3,
-                pointBackgroundColor: '#00b87c',
-                pointBorderColor: '#ffffff',
-                pointBorderWidth: 2,
-                pointRadius: 5,
-                pointHoverRadius: 7,
-                fill: true,
-                backgroundColor: gradient,
-                tension: 0.35
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    backgroundColor: '#0f172a',
-                    titleColor: '#ffffff',
-                    bodyColor: '#00b87c',
-                    padding: 12,
-                    displayColors: false,
-                    callbacks: {
-                        label: function(context) {
-                            return `${context.parsed.y.toLocaleString()} UZS`;
-                        }
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    grid: { display: false },
-                    ticks: { color: '#64748b', font: { family: 'Plus Jakarta Sans', size: 12, weight: '600' } }
-                },
-                y: {
-                    grid: { color: '#e2e8f0' },
-                    ticks: {
-                        color: '#64748b',
-                        font: { family: 'Plus Jakarta Sans', size: 11 },
-                        callback: function(val) {
-                            if (val >= 1000000) return (val / 1000000) + ' mln';
-                            if (val >= 1000) return (val / 1000) + ' ming';
-                            return val;
-                        }
-                    }
-                }
-            }
-        }
-    });
 }
 
 function renderRecentOrders(orders) {
@@ -1092,38 +1046,534 @@ async function updateOrderStatus(orderId, newStatus) {
     }
 }
 
-// Load Settings
+// ════════════════════════════════════════════════════════
+// AI AGENT — persona + prompt settings
+// ════════════════════════════════════════════════════════
+const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v ?? ''; };
+
+// Settings the simplified panel does not expose. Kept here so saving the
+// visible fields never silently resets them.
+let hiddenSettings = { ai_provider: 'gemini', model_name: 'gemini-3.5-flash-lite', auto_handoff_after: 3 };
+
 async function loadSettings() {
     try {
         const resp = await fetch('/api/admin/settings');
         const data = await resp.json();
 
-        document.getElementById('setting-provider').value = data.ai_provider;
-        document.getElementById('setting-prompt').value = data.system_prompt;
-        document.getElementById('ai-provider-badge').textContent = 'Model: ' + data.ai_provider.toUpperCase();
+        hiddenSettings = {
+            ai_provider: data.ai_provider || 'gemini',
+            model_name: data.model_name || 'gemini-3.5-flash-lite',
+            auto_handoff_after: data.auto_handoff_after || 3
+        };
+
+        setVal('setting-prompt', data.system_prompt);
+        setVal('ai-name', data.ai_name || 'Sotuvchi AI');
+        setVal('ai-tone', data.ai_tone || 'friendly');
+        setVal('ai-language', data.ai_language || 'uz');
+        setVal('ai-greeting', data.greeting_message);
+
+        const badge = document.getElementById('ai-provider-badge');
+        if (badge) badge.textContent = 'Model: ' + hiddenSettings.model_name;
     } catch (e) {
         console.error('Sozlamalarni yuklashda xatolik:', e);
     }
 }
 
 async function saveSettings() {
-    const provider = document.getElementById('setting-provider').value;
-    const prompt = document.getElementById('setting-prompt').value;
-
+    const gv = (id) => { const el = document.getElementById(id); return el ? el.value : null; };
     try {
-        await fetch('/api/admin/settings', {
+        const resp = await fetch('/api/admin/settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                ai_provider: provider,
-                system_prompt: prompt,
-                model_name: 'gemini-2.5-flash'
+                ...hiddenSettings,
+                system_prompt: gv('setting-prompt') || '',
+                ai_name: gv('ai-name'),
+                ai_tone: gv('ai-tone'),
+                ai_language: gv('ai-language'),
+                greeting_message: gv('ai-greeting')
             })
         });
-
-        alert('Sozlamalar saqlandi!');
+        if (!resp.ok) throw new Error('save failed');
+        toast('Saqlandi ✅');
         loadSettings();
     } catch (e) {
         console.error('Saqlashda xatolik:', e);
+        toast('Saqlashda xatolik', true);
+    }
+}
+
+// ════════════════════════════════════════════════════════
+// INBOX — live conversations, operator reply, handoff
+// ════════════════════════════════════════════════════════
+let inboxFilter = 'all';
+let activeConvId = null;
+let inboxPollTimer = null;
+
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+}
+
+function toast(msg, isError) {
+    let el = document.getElementById('app-toast');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'app-toast';
+        el.className = 'app-toast';
+        document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.style.background = isError ? '#e11d48' : '#0f172a';
+    el.classList.add('show');
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+const CHANNEL_ICON = { telegram: '✈️', web: '🌐', instagram: '📸' };
+const isSandbox = (c) => (c.external_id || '').startsWith('sandbox-');
+const STATUS_LABEL = { ai: '🤖 AI', operator: '👨‍💼 Operator', closed: '✅ Yopilgan' };
+
+async function loadInbox() {
+    try {
+        const resp = await fetch('/api/inbox/conversations?status=' + inboxFilter);
+        const list = await resp.json();
+        renderInboxList(list);
+        updateInboxBadge(list);
+    } catch (e) {
+        console.error('Inbox yuklashda xatolik:', e);
+    }
+}
+
+function updateInboxBadge(list) {
+    const badge = document.getElementById('inbox-nav-badge');
+    if (!badge) return;
+    const waiting = (list || []).filter(c => c.waiting_for_operator).length;
+    const unread = (list || []).reduce((n, c) => n + (c.unread_count || 0), 0);
+    // Waiting-for-operator wins: it is the number someone must act on
+    const count = waiting || unread;
+    badge.textContent = count;
+    badge.style.display = count > 0 ? 'inline-flex' : 'none';
+    badge.classList.toggle('urgent', waiting > 0);
+    lastWaitingCount = waiting;
+}
+
+function renderInboxList(list) {
+    const box = document.getElementById('inbox-conversations');
+    if (!box) return;
+    if (!list || list.length === 0) {
+        box.innerHTML = `<div class="inbox-empty-list">Hali suhbatlar yo'q.<br><span>Telegram botni ulang yoki Test rejimida sinab ko'ring.</span></div>`;
+        return;
+    }
+    box.innerHTML = list.map(c => `
+        <div class="conv-item ${c.id === activeConvId ? 'active' : ''} ${c.waiting_for_operator ? 'waiting' : ''}" onclick="openConversation('${c.id}')">
+            <div class="conv-avatar">${isSandbox(c) ? '🧪' : (CHANNEL_ICON[c.channel] || '💬')}</div>
+            <div class="conv-body">
+                <div class="conv-top">
+                    <span class="conv-name">${escapeHtml(c.customer_name)}${isSandbox(c) ? ' <span class="conv-sandbox">sinov</span>' : ''}</span>
+                    <span class="conv-time">${c.last_message_at || ''}</span>
+                </div>
+                <div class="conv-preview">${escapeHtml(c.last_message)}</div>
+                <div class="conv-tags">
+                    <span class="conv-status status-${c.status}">${STATUS_LABEL[c.status] || c.status}</span>
+                    ${c.waiting_for_operator ? '<span class="conv-waiting">⏳ javob kutmoqda</span>' : ''}
+                    ${c.assigned_user_name ? `<span class="conv-assignee">👤 ${escapeHtml(c.assigned_user_name)}</span>` : ''}
+                    ${c.unread_count > 0 ? `<span class="conv-unread">${c.unread_count}</span>` : ''}
+                </div>
+            </div>
+        </div>
+    `).join('');
+
+    const waiting = list.filter(c => c.waiting_for_operator).length;
+    renderHandoffBanner(waiting);
+}
+
+function renderHandoffBanner(waiting) {
+    const banner = document.getElementById('handoff-banner');
+    if (!banner) return;
+    banner.style.display = waiting > 0 ? 'flex' : 'none';
+    if (waiting > 0) {
+        document.getElementById('handoff-banner-text').textContent =
+            `${waiting} ta mijoz operator javobini kutmoqda`;
+    }
+}
+
+function filterInboxTo(status) {
+    const btn = document.querySelector(`.inbox-filter[data-status="${status}"]`);
+    if (btn) filterInbox(status, btn);
+}
+
+function filterInbox(status, btn) {
+    inboxFilter = status;
+    document.querySelectorAll('.inbox-filter').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    loadInbox();
+}
+
+async function openConversation(convId) {
+    activeConvId = convId;
+    try {
+        const resp = await fetch('/api/inbox/conversations/' + convId);
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        document.getElementById('inbox-empty').style.display = 'none';
+        document.getElementById('inbox-chat-active').style.display = 'flex';
+
+        const c = data.conversation;
+        document.getElementById('inbox-chat-header').innerHTML = `
+            <div>
+                <div class="chat-customer">${CHANNEL_ICON[c.channel] || '💬'} ${escapeHtml(c.customer_name)}</div>
+                <div class="chat-meta">${escapeHtml(c.customer_phone || c.external_id || '')}${c.assigned_user_name ? ' · 👤 ' + escapeHtml(c.assigned_user_name) : ''}</div>
+                ${c.status === 'operator' && c.handoff_reason ? `<div class="chat-reason">🔔 ${escapeHtml(c.handoff_reason)}</div>` : ''}
+            </div>
+            <div class="chat-actions">
+                <span class="conv-status status-${c.status}">${STATUS_LABEL[c.status] || c.status}</span>
+                ${c.status !== 'operator' ? `<button class="btn-mini" onclick="setConvStatus('${c.id}','operator')">👨‍💼 Men javob beraman</button>` : ''}
+                ${c.status !== 'ai' ? `<button class="btn-mini" onclick="setConvStatus('${c.id}','ai')">🤖 AI'ga qaytar</button>` : ''}
+                ${c.status !== 'closed' ? `<button class="btn-mini" onclick="setConvStatus('${c.id}','closed')">✅ Yopish</button>` : ''}
+            </div>`;
+
+        renderMessages('inbox-messages', data.messages);
+        loadInbox();
+    } catch (e) {
+        console.error('Suhbatni ochishda xatolik:', e);
+    }
+}
+
+function renderMessages(containerId, messages) {
+    const box = document.getElementById(containerId);
+    if (!box) return;
+    box.innerHTML = (messages || []).map(m => {
+        const side = m.sender === 'user' ? 'left' : 'right';
+        const who = { user: 'Mijoz', assistant: '🤖 AI', operator: '👨‍💼 Operator', system: 'Tizim' }[m.sender] || m.sender;
+        const meta = m.model_name && m.model_name !== 'fallback' ? ` · ${m.model_name}` : (m.model_name === 'fallback' ? ' · demo' : '');
+        return `<div class="msg msg-${side} sender-${m.sender}">
+            <div class="msg-who">${who}${meta}</div>
+            <div class="msg-bubble">${escapeHtml(m.text).replace(/\n/g, '<br>')}</div>
+            <div class="msg-time">${m.created_at || ''}</div>
+        </div>`;
+    }).join('');
+    box.scrollTop = box.scrollHeight;
+}
+
+async function sendOperatorReply() {
+    const input = document.getElementById('inbox-reply-text');
+    const text = input.value.trim();
+    if (!text || !activeConvId) return;
+    input.value = '';
+    try {
+        const resp = await fetch(`/api/inbox/conversations/${activeConvId}/reply`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        });
+        if (!resp.ok) throw new Error('reply failed');
+        openConversation(activeConvId);
+    } catch (e) {
+        toast('Yuborishda xatolik', true);
+    }
+}
+
+async function setConvStatus(convId, status) {
+    try {
+        await fetch(`/api/inbox/conversations/${convId}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status })
+        });
+        openConversation(convId);
+        toast(status === 'operator' ? 'Siz javob berasiz' : status === 'ai' ? "AI'ga qaytarildi" : 'Suhbat yopildi');
+    } catch (e) {
+        toast('Xatolik', true);
+    }
+}
+
+function startInboxPolling() {
+    if (inboxPollTimer) clearInterval(inboxPollTimer);
+    inboxPollTimer = setInterval(async () => {
+        const inboxTab = document.getElementById('tab-inbox');
+        if (inboxTab && inboxTab.classList.contains('active')) {
+            loadInbox();
+            if (activeConvId) refreshActiveConversation();
+        } else {
+            // Cheap check from any other tab so a waiting customer is never
+            // invisible just because the operator is looking at the catalog.
+            try {
+                const d = await (await fetch('/api/inbox/waiting-count')).json();
+                updateWaitingBadge(d.waiting);
+            } catch (e) { /* offline; try again next tick */ }
+        }
+    }, 8000);
+}
+
+let lastWaitingCount = 0;
+function updateWaitingBadge(waiting) {
+    const badge = document.getElementById('inbox-nav-badge');
+    if (badge && waiting > 0) {
+        badge.textContent = waiting;
+        badge.style.display = 'inline-flex';
+        badge.classList.add('urgent');
+    } else if (badge) {
+        badge.classList.remove('urgent');
+    }
+    // Alert once per new escalation, not on every poll
+    if (waiting > lastWaitingCount) {
+        toast(`🔔 ${waiting} ta mijoz operator kutmoqda`);
+    }
+    lastWaitingCount = waiting;
+}
+
+/** Re-render the open chat without stealing scroll if nothing changed. */
+async function refreshActiveConversation() {
+    try {
+        const resp = await fetch('/api/inbox/conversations/' + activeConvId);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const box = document.getElementById('inbox-messages');
+        if (box && box.children.length !== data.messages.length) {
+            renderMessages('inbox-messages', data.messages);
+        }
+    } catch (e) { /* ignore transient errors */ }
+}
+
+// ════════════════════════════════════════════════════════
+// AI SANDBOX (test rejimi)
+// ════════════════════════════════════════════════════════
+// Reuse one sandbox conversation across reloads, otherwise every page refresh
+// would spawn a new thread and clutter the Inbox.
+let testSessionId = localStorage.getItem('sotuvchi_sandbox_id');
+if (!testSessionId) {
+    testSessionId = 'sandbox-' + Math.random().toString(36).slice(2, 10);
+    localStorage.setItem('sotuvchi_sandbox_id', testSessionId);
+}
+let testMessages = [];
+
+async function sendTestMessage() {
+    const input = document.getElementById('test-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+
+    testMessages.push({ sender: 'user', text, created_at: '' });
+    renderMessages('test-messages', testMessages);
+
+    try {
+        const resp = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: testSessionId, message: text, user_name: 'Test mijoz' })
+        });
+        const data = await resp.json();
+        testMessages.push({ sender: 'assistant', text: data.reply_text, created_at: '' });
+        renderMessages('test-messages', testMessages);
+    } catch (e) {
+        toast('AI javob bermadi', true);
+    }
+}
+
+// ════════════════════════════════════════════════════════
+// MIJOZLAR
+// ════════════════════════════════════════════════════════
+async function loadCustomers() {
+    try {
+        const resp = await fetch('/api/admin/customers');
+        const list = await resp.json();
+        const tbody = document.getElementById('customers-tbody');
+        if (!list || list.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Hali mijozlar yo'q — birinchi buyurtmadan keyin paydo bo'ladi.</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = list.map(c => `
+            <tr>
+                <td><strong>${escapeHtml(c.customer_name)}</strong></td>
+                <td>${escapeHtml(c.customer_phone)}</td>
+                <td>${c.order_count}</td>
+                <td><strong>${c.ltv.toLocaleString()} UZS</strong></td>
+                <td>${c.last_order_at || '—'}</td>
+            </tr>`).join('');
+    } catch (e) {
+        console.error('Mijozlarni yuklashda xatolik:', e);
+    }
+}
+
+// ════════════════════════════════════════════════════════
+// INTEGRATSIYALAR — Telegram
+// ════════════════════════════════════════════════════════
+async function loadIntegrations() {
+    loadOperatorPairing();
+    try {
+        const resp = await fetch('/api/integrations/telegram');
+        const d = await resp.json();
+        document.getElementById('tg-status-text').textContent = d.connected ? 'Ulangan' : 'Ulanmagan';
+        document.getElementById('tg-connected').style.display = d.connected ? 'block' : 'none';
+        document.getElementById('tg-disconnected').style.display = d.connected ? 'none' : 'block';
+        if (d.connected) {
+            document.getElementById('tg-username').textContent = '@' + (d.username || '—');
+            const note = document.getElementById('tg-note');
+            if (d.polling_enabled) {
+                note.innerHTML = d.polling_active
+                    ? "🟢 <b>Localhost rejimi faol</b> — Telegram'da botga yozing, xabar shu Inbox'ga tushadi."
+                    : "🟡 Localhost rejimi yoqilgan, ulanish tayyorlanmoqda (~30 soniya)...";
+            } else if (d.public_url_configured) {
+                note.textContent = "🟢 Webhook faol — mijozlar xabarlari Inbox'ga tushadi.";
+            } else {
+                note.textContent = "⚠️ Na polling na public URL yoqilgan — xabarlar kelmaydi.";
+            }
+        }
+    } catch (e) {
+        console.error('Integratsiyalarni yuklashda xatolik:', e);
+    }
+}
+
+// ── Operator alert pairing ──
+async function loadOperatorPairing() {
+    try {
+        const d = await (await fetch('/api/integrations/operator')).json();
+        document.getElementById('op-status-text').textContent = d.paired ? 'Ulangan' : 'Ulanmagan';
+        document.getElementById('op-paired').style.display = d.paired ? 'block' : 'none';
+        document.getElementById('op-unpaired').style.display = d.paired ? 'none' : 'block';
+
+        if (d.paired) {
+            document.getElementById('op-name').textContent = d.operator_name || 'Operator';
+            document.getElementById('op-notify-handoff').checked = !!d.notify_on_handoff;
+            document.getElementById('op-notify-order').checked = !!d.notify_on_order;
+        } else {
+            const btn = document.getElementById('op-get-code-btn');
+            const box = document.getElementById('op-code-box');
+            if (d.pairing_code) {
+                showPairCode(d.pairing_code, d.bot_username);
+            } else {
+                box.style.display = 'none';
+                btn.style.display = d.bot_connected ? 'inline-flex' : 'none';
+                if (!d.bot_connected) {
+                    document.getElementById('op-unpaired').querySelector('p').textContent =
+                        'Avval Telegram botni ulang — bildirishnomalar shu bot orqali yuboriladi.';
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Operator holatini yuklashda xatolik:', e);
+    }
+}
+
+function showPairCode(code, botUsername) {
+    document.getElementById('op-code').textContent = code;
+    document.getElementById('op-cmd').textContent = '/operator ' + code;
+    document.getElementById('op-bot-name').textContent = botUsername ? '@' + botUsername : 'botga';
+    document.getElementById('op-code-box').style.display = 'block';
+    document.getElementById('op-get-code-btn').style.display = 'none';
+}
+
+async function getPairingCode() {
+    try {
+        const r = await fetch('/api/integrations/operator/pair-code', { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) { toast(d.detail || 'Xatolik', true); return; }
+        showPairCode(d.pairing_code, d.bot_username);
+    } catch (e) {
+        toast('Kod olishda xatolik', true);
+    }
+}
+
+async function unpairOperator() {
+    if (!confirm('Operator bildirishnomasini uzmoqchimisiz?')) return;
+    await fetch('/api/integrations/operator/unpair', { method: 'POST' });
+    toast('Uzildi');
+    loadOperatorPairing();
+}
+
+async function saveOperatorNotifications() {
+    await fetch('/api/integrations/operator/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            notify_on_handoff: document.getElementById('op-notify-handoff').checked,
+            notify_on_order: document.getElementById('op-notify-order').checked
+        })
+    });
+    toast('Saqlandi');
+}
+
+async function connectTelegram() {
+    const token = document.getElementById('tg-token-input').value.trim();
+    if (!token) { toast('Token kiriting', true); return; }
+    try {
+        const resp = await fetch('/api/integrations/telegram/connect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token })
+        });
+        const d = await resp.json();
+        if (!resp.ok) { toast(d.detail || 'Ulanmadi', true); return; }
+        toast('Bot ulandi: @' + d.username);
+        document.getElementById('tg-token-input').value = '';
+        loadIntegrations();
+    } catch (e) {
+        toast('Ulashda xatolik', true);
+    }
+}
+
+async function disconnectTelegram() {
+    if (!confirm('Telegram botni uzmoqchimisiz?')) return;
+    try {
+        await fetch('/api/integrations/telegram/disconnect', { method: 'POST' });
+        toast('Bot uzildi');
+        loadIntegrations();
+    } catch (e) {
+        toast('Xatolik', true);
+    }
+}
+
+// ════════════════════════════════════════════════════════
+// ANALITIKA
+// ════════════════════════════════════════════════════════
+async function loadAnalytics() {
+    try {
+        const resp = await fetch('/api/admin/analytics');
+        const a = await resp.json();
+
+        document.getElementById('analytics-metrics').innerHTML =
+            kpiCard('💬', '#00b87c', 'Suhbatlar', a.total_conversations, a.total_messages + ' xabar') +
+            kpiCard('⚡️', '#0ea5e9', "O'rtacha javob vaqti", a.avg_latency_ms + ' ms', null) +
+            kpiCard('🙋', '#e11d48', 'Eskalatsiya', a.escalation_rate + '%', 'operatorga uzatildi') +
+            kpiCard('📈', '#a855f7', 'Savdo konversiyasi', a.conversion_rate + '%', a.order_count + ' buyurtma') +
+            kpiCard('🎫', '#f59e0b', 'Token sarfi', a.total_tokens.toLocaleString(), 'tannarx hisobi uchun') +
+            kpiCard('💰', '#06b6d4', 'Tushum', a.revenue.toLocaleString() + ' UZS', null);
+
+        const total = Math.max(a.total_conversations, 1);
+        const bar = (label, val, color) => `
+            <div class="stat-bar-row">
+                <span class="stat-bar-label">${label}</span>
+                <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${(val / total * 100).toFixed(1)}%; background:${color};"></div></div>
+                <span class="stat-bar-val">${val}</span>
+            </div>`;
+        document.getElementById('analytics-status-bars').innerHTML =
+            bar('🤖 AI', a.by_status.ai, '#00b87c') +
+            bar('👨‍💼 Operator', a.by_status.operator, '#f59e0b') +
+            bar('✅ Yopilgan', a.by_status.closed, '#64748b');
+    } catch (e) {
+        console.error('Analitikani yuklashda xatolik:', e);
+    }
+}
+
+// ════════════════════════════════════════════════════════
+// SOZLAMALAR (biznes profili)
+// ════════════════════════════════════════════════════════
+const PLAN_LABEL = { start: 'Start', business: 'Business', pro: 'Pro' };
+
+async function loadAccountSettings() {
+    try {
+        if (!currentTenant) {
+            const r = await fetch('/api/auth/me');
+            if (r.ok) currentTenant = await r.json();
+        }
+        if (!currentTenant) return;
+        setVal('set-biz-name', currentTenant.business_name);
+        setVal('set-email', currentTenant.email);
+        setVal('set-plan', PLAN_LABEL[currentTenant.plan] || currentTenant.plan || 'Start');
+    } catch (e) {
+        console.error('Hisob sozlamalarini yuklashda xatolik:', e);
     }
 }

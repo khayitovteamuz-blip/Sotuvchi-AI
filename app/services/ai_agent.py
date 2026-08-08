@@ -1,215 +1,385 @@
-import re
-import random
+"""
+AI Sales Agent — tenant-scoped, Postgres-backed, tool-calling.
+
+The model does not answer from the prompt alone: it calls tools (search_product,
+check_stock, create_order, calc_delivery, handoff_to_human) that read and write
+the tenant's real Postgres rows. Prices, stock and order ids therefore cannot be
+hallucinated — that is the difference between this and a plain chatbot.
+
+Falls back to a keyword sales engine when no API key is configured.
+"""
+import asyncio
+import json
 import logging
-from typing import List, Tuple, Optional
-from app.models.schema import Product, Order, OrderItem, ChatMessage, ChatResponse
-from app.core.database import db
+import re
+import time
+from typing import Any, Dict, List, Optional, Tuple
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
-from app.services.sheets_service import sheets_service
+from app.db import repo
+from app.db.models import Conversation, Product, Tenant, TenantSettings
+from app.models.schema import ChatResponse
+from app.services import ai_tools
 
 logger = logging.getLogger("ai_agent")
 
+MAX_TOOL_ROUNDS = 5   # guard against a model looping on tools forever
+MAX_RETRIES = 2       # retries on transient 429/503 from the API
+MAX_RETRY_WAIT = 25.0 # seconds; longer than this we give up and use the fallback
+
+STYLE = """
+GAPIRISH USLUBI (juda muhim):
+- Mijozga ISMI bilan murojaat qiling va hurmat so'zini qo'shing:
+  erkak ismi bo'lsa "aka", ayol ismi bo'lsa "opa".
+  Masalan: "Bekzod aka", "Dilnoza opa".
+  Jinsini o'zbek ismidan aniqlang. Aniq bo'lmasa — faqat ismini ishlating.
+  Har javobda emas, tabiiy joyda ishlating (odatda javob boshida).
+- Tirik odamdek, oddiy so'zlashuv tilida gapiring. Rasmiy kanselyariya tilidan
+  qoching: "ushbu", "mazkur", "tashkil qiladi", "ma'lum qilamanki" — YOZMANG.
+  Buning o'rniga: "bu", "narxi", "bor", "chiroyli".
+- Do'stona va samimiy bo'ling, xuddi do'kondagi yaxshi sotuvchi kabi.
+  Qisqa gaplar. Ba'zan emoji (ko'p emas, 1-2 ta).
+- "Sizga qanday yordam bera olaman?" kabi robot iboralarni ishlatmang.
+  Oddiy qiling: "Nima qidiryapsiz?", "Qaysi biri yoqdi?"
+
+YAXSHI misol: "Bekzod aka, AirPods Pro bor 👍 Narxi 2 950 000 so'm.
+Olasizmi? Ismingiz va telefon raqamingizni tashlang."
+
+YOMON misol (bunday YOZMANG): "Assalomu alaykum! Ushbu mahsulot bizning
+katalogimizda mavjud bo'lib, uning narxi 2 950 000 so'mni tashkil qiladi."
+"""
+
+GUARDRAILS = """
+QAT'IY QOIDALAR (buzilishi mumkin emas):
+1. Narx, ombor qoldig'i yoki mahsulot tavsifini HECH QACHON o'zingizdan aytmang.
+   Har doim avval search_product yoki check_stock funksiyasini chaqiring va faqat
+   qaytgan qiymatlarni ayting.
+2. Chegirma, aksiya yoki sovg'a VA'DA QILMANG. Bunday vakolatingiz yo'q.
+   Mijoz chegirma so'rasa — handoff_to_human FUNKSIYASINI CHAQIRING.
+   DIQQAT: "operatorga ulayman" deb YOZISH yetarli emas. Funksiyani
+   chaqirmasangiz, operator hech narsa bilmaydi va mijoz javobsiz qoladi.
+   Avval funksiyani chaqiring, keyin mijozga ayting.
+3. Omborda yo'q mahsulotni sotmang. check_stock "in_stock: false" qaytarsa,
+   muqobil mahsulot taklif qiling.
+4. Buyurtma ID sini o'zingiz yaratmang — faqat create_order qaytargan ID ni ayting.
+5. create_order ni faqat mijozning ISMI va TELEFON raqami bo'lsa chaqiring.
+   Yo'q bo'lsa — avval mijozdan so'rang.
+6. Yetkazib berish narxini calc_delivery orqali oling, taxmin qilmang.
+7. Javobni bilmasangiz yoki mijoz operator so'rasa — handoff_to_human
+   funksiyasini chaqiring (shunchaki yozish emas!). "Bilmadim" deb qo'yib
+   yubormang.
+8. Qisqa va tabiiy gapiring (2-4 jumla). Har javob oxirida mijozni keyingi
+   qadamga undang.
+9. Texnik tafsilotlarni mijozga KO'RSATMANG: funksiya nomlari, maydon nomlari
+   (in_stock, product_id, PROD-101 kabi), JSON yoki xato matnlarini yozmang.
+   Ularni oddiy odam tilida ayting ("hozircha omborda tugagan").
+"""
+
 
 class AISalesAgent:
-    def __init__(self):
-        pass
+    async def generate_response(
+        self,
+        session: AsyncSession,
+        tenant: Tenant,
+        conversation: Conversation,
+        user_message: str,
+        user_name: str = "Mijoz",
+    ) -> ChatResponse:
+        tenant_id = tenant.id
+        cfg = await repo.get_settings(session, tenant_id)
+        history = await repo.recent_messages(session, conversation.id, limit=10)
 
-    def _build_context_prompt(self, session_id: str, current_message: str) -> str:
-        products = db.get_products()
-        catalog_str = "MAHSULOTLAR KATALOGI (Sotuvda bor):\n"
-        for p in products:
-            status = "Mavjud" if p.in_stock else "Tugagan"
-            catalog_str += f"- ID: {p.id} | Nomi: {p.name} | Narxi: {p.price:,.0f} {p.currency} | Kategoriya: {p.category} | Holat: {status}\n  Tavsif: {p.description}\n"
+        await repo.add_message(session, tenant_id, conversation, "user", user_message)
 
-        history = db.get_session_history(session_id)
-        history_str = "SUHBAT TARIXI:\n"
-        for msg in history[-6:]:  # Last 6 messages
-            sender_name = "Mijoz" if msg.sender == "user" else "Sotuvchi AI"
-            history_str += f"{sender_name}: {msg.text}\n"
+        t0 = time.monotonic()
+        reply_text, tokens, model_used = "", 0, None
+        tool_trace: List[Dict[str, Any]] = []
+        created_order = None
 
-        system_instruction = db.settings.system_prompt
+        use_gemini = cfg.ai_provider == "gemini" and settings.GEMINI_API_KEY
+        if use_gemini:
+            reply_text, tokens, tool_trace = await self._run_gemini_with_tools(
+                session, tenant_id, conversation, cfg, history, user_message, user_name
+            )
+            model_used = cfg.model_name
 
-        full_prompt = f"""{system_instruction}
-
-{catalog_str}
-
-{history_str}
-Mijoz: {current_message}
-Sotuvchi AI:"""
-        return full_prompt
-
-    def generate_response(self, session_id: str, user_message: str, user_name: str = "Mijoz", telegram_id: Optional[str] = None) -> ChatResponse:
-        # Save user message
-        user_msg_obj = ChatMessage(id=f"msg-{random.randint(1000,9999)}", session_id=session_id, sender="user", text=user_message)
-        db.add_chat_message(user_msg_obj)
-
-        products = db.get_products()
-        provider = db.settings.ai_provider
-        gemini_key = settings.GEMINI_API_KEY
-        anthropic_key = settings.ANTHROPIC_API_KEY
-
-        reply_text = ""
-        intent = "general_query"
-        recommended_products: List[Product] = []
-        order_draft: Optional[Order] = None
-
-        # Detect intent and recommended products based on user query
-        query_lower = user_message.lower()
-
-        # Find matching products
-        for p in products:
-            if any(term in query_lower for term in p.name.lower().split()) or p.category.lower() in query_lower:
-                if p not in recommended_products:
-                    recommended_products.append(p)
-
-        # Intent detection
-        if any(w in query_lower for w in ["salom", "assalomu alaykum", "hayrli", "privet", "sardor"]):
-            intent = "greeting"
-        elif any(w in query_lower for w in ["narx", "qancha", "necha pul", "qimmatcha", "aksiya", "chegirma", "katalog"]):
-            intent = "query"
-        elif any(w in query_lower for w in ["olmoqchiman", "xarid", "sotib olaman", "buyurtma", "zakaz", "olaman"]):
-            intent = "order_intent"
-        elif any(w in query_lower for w in ["qimmat", "boshqa joyda arzon", "kafolat", "ishonch"]):
-            intent = "objection"
-
-        # Try LLM Generation if API Keys available
-        if provider == "gemini" and gemini_key:
-            reply_text = self._call_gemini(session_id, user_message)
-        elif provider == "anthropic" and anthropic_key:
-            reply_text = self._call_anthropic(session_id, user_message)
-
-        # Fallback AI Sales Engine if LLM key is not provided or fails
         if not reply_text:
-            reply_text = self._fallback_uzbek_sales_engine(user_message, intent, recommended_products, products, session_id, user_name)
+            products = await repo.list_products(session, tenant_id)
+            intent = self._detect_intent(user_message)
+            matched = self._match_products(user_message, products)
+            reply_text = self._fallback(user_message, intent, matched, products, user_name, cfg)
+            model_used = model_used or "fallback"
 
-        # Check for order detail collection (Phone number, Name, Product selection)
-        order_draft = self._check_and_create_order(session_id, user_message, user_name, telegram_id, products)
-        if order_draft:
-            intent = "closing"
-            reply_text += f"\n\n🎉 **Buyurtmangiz muvaffaqiyatli qabul qilindi!**\n🆔 Buyurtma ID: `{order_draft.id}`\n💰 Jami summa: {order_draft.total_amount:,.0f} UZS\n📞 Bog'lanish uchun: {order_draft.customer_phone}\n\nTez orada operatorimiz siz bilan bog'lanadi!"
+        # If a tool created an order, surface it in the API response
+        for t in tool_trace:
+            if t["name"] == "create_order" and t["result"].get("success"):
+                created_order = t["result"]
 
-        # Save assistant message
-        ai_msg_obj = ChatMessage(id=f"msg-{random.randint(1000,9999)}", session_id=session_id, sender="assistant", text=reply_text)
-        db.add_chat_message(ai_msg_obj)
+        # Safety net: models sometimes *say* they are escalating without calling
+        # the tool. A promise nobody acts on is worse than no promise, so if the
+        # reply announces an operator, perform the handoff for real.
+        tool_trace = await self._enforce_promised_handoff(
+            session, tenant_id, conversation, reply_text, tool_trace
+        )
+
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        intent = self._intent_from_trace(tool_trace) or self._detect_intent(user_message)
+
+        await repo.add_message(
+            session, tenant_id, conversation, "assistant", reply_text,
+            intent=intent, model_name=model_used, tokens=tokens, latency_ms=latency_ms,
+            meta={"tools": tool_trace} if tool_trace else None,
+        )
+
+        # recommend whatever the model actually looked up
+        recommended = await self._recommended_from_trace(session, tenant_id, tool_trace, user_message)
 
         return ChatResponse(
-            session_id=session_id,
+            session_id=conversation.id,
             reply_text=reply_text,
             intent=intent,
-            recommended_products=recommended_products[:3],
-            order_draft=order_draft
+            recommended_products=recommended[:3],
+            order_draft=None,  # orders are persisted by the tool; see meta/tool_trace
         )
 
-    def _call_gemini(self, session_id: str, user_message: str) -> str:
+    # ─── Gemini tool-calling loop ─────────────────────────────────────────────
+    async def _run_gemini_with_tools(
+        self, session, tenant_id, conversation, cfg, history, user_message, user_name
+    ) -> Tuple[str, int, List[Dict[str, Any]]]:
+        try:
+            from google.genai import types
+        except Exception as e:
+            logger.error(f"genai import failed: {e}")
+            return ("", 0, [])
+
+        client = self._client()
+        if client is None:
+            return ("", 0, [])
+
+        system_instruction = self._system_instruction(cfg, conversation, user_name)
+
+        # Build the conversation for the model
+        contents: List[Any] = []
+        for m in history:
+            role = "user" if m.sender == "user" else "model"
+            contents.append(types.Content(role=role, parts=[types.Part.from_text(text=m.text)]))
+        contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_message)]))
+
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            tools=ai_tools.tool_declarations(),
+            temperature=cfg.temperature,
+        )
+
+        total_tokens = 0
+        trace: List[Dict[str, Any]] = []
+
+        for _round in range(MAX_TOOL_ROUNDS):
+            resp = await self._generate(client, cfg.model_name, contents, config)
+            if resp is None:
+                return ("", total_tokens, trace)
+
+            try:
+                total_tokens += resp.usage_metadata.total_token_count or 0
+            except Exception:
+                pass
+
+            calls = list(getattr(resp, "function_calls", None) or [])
+            if not calls:
+                return ((resp.text or "").strip(), total_tokens, trace)
+
+            # Echo back the model's OWN content, not a reconstruction: thinking
+            # models attach a thought_signature to functionCall parts and reject
+            # the next request if it is missing.
+            model_content = resp.candidates[0].content
+            contents.append(model_content)
+
+            result_parts = []
+            for call in calls:
+                args = dict(call.args or {})
+                result = await ai_tools.execute_tool(
+                    call.name, args, session, tenant_id, conversation
+                )
+                trace.append({"name": call.name, "args": args, "result": result})
+                logger.info(f"[tool] {call.name}({args}) -> {str(result)[:160]}")
+                result_parts.append(types.Part.from_function_response(name=call.name, response=result))
+
+            contents.append(types.Content(role="user", parts=result_parts))
+
+        # Ran out of rounds — ask for a final answer without tools
+        final = await self._generate(
+            client, cfg.model_name, contents,
+            types.GenerateContentConfig(system_instruction=system_instruction, temperature=cfg.temperature),
+        )
+        if final is None:
+            return ("", total_tokens, trace)
+        return ((final.text or "").strip(), total_tokens, trace)
+
+    async def _generate(self, client, model: str, contents, config):
+        """One generate_content call, retrying transient rate limits (429/503).
+
+        The free Gemini tier is only a few requests per minute and one chat turn
+        costs 2+ requests, so a short retry is the difference between a real
+        answer and silently dropping to the fallback engine.
+        """
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                return await asyncio.to_thread(
+                    client.models.generate_content, model=model, contents=contents, config=config
+                )
+            except Exception as e:
+                msg = str(e)
+                transient = "429" in msg or "RESOURCE_EXHAUSTED" in msg or "503" in msg or "UNAVAILABLE" in msg
+                if not transient or attempt == MAX_RETRIES:
+                    logger.error(f"Gemini API error ({'rate limit' if transient else 'fatal'}): {msg[:200]}")
+                    return None
+                wait = self._retry_delay(msg, attempt)
+                if wait > MAX_RETRY_WAIT:
+                    logger.error(f"Gemini rate limited, retry delay {wait}s too long — using fallback")
+                    return None
+                logger.warning(f"Gemini rate limited, retrying in {wait:.1f}s (attempt {attempt + 1})")
+                await asyncio.sleep(wait)
+        return None
+
+    @staticmethod
+    def _retry_delay(msg: str, attempt: int) -> float:
+        """Honour the API's suggested retryDelay, else exponential backoff."""
+        m = re.search(r"'retryDelay':\s*'(\d+(?:\.\d+)?)s'", msg) or re.search(r"retry in (\d+(?:\.\d+)?)s", msg)
+        if m:
+            return float(m.group(1)) + 0.5
+        return 2.0 * (2 ** attempt)
+
+    # Phrases that mean "a human will take over" — if the model says one of
+    # these it has made a promise to the customer that must be kept.
+    _HANDOFF_PROMISE = re.compile(
+        r"operator(imiz|ga|ni|lar)?\b.*\b(ula|bog'la|boglа|xabar|yuboraman|beradi|chaqir)"
+        r"|operatorga\s+(ulay|ulab|uzat)"
+        r"|mutaxassis(imiz)?\s+.*(bog'lan|javob)",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    async def _enforce_promised_handoff(self, session, tenant_id, conversation, reply_text, trace):
+        """Execute a handoff the model promised in text but never called."""
+        if any(t["name"] == "handoff_to_human" for t in trace):
+            return trace
+        if conversation.status != "ai" or not reply_text:
+            return trace
+        if not self._HANDOFF_PROMISE.search(reply_text):
+            return trace
+
+        logger.info("Model promised an operator without calling the tool — enforcing handoff")
+        result = await ai_tools.execute_tool(
+            "handoff_to_human",
+            {"reason": "AI operatorni va'da qildi (avtomatik uzatildi)"},
+            session, tenant_id, conversation,
+        )
+        return trace + [{"name": "handoff_to_human", "args": {"reason": "auto-enforced"}, "result": result}]
+
+    def _client(self):
         try:
             from google import genai
-            client = genai.Client(api_key=settings.GEMINI_API_KEY)
-            prompt = self._build_context_prompt(session_id, user_message)
-            response = client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=prompt,
-            )
-            return response.text
+            return genai.Client(api_key=settings.GEMINI_API_KEY)
         except Exception as e:
-            logger.error(f"Gemini API Error: {e}")
-            return ""
-
-    def _call_anthropic(self, session_id: str, user_message: str) -> str:
-        try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-            prompt = self._build_context_prompt(session_id, user_message)
-            response = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=500,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            return response.content[0].text
-        except Exception as e:
-            logger.error(f"Anthropic API Error: {e}")
-            return ""
-
-    def _fallback_uzbek_sales_engine(
-        self,
-        user_message: str,
-        intent: str,
-        matched_products: List[Product],
-        all_products: List[Product],
-        session_id: str,
-        user_name: str
-    ) -> str:
-        """High-converting, natural Uzbek Sales Dialogue Engine for Fallback/Demo mode"""
-        if intent == "greeting":
-            prod_names = ", ".join([p.name for p in all_products[:3]])
-            return f"Assalomu alaykum, {user_name}! 👋 'Sotuvchi AI' do'konimizga xush kelibsiz! Bugun sizga qaysi mahsulotni tanlashda yordam beray? Bizda hozirda {prod_names} va boshqa ko'plab premium mahsulotlar mavjud!"
-
-        if matched_products:
-            p = matched_products[0]
-            if intent == "query":
-                return f"✨ **{p.name}** haqida ma'lumot:\n\n📝 Tavsif: {p.description}\n💵 Narxi: **{p.price:,.0f} UZS**\n📦 Omborimizda: {'Mavjud (Zudlik bilan yetkazib beramiz)' if p.in_stock else 'Tugagan'}\n\nUshbu model rasmiy kafolat bilan beriladi. Xarid qilishni xohlaysizmi? Buyurtma berish uchun ismingiz va telefon raqamingizni qoldiring!"
-
-            if intent == "objection":
-                return f"Tushunaman, narx muhim omil. Lekin **{p.name}** o'z segmentida eng sifatli materiallar va rasmiy 1 yillik kafolat bilan ta'minlangan. Bugun buyurtma bersangiz, yetkazib berish va sovg'a sifatida aksessuar ham qo'shib beramiz! Buyurtmani rasmiylashtiraylikmi?"
-
-            if intent == "order_intent":
-                return f"Ajoyib tanlov! 🎯 **{p.name}** ({p.price:,.0f} UZS) buyurtmasini rasmiylashtirish uchun iltimos:\n1. Ism-familiyangiz\n2. Telefon raqamingiz (+998XX...)\n3. Yetkazib berish manzilingizni yuboring."
-
-        # Default smart sales response
-        cat_str = "\n".join([f"• **{p.name}** — {p.price:,.0f} UZS" for p in all_products])
-        return f"Sizning so'rovingiz bo'yicha bizdagi eng ommabop mahsulotlar katalogini taklif qilaman:\n\n{cat_str}\n\nQaysi birining xususiyatlari va narxlari bilan batafsilroq tanishishni xohlaysiz?"
-
-    def _check_and_create_order(
-        self,
-        session_id: str,
-        user_message: str,
-        user_name: str,
-        telegram_id: Optional[str],
-        products: List[Product]
-    ) -> Optional[Order]:
-        """Detect phone number and product intent to create an Order"""
-        phone_match = re.search(r'(\+?998[\s\-]?\d{2}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2})|(\d{9})', user_message)
-        if not phone_match:
+            logger.error(f"Gemini client init failed: {e}")
             return None
 
-        phone_num = phone_match.group(0)
+    def _system_instruction(self, cfg: TenantSettings, conversation: Conversation, user_name: str) -> str:
+        tone = {
+            "professional": "Ishonchli, lekin quruq emas — tirik odamdek gapiring.",
+            "friendly": "Do'stona, iliq va samimiy — yaqin tanishingiz bilan gaplashayotgandek.",
+            "concise": "Juda qisqa va aniq — 1-2 jumla, ortiqcha gap yo'q.",
+        }.get(cfg.ai_tone or "friendly", "")
+        lang = {
+            "uz": "Har doim O'ZBEK tilida javob bering.",
+            "ru": "Всегда отвечайте на РУССКОМ языке.",
+            "en": "Always answer in ENGLISH.",
+        }.get(cfg.ai_language or "uz", "Har doim o'zbek tilida javob bering.")
 
-        # Determine matched product from history or current message
-        history = db.get_session_history(session_id)
-        full_text = " ".join([m.text for m in history]) + " " + user_message
+        return (
+            f"Sizning ismingiz: {cfg.ai_name or 'Sotuvchi AI'}.\n"
+            f"{cfg.system_prompt}\n\n{tone}\n{lang}\n"
+            f"Mijozning ismi: {user_name}. Kanal: {conversation.channel}.\n"
+            f"{STYLE}\n{GUARDRAILS}"
+        )
 
-        selected_product = products[0]
+    # ─── helpers ──────────────────────────────────────────────────────────────
+    def _intent_from_trace(self, trace) -> Optional[str]:
+        names = [t["name"] for t in trace]
+        if "create_order" in names:
+            return "closing"
+        if "handoff_to_human" in names:
+            return "handoff"
+        if "check_stock" in names or "search_product" in names:
+            return "query"
+        return None
+
+    async def _recommended_from_trace(self, session, tenant_id, trace, user_message) -> List[Product]:
+        ids = []
+        for t in trace:
+            r = t.get("result") or {}
+            for p in (r.get("products") or []):
+                if p.get("product_id"):
+                    ids.append(p["product_id"])
+            if r.get("product_id"):
+                ids.append(r["product_id"])
+        out, seen = [], set()
+        for pid in ids:
+            if pid in seen:
+                continue
+            seen.add(pid)
+            p = await repo.get_product(session, tenant_id, pid)
+            if p:
+                out.append(p)
+        if not out:
+            products = await repo.list_products(session, tenant_id)
+            out = self._match_products(user_message, products)
+        return out
+
+    def _detect_intent(self, msg: str) -> str:
+        q = msg.lower()
+        if any(w in q for w in ["salom", "assalom", "hayrli", "privet"]):
+            return "greeting"
+        if any(w in q for w in ["olmoqchi", "xarid", "sotib", "buyurtma", "zakaz", "olaman"]):
+            return "order_intent"
+        if any(w in q for w in ["qimmat", "arzon", "kafolat", "ishonch"]):
+            return "objection"
+        if any(w in q for w in ["narx", "qancha", "necha pul", "aksiya", "chegirma", "katalog"]):
+            return "query"
+        return "general_query"
+
+    def _match_products(self, msg: str, products: List[Product]) -> List[Product]:
+        q = msg.lower()
+        out = []
         for p in products:
-            if p.name.lower() in full_text.lower():
-                selected_product = p
-                break
+            if any(term in q for term in p.name.lower().split()) or (p.category and p.category.lower() in q):
+                if p not in out:
+                    out.append(p)
+        return out
 
-        order_id = f"ORD-{random.randint(10000, 99999)}"
-        order_item = OrderItem(
-            product_id=selected_product.id,
-            product_name=selected_product.name,
-            quantity=1,
-            unit_price=selected_product.price
-        )
-
-        order = Order(
-            id=order_id,
-            customer_name=user_name if user_name != "Mijoz" else "Telegram Xaridori",
-            customer_phone=phone_num,
-            telegram_id=telegram_id,
-            items=[order_item],
-            total_amount=selected_product.price,
-            status="Yangi",
-            delivery_address="Toshkent shahri (muloqotda ko'rsatilgan)",
-            notes="AI Sotuvchi orqali avtomatik shakllantirilgan buyurtma"
-        )
-
-        # Save to database
-        db.add_order(order)
-
-        # Sync with Google Sheets if connected
-        sheets_service.log_order(order)
-
-        return order
+    # ─── fallback engine (no API key) ─────────────────────────────────────────
+    def _fallback(self, msg, intent, matched, products, user_name, cfg) -> str:
+        ai_name = cfg.ai_name or "Sotuvchi AI"
+        if intent == "greeting":
+            names = ", ".join(p.name for p in products[:3]) or "mahsulotlar"
+            return (f"Assalomu alaykum, {user_name}! 👋 '{ai_name}' do'koniga xush kelibsiz! "
+                    f"Bizda {names} va boshqa mahsulotlar bor. Nima tanlashda yordam beray?")
+        if matched:
+            p = matched[0]
+            if intent == "objection":
+                return (f"Tushunaman, narx muhim. **{p.name}** sifatli va rasmiy kafolat bilan. "
+                        f"Batafsil shartlarni operatorimiz aytib beradi. Rasmiylashtiraymizmi?")
+            if intent == "order_intent":
+                return (f"Ajoyib tanlov! 🎯 **{p.name}** ({p.price:,.0f} UZS) uchun iltimos:\n"
+                        f"1. Ism-familiya\n2. Telefon (+998...)\n3. Manzil yuboring.")
+            return (f"✨ **{p.name}**\n💵 {p.price:,.0f} {p.currency}\n📦 "
+                    f"{'Mavjud' if p.in_stock else 'Tugagan'}\n📝 {p.description}\n\n"
+                    f"Buyurtma berasizmi? Ism va telefon raqamingizni qoldiring!")
+        if not products:
+            return "Katalog hozircha bo'sh. Tez orada mahsulotlar qo'shiladi!"
+        cat = "\n".join(f"• **{p.name}** — {p.price:,.0f} {p.currency}" for p in products[:8])
+        return f"Bizdagi mahsulotlar:\n\n{cat}\n\nQaysi biri haqida batafsil bilmoqchisiz?"
 
 
 ai_agent = AISalesAgent()

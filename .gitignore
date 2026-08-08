@@ -16,3 +16,10 @@ debug_server.log
 # macOS system files
 .DS_Store
 .claude/
+
+# Google service account credentials
+service_account.json
+
+# Uploaded product images (user content, not source)
+static/uploads/*
+!static/uploads/.gitkeep

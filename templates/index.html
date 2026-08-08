@@ -4,20 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sotuvchi AI - Boshqaruv Paneli</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=1.0.5">
+    <link rel="stylesheet" href="/static/css/style.css?v=3.0">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
-    <!-- Chart.js for clean graph visualization -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
-    <!-- ═══════════════════════════════════════════════════════════════════
-         AUTH OVERLAY — shown until user logs in
-         ═══════════════════════════════════════════════════════════════════ -->
-    <div id="auth-overlay" style="display:none; position:fixed; inset:0; z-index:9999; background: linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0f172a 100%); display:flex; align-items:center; justify-content:center; font-family:inherit;">
+    <!-- ═══════════════ AUTH OVERLAY ═══════════════ -->
+    <div id="auth-overlay" style="display:none; position:fixed; inset:0; z-index:9999; background: linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0f172a 100%); align-items:center; justify-content:center; font-family:inherit;">
         <div style="width:100%; max-width:420px; padding:0 20px;">
-
-            <!-- Logo -->
             <div style="text-align:center; margin-bottom:36px;">
                 <div style="width:64px; height:64px; background:linear-gradient(135deg,#00b87c,#009664); border-radius:18px; display:inline-flex; align-items:center; justify-content:center; box-shadow:0 16px 40px rgba(0,184,124,0.3); margin-bottom:16px;">
                     <span style="font-size:30px;">🤖</span>
@@ -26,13 +20,10 @@
                 <p style="color:#94a3b8; font-size:14px; margin-top:6px;">Biznesingiz boshqaruv paneli</p>
             </div>
 
-            <!-- LOGIN FORM -->
             <div id="auth-login-panel">
                 <div style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:20px; padding:32px;">
                     <h3 style="color:#fff; font-size:18px; font-weight:700; margin:0 0 24px;">🔐 Tizimga Kirish</h3>
-
                     <div id="auth-error" style="display:none; background:rgba(225,29,72,0.15); border:1px solid rgba(225,29,72,0.3); color:#fda4af; padding:12px 16px; border-radius:10px; font-size:13px; margin-bottom:16px;"></div>
-
                     <div style="margin-bottom:16px;">
                         <label style="display:block; color:#94a3b8; font-size:12px; font-weight:600; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.05em;">Email</label>
                         <input type="email" id="login-email" placeholder="admin@biznes.com" style="width:100%; box-sizing:border-box; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); color:#fff; padding:12px 16px; border-radius:10px; font-size:14px; outline:none;" onkeydown="if(event.key==='Enter') doLogin()">
@@ -42,7 +33,6 @@
                         <input type="password" id="login-password" placeholder="••••••••" style="width:100%; box-sizing:border-box; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); color:#fff; padding:12px 16px; border-radius:10px; font-size:14px; outline:none;" onkeydown="if(event.key==='Enter') doLogin()">
                     </div>
                     <button onclick="doLogin()" id="login-btn" style="width:100%; background:linear-gradient(135deg,#00b87c,#009664); color:#fff; border:none; padding:14px; border-radius:12px; font-size:15px; font-weight:700; cursor:pointer; transition:opacity .2s;">Kirish →</button>
-
                     <div style="text-align:center; margin-top:20px;">
                         <span style="color:#64748b; font-size:13px;">Hisobingiz yo'qmi? </span>
                         <a href="#" onclick="showRegisterPanel()" style="color:#00b87c; font-size:13px; font-weight:600; text-decoration:none;">Ro'yxatdan o'ting</a>
@@ -53,13 +43,10 @@
                 </div>
             </div>
 
-            <!-- REGISTER FORM -->
             <div id="auth-register-panel" style="display:none;">
                 <div style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:20px; padding:32px;">
                     <h3 style="color:#fff; font-size:18px; font-weight:700; margin:0 0 24px;">🏢 Yangi Biznes Ro'yxati</h3>
-
                     <div id="register-error" style="display:none; background:rgba(225,29,72,0.15); border:1px solid rgba(225,29,72,0.3); color:#fda4af; padding:12px 16px; border-radius:10px; font-size:13px; margin-bottom:16px;"></div>
-
                     <div style="margin-bottom:14px;">
                         <label style="display:block; color:#94a3b8; font-size:12px; font-weight:600; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.05em;">Biznes Nomi</label>
                         <input type="text" id="reg-biz-name" placeholder="Masalan: TechMart Savdo" style="width:100%; box-sizing:border-box; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); color:#fff; padding:12px 16px; border-radius:10px; font-size:14px; outline:none;">
@@ -73,44 +60,37 @@
                         <input type="password" id="reg-password" placeholder="Kamida 6 ta belgi" style="width:100%; box-sizing:border-box; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); color:#fff; padding:12px 16px; border-radius:10px; font-size:14px; outline:none;">
                     </div>
                     <button onclick="doRegister()" id="register-btn" style="width:100%; background:linear-gradient(135deg,#00b87c,#009664); color:#fff; border:none; padding:14px; border-radius:12px; font-size:15px; font-weight:700; cursor:pointer;">Ro'yxatdan O'tish →</button>
-
                     <div style="text-align:center; margin-top:20px;">
                         <a href="#" onclick="showLoginPanel()" style="color:#00b87c; font-size:13px; font-weight:600; text-decoration:none;">← Kirish sahifasiga qaytish</a>
                     </div>
                 </div>
             </div>
-
         </div>
     </div>
-    <!-- ═══════════════════════════════════════════════════════════════════ -->
 
+    <!-- ═══════════════ APP ═══════════════ -->
     <div id="app-container" class="app-container" style="display:none;">
-        <!-- Sidebar Navigation -->
         <aside class="sidebar">
             <div class="brand">
                 <img src="/static/images/logo.svg" alt="Sotuvchi AI Logo" class="brand-icon-img">
                 <div class="brand-text">
                     <h1>Sotuvchi AI</h1>
-                    <span>Tizim v1.0</span>
+                    <span>Tizim v2.0</span>
                 </div>
             </div>
 
             <nav class="nav-menu">
-                <div class="nav-item active" data-tab="tab-overview">
-                    <span>📊</span> Boshqaruv Paneli
-                </div>
-                <div class="nav-item" data-tab="tab-products">
-                    <span>🛍</span> Mahsulot Kategoriyalari
-                </div>
-                <div class="nav-item" data-tab="tab-orders">
-                    <span>📦</span> Buyurtmalar
-                </div>
-                <div class="nav-item" data-tab="tab-settings">
-                    <span>⚙️</span> AI Sozlamalari
-                </div>
+                <div class="nav-item" data-tab="tab-overview"><span>🏠</span> Dashboard</div>
+                <div class="nav-item active" data-tab="tab-inbox"><span>💬</span> Inbox <span class="nav-badge" id="inbox-nav-badge" style="display:none;">0</span></div>
+                <div class="nav-item" data-tab="tab-ai-agent"><span>🤖</span> AI Agent</div>
+                <div class="nav-item" data-tab="tab-products"><span>📦</span> Katalog</div>
+                <div class="nav-item" data-tab="tab-orders"><span>🧾</span> Buyurtmalar</div>
+                <div class="nav-item" data-tab="tab-customers"><span>👥</span> Mijozlar</div>
+                <div class="nav-item" data-tab="tab-integrations"><span>🔌</span> Integratsiyalar</div>
+                <div class="nav-item" data-tab="tab-analytics"><span>📊</span> Analitika</div>
+                <div class="nav-item" data-tab="tab-settings"><span>⚙️</span> Sozlamalar</div>
             </nav>
 
-            <!-- Tenant info + logout -->
             <div id="tenant-info-bar" style="padding:12px 16px; border-top:1px solid var(--card-border); margin-top:auto;">
                 <div style="display:flex; align-items:center; gap:10px;">
                     <div style="width:34px; height:34px; border-radius:50%; background:linear-gradient(135deg,#00b87c,#009664); display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0;">🏢</div>
@@ -123,248 +103,256 @@
             </div>
 
             <div class="sidebar-status">
-                <div class="status-badge">
-                    <span class="pulse-dot"></span> Tizim Faol
-                </div>
-                <p style="font-size: 11px; color: var(--text-dim); margin-top: 6px;" id="ai-provider-badge">
-                    Model: Gemini AI
-                </p>
+                <div class="status-badge"><span class="pulse-dot"></span> Tizim Faol</div>
+                <p style="font-size: 11px; color: var(--text-dim); margin-top: 6px;" id="ai-provider-badge">Model: Gemini AI</p>
             </div>
         </aside>
 
-        <!-- Main Content -->
         <main class="main-content">
-            <!-- Header -->
             <header class="top-header">
                 <div class="header-title">
-                    <h2 id="page-title">Boshqaruv Paneli</h2>
-                    <p id="page-subtitle">Haftalik sotuv ko'rsatkichlari va tushum dinamikasi</p>
+                    <h2 id="page-title">Inbox</h2>
+                    <p id="page-subtitle">Jonli suhbatlar — AI va operator</p>
                 </div>
-                
                 <div id="header-action-group" style="display: none; gap: 14px; align-items: center;">
                     <span class="categories-badge-pill" id="categories-count-text">0 ta kategoriya</span>
-                    <button class="btn-primary" onclick="openAddCategoryModal()">
-                        <span>+</span> Yangi Kategoriya
-                    </button>
+                    <button class="btn-primary" onclick="openAddCategoryModal()"><span>+</span> Yangi Kategoriya</button>
                 </div>
             </header>
 
-            <!-- TAB 1: OVERVIEW -->
-            <section id="tab-overview" class="tab-view active">
-                
-                <!-- Hero 2-Column Grid: Chart on Left, 3 Metric Cards Stacked on Right -->
-                <div class="overview-hero-grid">
-                    <!-- Left: Revenue Chart Card -->
-                    <div class="revenue-chart-card">
-                        <div class="chart-card-header">
-                            <div>
-                                <div class="chart-title-row">
-                                    <span class="chart-title">Kunlik Tushum</span>
-                                    <span class="period-badge">Avgust, 2026</span>
-                                </div>
-                                <div class="chart-value-row">
-                                    <h2 id="stat-revenue" class="chart-total-value">0 UZS</h2>
-                                    <span class="growth-tag">▲ +18.5%</span>
-                                </div>
-                            </div>
-                            <div class="revenue-icon-box">
-                                💰
-                            </div>
+            <!-- ═══ INBOX (default) ═══ -->
+            <section id="tab-inbox" class="tab-view active">
+                <div id="handoff-banner" class="handoff-banner" style="display:none;" onclick="filterInboxTo('operator')">
+                    <span class="handoff-banner-icon">🔔</span>
+                    <span id="handoff-banner-text">Operator kutayotgan suhbatlar bor</span>
+                    <span class="handoff-banner-cta">Ko'rish →</span>
+                </div>
+                <div class="inbox-layout">
+                    <div class="inbox-list-pane">
+                        <div class="inbox-filters">
+                            <button class="inbox-filter active" data-status="all" onclick="filterInbox('all',this)">Barchasi</button>
+                            <button class="inbox-filter" data-status="ai" onclick="filterInbox('ai',this)">🤖 AI</button>
+                            <button class="inbox-filter" data-status="operator" onclick="filterInbox('operator',this)">👨‍💼 Operator</button>
+                            <button class="inbox-filter" data-status="closed" onclick="filterInbox('closed',this)">✅ Yopilgan</button>
                         </div>
-                        
-                        <!-- Graph Canvas Area -->
-                        <div class="chart-canvas-wrapper">
-                            <canvas id="revenueChart"></canvas>
-                        </div>
+                        <div id="inbox-conversations" class="inbox-conversations"></div>
                     </div>
-
-                    <!-- Right Column: 3 Metric Cards Stacked Vertically -->
-                    <div class="hero-stats-column">
-                        <div class="stat-card" onclick="switchToTab('tab-orders')" style="cursor: pointer;" title="Barcha buyurtmalarni ko'rish">
-                            <div class="stat-icon" style="background: rgba(6, 182, 212, 0.12); color: #06b6d4;">📦</div>
-                            <div class="stat-info">
-                                <span>Buyurtmalar</span>
-                                <h3 id="stat-orders">0</h3>
+                    <div class="inbox-chat-pane">
+                        <div class="inbox-empty" id="inbox-empty">
+                            <div style="text-align:center;">
+                                <div style="font-size:48px; opacity:0.4;">💬</div>
+                                <p style="color:var(--text-muted); margin-top:10px;">Suhbatni tanlang</p>
                             </div>
                         </div>
-                        <div class="stat-card">
-                            <div class="stat-icon" style="background: rgba(245, 158, 11, 0.12); color: #d97706;">👥</div>
-                            <div class="stat-info">
-                                <span>Mijozlar Suhbatlari</span>
-                                <h3 id="stat-leads">0</h3>
-                            </div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon" style="background: rgba(168, 85, 247, 0.12); color: #7e22ce;">📈</div>
-                            <div class="stat-info">
-                                <span>Sotuv Konversiyasi</span>
-                                <h3 id="stat-conversion">0%</h3>
+                        <div id="inbox-chat-active" style="display:none; flex-direction:column; height:100%;">
+                            <div class="inbox-chat-header" id="inbox-chat-header"></div>
+                            <div class="inbox-messages" id="inbox-messages"></div>
+                            <div class="inbox-composer">
+                                <textarea id="inbox-reply-text" placeholder="Javob yozing..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendOperatorReply();}"></textarea>
+                                <button class="btn-primary" onclick="sendOperatorReply()">Yuborish</button>
                             </div>
                         </div>
                     </div>
                 </div>
+            </section>
 
-                <!-- Recent Orders Table -->
-                <div class="table-container">
+            <!-- ═══ DASHBOARD ═══ -->
+            <section id="tab-overview" class="tab-view">
+                <div class="kpi-grid" id="dashboard-kpis"></div>
+                <div class="table-container" style="margin-top:22px;">
                     <div style="padding: 20px 24px; border-bottom: 1px solid var(--card-border); font-weight: 700; font-size: 15px; color: var(--text-main); display: flex; justify-content: space-between; align-items: center;">
                         <span>🔥 Oxirgi Buyurtmalar</span>
-                        <button onclick="switchToTab('tab-orders')" style="background: transparent; border: none; color: var(--primary); font-size: 13px; font-weight: 700; cursor: pointer;">
-                            Barchasini ko'rish →
-                        </button>
+                        <button onclick="switchToTab('tab-orders')" style="background: transparent; border: none; color: var(--primary); font-size: 13px; font-weight: 700; cursor: pointer;">Barchasini ko'rish →</button>
                     </div>
                     <table>
-                        <thead>
-                            <tr>
-                                <th>Buyurtma ID</th>
-                                <th>Mijoz</th>
-                                <th>Telefon</th>
-                                <th>Summa</th>
-                                <th>Holati</th>
-                                <th>Sana</th>
-                            </tr>
-                        </thead>
-                        <tbody id="recent-orders-tbody">
-                            <!-- Dynamic Content -->
-                        </tbody>
+                        <thead><tr><th>Buyurtma ID</th><th>Mijoz</th><th>Telefon</th><th>Summa</th><th>Holati</th><th>Sana</th></tr></thead>
+                        <tbody id="recent-orders-tbody"></tbody>
                     </table>
                 </div>
             </section>
 
-            <!-- TAB 2: PRODUCTS KATALOGI (Kategoriyalar va Mahsulotlar) -->
-            <section id="tab-products" class="tab-view">
-                
-                <!-- Level 1: Categories Cards Grid View (Clean & Direct without duplicated headers) -->
-                <div id="categories-view">
-                    <div id="categories-cards-grid" class="categories-cards-grid">
-                        <!-- Dynamic Premium Categories Rendered by JS -->
+            <!-- ═══ AI AGENT ═══ -->
+            <section id="tab-ai-agent" class="tab-view">
+                <!-- Kept minimal on purpose: full AI configuration lands in the
+                     big admin panel once there are 10+ customers. -->
+                <div class="agent-layout">
+                    <div class="panel-card">
+                        <div class="agent-row">
+                            <div class="form-group" style="flex:1;"><label>AI ismi</label>
+                                <input type="text" id="ai-name" class="form-control" placeholder="Sotuvchi AI">
+                            </div>
+                            <div class="form-group" style="width:150px;"><label>Til</label>
+                                <select id="ai-language" class="form-control">
+                                    <option value="uz">O'zbek</option>
+                                    <option value="ru">Rus</option>
+                                    <option value="en">Ingliz</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="width:170px;"><label>Ohang</label>
+                                <select id="ai-tone" class="form-control">
+                                    <option value="friendly">Do'stona</option>
+                                    <option value="professional">Professional</option>
+                                    <option value="concise">Qisqa va aniq</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group"><label>Salomlashish xabari</label>
+                            <input type="text" id="ai-greeting" class="form-control" placeholder="Assalomu alaykum! Nima qidiryapsiz?">
+                        </div>
+
+                        <div class="form-group">
+                            <label>System Prompt — AI nima qiladi va nima QILMAYDI</label>
+                            <textarea id="setting-prompt" class="form-control" style="min-height:210px;" placeholder="AI sotuvchining xarakteri va qoidalari..."></textarea>
+                            <p class="field-hint">Narx, ombor va buyurtma qoidalari tizimga o'rnatilgan — bu yerda faqat xarakter va biznes qoidalaringizni yozing.</p>
+                        </div>
+
+                        <button class="btn-primary" onclick="saveSettings()">Saqlash</button>
+                        <span class="agent-note">Qo'shimcha sozlamalar (model tanlash, eskalatsiya chegarasi, Knowledge Base) keyingi bosqichda qo'shiladi.</span>
+                    </div>
+
+                    <div class="panel-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column;">
+                        <div class="agent-test-head">🧪 Sinov — mijoz sifatida yozib ko'ring</div>
+                        <div id="test-messages" class="inbox-messages" style="flex:1; min-height:300px;"></div>
+                        <div class="inbox-composer">
+                            <textarea id="test-input" placeholder="Salom, noutbuk bormi?" rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendTestMessage();}"></textarea>
+                            <button class="btn-primary" onclick="sendTestMessage()">Yuborish</button>
+                        </div>
                     </div>
                 </div>
+            </section>
 
-                <!-- Level 2: Category Products Table View (Shown when category clicked) -->
+            <!-- ═══ KATALOG ═══ -->
+            <section id="tab-products" class="tab-view">
+                <div id="categories-view">
+                    <div id="categories-cards-grid" class="categories-cards-grid"></div>
+                </div>
                 <div id="category-products-view" style="display: none;">
                     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; border-bottom: 1px solid var(--card-border); padding-bottom: 18px;">
                         <div style="display: flex; align-items: center; gap: 14px;">
-                            <button onclick="showCategoriesView()" style="background: #ffffff; border: 1px solid var(--card-border); color: var(--text-main); padding: 10px 18px; border-radius: var(--radius-md); cursor: pointer; font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);">
-                                ⬅️ Kategoriyalar
-                            </button>
+                            <button onclick="showCategoriesView()" style="background: #ffffff; border: 1px solid var(--card-border); color: var(--text-main); padding: 10px 18px; border-radius: var(--radius-md); cursor: pointer; font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);">⬅️ Kategoriyalar</button>
                             <h3 id="current-category-title" style="font-size: 22px; font-weight: 800; color: var(--text-main); letter-spacing: -0.3px;">Smartfonlar</h3>
                         </div>
-                        
-                        <!-- Prominent Add Product Button inside Category View -->
-                        <button onclick="openAddProductModalForCurrentCategory()" class="btn-primary" id="btn-add-product-in-category">
-                            <span>+</span> Mahsulot Qo'shish
-                        </button>
+                        <button onclick="openAddProductModalForCurrentCategory()" class="btn-primary" id="btn-add-product-in-category"><span>+</span> Mahsulot Qo'shish</button>
                     </div>
-
                     <div class="table-container">
                         <table>
-                            <thead>
-                                <tr>
-                                    <th>Rasm</th>
-                                    <th>ID</th>
-                                    <th>Mahsulot Nomi</th>
-                                    <th>Narxi</th>
-                                    <th>Ombor Qoldig'i</th>
-                                    <th>Amallar</th>
-                                </tr>
-                            </thead>
-                            <tbody id="products-tbody">
-                                <!-- Dynamic Content -->
-                            </tbody>
+                            <thead><tr><th>Rasm</th><th>ID</th><th>Mahsulot Nomi</th><th>Narxi</th><th>Ombor Qoldig'i</th><th>Amallar</th></tr></thead>
+                            <tbody id="products-tbody"></tbody>
                         </table>
                     </div>
                 </div>
             </section>
 
-            <!-- TAB 3: ORDERS -->
+            <!-- ═══ BUYURTMALAR ═══ -->
             <section id="tab-orders" class="tab-view">
-                <!-- Filter Pills Bar & Search Input -->
                 <div class="orders-filter-bar" style="display: flex; align-items: center; gap: 12px; flex-wrap: nowrap; overflow-x: auto;">
                     <div style="flex-shrink: 0; min-width: 230px;">
                         <input type="text" id="order-search-input" class="form-control" placeholder="🔍 Mijoz yoki ID bo'yicha qidiruv..." oninput="renderOrdersTable()" style="margin: 0;">
                     </div>
                     <div class="filter-pills-group" style="display: flex; gap: 8px; flex-wrap: nowrap; align-items: center;">
-                        <button class="filter-pill active" onclick="filterOrdersByStatus('all', this)">
-                            Barcha <span class="filter-count" id="count-order-all">0</span>
-                        </button>
-                        <button class="filter-pill" onclick="filterOrdersByStatus('Yangi', this)">
-                            🔥 Yangi <span class="filter-count" id="count-order-yangi">0</span>
-                        </button>
-                        <button class="filter-pill" onclick="filterOrdersByStatus('Tasdiqlandi', this)">
-                            ⚡️ Tasdiqlandi <span class="filter-count" id="count-order-tasdiqlandi">0</span>
-                        </button>
-                        <button class="filter-pill" onclick="filterOrdersByStatus('Yo\'lda', this)">
-                            🚚 Yo'lda <span class="filter-count" id="count-order-yolda">0</span>
-                        </button>
-                        <button class="filter-pill" onclick="filterOrdersByStatus('Yetkazildi', this)">
-                            ✅ Yetkazildi <span class="filter-count" id="count-order-yetkazildi">0</span>
-                        </button>
-                        <button class="filter-pill" onclick="filterOrdersByStatus('Bekor qilindi', this)">
-                            ❌ Bekor qilindi <span class="filter-count" id="count-order-bekor">0</span>
-                        </button>
+                        <button class="filter-pill active" onclick="filterOrdersByStatus('all', this)">Barcha <span class="filter-count" id="count-order-all">0</span></button>
+                        <button class="filter-pill" onclick="filterOrdersByStatus('Yangi', this)">🔥 Yangi <span class="filter-count" id="count-order-yangi">0</span></button>
+                        <button class="filter-pill" onclick="filterOrdersByStatus('Tasdiqlandi', this)">⚡️ Tasdiqlandi <span class="filter-count" id="count-order-tasdiqlandi">0</span></button>
+                        <button class="filter-pill" onclick="filterOrdersByStatus('Yo\'lda', this)">🚚 Yo'lda <span class="filter-count" id="count-order-yolda">0</span></button>
+                        <button class="filter-pill" onclick="filterOrdersByStatus('Yetkazildi', this)">✅ Yetkazildi <span class="filter-count" id="count-order-yetkazildi">0</span></button>
+                        <button class="filter-pill" onclick="filterOrdersByStatus('Bekor qilindi', this)">❌ Bekor qilindi <span class="filter-count" id="count-order-bekor">0</span></button>
                     </div>
                 </div>
-
                 <div class="table-container">
                     <table>
-                        <thead>
-                            <tr>
-                                <th>Buyurtma ID</th>
-                                <th>Sana</th>
-                                <th>Mijoz Nomi</th>
-                                <th>Telefon</th>
-                                <th>Mahsulotlar</th>
-                                <th>Summa</th>
-                                <th>Holati</th>
-                                <th>Amallar</th>
-                            </tr>
-                        </thead>
-                        <tbody id="orders-tbody">
-                            <!-- Dynamic Content -->
-                        </tbody>
+                        <thead><tr><th>Buyurtma ID</th><th>Sana</th><th>Mijoz Nomi</th><th>Telefon</th><th>Mahsulotlar</th><th>Summa</th><th>Holati</th><th>Amallar</th></tr></thead>
+                        <tbody id="orders-tbody"></tbody>
                     </table>
                 </div>
             </section>
 
-            <!-- TAB 4: SETTINGS -->
+            <!-- ═══ MIJOZLAR ═══ -->
+            <section id="tab-customers" class="tab-view">
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Mijoz</th><th>Telefon</th><th>Buyurtmalar</th><th>LTV (jami xarid)</th><th>Oxirgi buyurtma</th></tr></thead>
+                        <tbody id="customers-tbody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- ═══ INTEGRATSIYALAR ═══ -->
+            <section id="tab-integrations" class="tab-view">
+                <div class="integration-grid">
+                    <div class="integration-card">
+                        <div class="integration-head"><span class="integration-icon">✈️</span><div><h3>Telegram Bot</h3><p id="tg-status-text">Ulanmagan</p></div></div>
+                        <div id="tg-connected" style="display:none;">
+                            <div class="tg-badge">✅ Ulangan: <b id="tg-username">—</b></div>
+                            <div id="tg-note" style="font-size:12px; color:var(--text-muted); margin:10px 0;"></div>
+                            <button class="btn-danger-soft" onclick="disconnectTelegram()">Uzish</button>
+                        </div>
+                        <div id="tg-disconnected">
+                            <p style="font-size:13px; color:var(--text-muted); margin:8px 0 12px;">@BotFather'dan olingan bot tokenini kiriting:</p>
+                            <input type="text" id="tg-token-input" class="form-control" placeholder="123456:ABC-DEF...">
+                            <button class="btn-primary" style="margin-top:10px;" onclick="connectTelegram()">Ulash</button>
+                        </div>
+                    </div>
+                    <div class="integration-card">
+                        <div class="integration-head"><span class="integration-icon">🔔</span><div><h3>Operator bildirishnomasi</h3><p id="op-status-text">Ulanmagan</p></div></div>
+                        <div id="op-paired" style="display:none;">
+                            <div class="tg-badge">✅ Ulangan: <b id="op-name">—</b></div>
+                            <p style="font-size:12px; color:var(--text-muted); margin:10px 0;">AI operatorga uzatganda va yangi buyurtma tushganda Telegram'ingizga xabar keladi.</p>
+                            <label class="switch-row"><input type="checkbox" id="op-notify-handoff" onchange="saveOperatorNotifications()"> Operatorga uzatilganda xabar</label>
+                            <label class="switch-row"><input type="checkbox" id="op-notify-order" onchange="saveOperatorNotifications()"> Yangi buyurtmada xabar</label>
+                            <button class="btn-danger-soft" style="margin-top:12px;" onclick="unpairOperator()">Uzish</button>
+                        </div>
+                        <div id="op-unpaired">
+                            <p style="font-size:13px; color:var(--text-muted); margin:8px 0 12px;">AI operatorni chaqirganda telefoningizga xabar kelishi uchun o'z Telegram'ingizni ulang.</p>
+                            <div id="op-code-box" style="display:none;">
+                                <div class="pair-code" id="op-code">——————</div>
+                                <p style="font-size:12px; color:var(--text-muted); margin:10px 0;">Telegram'da <b id="op-bot-name">botga</b> shu xabarni yuboring:</p>
+                                <code class="pair-cmd" id="op-cmd">/operator ——————</code>
+                                <p style="font-size:11px; color:var(--text-dim); margin-top:8px;">Yuborgandan so'ng "Yangilash" ni bosing.</p>
+                                <button class="btn-mini" style="margin-top:8px;" onclick="loadOperatorPairing()">🔄 Yangilash</button>
+                            </div>
+                            <button class="btn-primary" id="op-get-code-btn" onclick="getPairingCode()">Kod olish</button>
+                        </div>
+                    </div>
+                    <div class="integration-card disabled"><div class="integration-head"><span class="integration-icon">📸</span><div><h3>Instagram</h3><p>Meta Business (tez orada)</p></div></div></div>
+                    <div class="integration-card disabled"><div class="integration-head"><span class="integration-icon">🌐</span><div><h3>Web widget</h3><p>Saytga o'rnatish (tez orada)</p></div></div></div>
+                    <div class="integration-card disabled"><div class="integration-head"><span class="integration-icon">💳</span><div><h3>To'lov (Payme/Click)</h3><p>tez orada</p></div></div></div>
+                    <div class="integration-card disabled"><div class="integration-head"><span class="integration-icon">📊</span><div><h3>Google Sheets / CRM</h3><p>tez orada</p></div></div></div>
+                </div>
+            </section>
+
+            <!-- ═══ ANALITIKA ═══ -->
+            <section id="tab-analytics" class="tab-view">
+                <div class="kpi-grid" id="analytics-metrics"></div>
+                <div class="panel-card" style="margin-top:22px;">
+                    <h3 style="margin-bottom:16px;">Suhbatlar holati bo'yicha</h3>
+                    <div id="analytics-status-bars"></div>
+                </div>
+            </section>
+
+            <!-- ═══ SOZLAMALAR ═══ -->
             <section id="tab-settings" class="tab-view">
-                <div style="background: var(--card-bg); backdrop-filter: var(--glass-blur); border: 1px solid var(--card-border); border-radius: var(--radius-lg); padding: 32px; max-width: 760px;">
-                    <h3 style="margin-bottom: 24px; font-size: 18px;">⚙️ AI Sotuvchi Sozlamalari</h3>
-                    
-                    <div class="form-group">
-                        <label>AI Model Tizimi</label>
-                        <select id="setting-provider" class="form-control">
-                            <option value="gemini">Google Gemini AI (gemini-2.5-flash)</option>
-                            <option value="anthropic">Anthropic Claude (claude-3-5-sonnet)</option>
-                            <option value="demo">Demo Uzbek Sales Engine (API Kalitsiz)</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label>AI Sotuvchi Yo'riqnomasi (System Prompt)</label>
-                        <textarea id="setting-prompt" class="form-control" placeholder="AI sotuvchining xarakteri va ko'rsatmalari..."></textarea>
-                    </div>
-
-                    <button class="btn-primary" onclick="saveSettings()">
-                        Sozlamalarni Saqlash
-                    </button>
+                <div class="panel-card" style="max-width:640px;">
+                    <h3 style="margin-bottom:20px;">🏢 Biznes ma'lumoti</h3>
+                    <div class="form-group"><label>Biznes nomi</label><input type="text" id="set-biz-name" class="form-control" disabled></div>
+                    <div class="form-group"><label>Email</label><input type="text" id="set-email" class="form-control" disabled></div>
+                    <div class="form-group"><label>Tarif</label><input type="text" id="set-plan" class="form-control" disabled></div>
+                    <div class="settings-note">Xodimlar/rollar, ish vaqti, bildirishnoma va billing — keyingi bosqichda.</div>
                 </div>
             </section>
         </main>
     </div>
 
-    <!-- Add/Edit Category Modal with Real Image Upload -->
+    <!-- Category Modal -->
     <div class="modal-overlay" id="category-modal">
         <div class="modal-card" style="max-width: 460px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--card-border); padding-bottom: 14px;">
                 <h3 id="cat-modal-title" style="font-size: 18px; font-weight: 800;">Yangi Kategoriya Qo'shish</h3>
                 <button onclick="closeCategoryModal()" style="background: transparent; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer;">✕</button>
             </div>
-
             <input type="hidden" id="cat-edit-mode" value="add">
             <input type="hidden" id="cat-id-val" value="">
             <input type="hidden" id="cat-image-url-val" value="">
-
             <div class="form-group">
                 <label>Kategoriya Rasmi</label>
                 <div class="upload-dropzone" id="cat-upload-dropzone" onclick="triggerCatFileInput()" style="height: 140px;">
@@ -379,12 +367,7 @@
                 </div>
                 <input type="file" id="cat-file-input" accept="image/*" style="display: none;" onchange="handleCatFileSelect(event)">
             </div>
-
-            <div class="form-group">
-                <label>Kategoriya Nomi</label>
-                <input type="text" id="cat-name" class="form-control" placeholder="Masalan: Maishiy Texnika">
-            </div>
-
+            <div class="form-group"><label>Kategoriya Nomi</label><input type="text" id="cat-name" class="form-control" placeholder="Masalan: Maishiy Texnika"></div>
             <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
                 <button onclick="closeCategoryModal()" style="background: transparent; border: 1px solid var(--card-border); color: var(--text-main); padding: 10px 20px; border-radius: var(--radius-md); cursor: pointer; font-weight: 600;">Bekor qilish</button>
                 <button onclick="saveCategoryForm()" class="btn-primary" id="cat-save-btn">Saqlash</button>
@@ -392,29 +375,23 @@
         </div>
     </div>
 
-    <!-- Product Add/Edit Modal (Multi-Image Gallery & Vector Trash Icon) -->
+    <!-- Product Modal -->
     <div class="modal-overlay" id="product-modal">
         <div class="modal-card wide-modal">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--card-border); padding-bottom: 16px;">
                 <h3 id="modal-title" style="font-size: 20px; font-weight: 800;">Mahsulotni Tahrirlash</h3>
                 <button onclick="closeProductModal()" style="background: transparent; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer;">✕</button>
             </div>
-            
             <input type="hidden" id="prod-edit-mode" value="add">
-
             <div class="modal-body-grid">
-                <!-- Left Column: Multi-Image Gallery (3-5 Images) with Clean Hover Vector SVG Trash -->
                 <div class="image-upload-section">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                         <label style="font-size: 13px; font-weight: 600; color: var(--text-muted);">Mahsulot Rasmlari (3-5 ta)</label>
                         <span id="image-count-badge" style="font-size: 11px; color: var(--primary); font-weight: 700;">0 / 5</span>
                     </div>
-                    
-                    <!-- Active Main Image Preview Box -->
                     <div class="upload-dropzone" id="main-preview-box">
                         <div id="image-preview-container" style="display: none;">
                             <img id="modal-image-preview" src="" alt="Preview">
-                            <!-- Clean Vector SVG Trash Icon (Appears ONLY on Hover) -->
                             <button type="button" class="btn-remove-image" title="Ushbu rasmni o'chirish" onclick="removeActiveImage(event)">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                                     <polyline points="3 6 5 6 21 6"></polyline>
@@ -422,68 +399,31 @@
                                 </svg>
                             </button>
                         </div>
-                        
                         <div class="upload-hint" id="upload-hint-text" onclick="triggerFileInput()">
                             <span style="font-size: 28px;">📷</span>
                             <p style="font-size: 13px; font-weight: 600; margin-top: 6px;">Rasm yuklash uchun bosing</p>
                             <span style="font-size: 11px; color: var(--text-muted);">PNG, JPG (max 5MB)</span>
                         </div>
                     </div>
-                    
-                    <!-- Thumbnails Row for 3-5 Images -->
-                    <div id="gallery-thumbnails-grid" class="gallery-thumbnails-grid" style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
-                        <!-- Dynamic Thumbnails Rendered by JS -->
-                    </div>
-
+                    <div id="gallery-thumbnails-grid" class="gallery-thumbnails-grid" style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;"></div>
                     <input type="file" id="prod-file-input" accept="image/*" style="display: none;" onchange="handleFileSelect(event)">
-                    
-                    <!-- "+ Rasm Qo'shish" Trigger Button -->
                     <div style="margin-top: 12px;">
-                        <button type="button" class="btn-add-image-trigger" onclick="triggerFileInput()" id="btn-add-img">
-                            <span>+</span> Rasm Qo'shish (3-5 ta)
-                        </button>
+                        <button type="button" class="btn-add-image-trigger" onclick="triggerFileInput()" id="btn-add-img"><span>+</span> Rasm Qo'shish (3-5 ta)</button>
                     </div>
                 </div>
-
-                <!-- Right Column: Product Fields -->
                 <div class="fields-section">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
-                        <div class="form-group">
-                            <label>Mahsulot ID</label>
-                            <input type="text" id="prod-id" class="form-control" placeholder="PROD-105">
-                        </div>
-                        <div class="form-group">
-                            <label>Kategoriya</label>
-                            <select id="prod-category" class="form-control">
-                                <!-- Dynamic Options Populated from Categories -->
-                            </select>
-                        </div>
+                        <div class="form-group"><label>Mahsulot ID</label><input type="text" id="prod-id" class="form-control" placeholder="PROD-105"></div>
+                        <div class="form-group"><label>Kategoriya</label><select id="prod-category" class="form-control"></select></div>
                     </div>
-
-                    <div class="form-group">
-                        <label>Mahsulot Nomi</label>
-                        <input type="text" id="prod-name" class="form-control" placeholder="iPhone 15 Pro Max 256GB">
-                    </div>
-
+                    <div class="form-group"><label>Mahsulot Nomi</label><input type="text" id="prod-name" class="form-control" placeholder="iPhone 15 Pro Max 256GB"></div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
-                        <div class="form-group">
-                            <label>Narxi (UZS)</label>
-                            <input type="number" id="prod-price" class="form-control" placeholder="15200000">
-                        </div>
-                        <div class="form-group">
-                            <label>Ombor Qoldig'i (Soni)</label>
-                            <input type="number" id="prod-stock" class="form-control" placeholder="10" value="10">
-                        </div>
+                        <div class="form-group"><label>Narxi (UZS)</label><input type="number" id="prod-price" class="form-control" placeholder="15200000"></div>
+                        <div class="form-group"><label>Ombor Qoldig'i (Soni)</label><input type="number" id="prod-stock" class="form-control" placeholder="10" value="10"></div>
                     </div>
-
-                    <div class="form-group">
-                        <label>Tavsif (Opisaniya)</label>
-                        <textarea id="prod-desc" class="form-control" style="min-height: 100px;" placeholder="Mahsulot xususiyatlari, rangi, kafolat muddatlari..."></textarea>
-                    </div>
+                    <div class="form-group"><label>Tavsif (Opisaniya)</label><textarea id="prod-desc" class="form-control" style="min-height: 100px;" placeholder="Mahsulot xususiyatlari, rangi, kafolat muddatlari..."></textarea></div>
                 </div>
             </div>
-
-            <!-- Footer Actions -->
             <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; border-top: 1px solid var(--card-border); padding-top: 18px;">
                 <button onclick="closeProductModal()" style="background: transparent; border: 1px solid var(--card-border); color: var(--text-main); padding: 10px 22px; border-radius: var(--radius-md); cursor: pointer; font-weight: 600;">Bekor qilish</button>
                 <button onclick="saveProductForm()" class="btn-primary" id="modal-save-btn">O'zgarishlarni Saqlash</button>
@@ -491,6 +431,6 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js?v=2.0"></script>
+    <script src="/static/js/app.js?v=3.0"></script>
 </body>
 </html>

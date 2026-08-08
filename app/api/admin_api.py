@@ -1,134 +1,127 @@
+"""
+Admin API — all endpoints are tenant-scoped via the current user's tenant_id.
+Data lives in Postgres (see app/db/repo.py).
+"""
+import uuid
 from typing import List
-from fastapi import APIRouter, HTTPException, Body, Depends
-from app.models.schema import Product, Order, SystemSettings, DashboardStats, Category
+
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.auth import require_auth
-from app.core.tenant_manager import tenant_manager
 from app.core.config import BASE_DIR
+from app.db import repo
+from app.db.base import get_session
+from app.db.models import User
+from app.models.schema import Category, DashboardStats, Order, Product, SystemSettings
+from app.services import tenant_service
 from app.services.sheets_service import sheets_service
-from app.services.bot_service import bot_service
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
 
-def get_db(tenant=Depends(require_auth)):
-    """Helper dependency: returns the DB instance for the current tenant."""
-    return tenant_manager.get_tenant_db(tenant.id)
-
-
+# ─── Dashboard ────────────────────────────────────────────────────────────────
 @router.get("/stats", response_model=DashboardStats)
-async def get_dashboard_stats(db=Depends(get_db)):
-    orders = db.get_orders()
-    total_revenue = sum(o.total_amount for o in orders if o.status != "Bekor qilindi")
-    total_orders = len(orders)
-    active_leads = len(db.chat_history)
-    conversion_rate = (total_orders / active_leads * 100) if active_leads > 0 else 0.0
-
+async def get_dashboard_stats(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    s = await repo.dashboard_stats(session, user.tenant_id)
     weekly_labels = ["Dush", "Sesh", "Chor", "Pays", "Juma", "Shan", "Yak"]
     weekly_sales = [2500000.0, 4100000.0, 3200000.0, 5600000.0, 4800000.0, 7100000.0,
-                    max(total_revenue, 15200000.0)]
-
+                    max(s["total_revenue"], 0.0)]
     return DashboardStats(
-        total_revenue=total_revenue,
-        total_orders=total_orders,
-        active_leads=active_leads,
-        conversion_rate=round(conversion_rate, 1),
-        recent_orders=orders[:5],
+        total_revenue=s["total_revenue"],
+        total_orders=s["total_orders"],
+        active_leads=s["active_leads"],
+        conversion_rate=s["conversion_rate"],
+        recent_orders=s["recent_orders"],
         weekly_sales=weekly_sales,
-        weekly_labels=weekly_labels
+        weekly_labels=weekly_labels,
     )
 
 
-# ─── Categories ──────────────────────────────────────────────────────────────
+# ─── Categories ───────────────────────────────────────────────────────────────
 @router.get("/categories", response_model=List[Category])
-async def get_categories(db=Depends(get_db)):
-    return db.get_categories()
+async def get_categories(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    return await repo.list_categories(session, user.tenant_id)
 
 
 @router.post("/categories", response_model=Category)
-async def create_category(category: Category, db=Depends(get_db)):
-    return db.add_category(category)
+async def create_category(category: Category, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    return await repo.create_category(session, user.tenant_id, category.model_dump())
 
 
 @router.put("/categories/{category_id}", response_model=Category)
-async def update_category(category_id: str, category: Category, db=Depends(get_db)):
-    updated = db.update_category(category_id, category)
+async def update_category(category_id: str, category: Category, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    updated = await repo.update_category(session, user.tenant_id, category_id, category.model_dump())
     if not updated:
         raise HTTPException(status_code=404, detail="Kategoriya topilmadi.")
     return updated
 
 
 @router.delete("/categories/{category_id}")
-async def delete_category(category_id: str, db=Depends(get_db)):
-    success = db.delete_category(category_id)
-    if not success:
+async def delete_category(category_id: str, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    if not await repo.delete_category(session, user.tenant_id, category_id):
         raise HTTPException(status_code=404, detail="Kategoriya topilmadi.")
     return {"status": "success", "message": "Kategoriya o'chirildi."}
 
 
-# ─── Products ────────────────────────────────────────────────────────────────
+# ─── Products ─────────────────────────────────────────────────────────────────
 @router.get("/products", response_model=List[Product])
-async def list_products(db=Depends(get_db)):
-    return db.get_products()
+async def list_products(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    return await repo.list_products(session, user.tenant_id)
 
 
 @router.post("/products", response_model=Product)
-async def create_product(product: Product, db=Depends(get_db)):
-    return db.add_product(product)
+async def create_product(product: Product, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    return await repo.create_product(session, user.tenant_id, product.model_dump())
 
 
 @router.put("/products/{product_id}", response_model=Product)
-async def update_product(product_id: str, product: Product, db=Depends(get_db)):
-    updated = db.update_product(product_id, product)
+async def update_product(product_id: str, product: Product, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    updated = await repo.update_product(session, user.tenant_id, product_id, product.model_dump())
     if not updated:
         raise HTTPException(status_code=404, detail="Mahsulot topilmadi.")
     return updated
 
 
 @router.delete("/products/{product_id}")
-async def delete_product(product_id: str, db=Depends(get_db)):
-    success = db.delete_product(product_id)
-    if not success:
+async def delete_product(product_id: str, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    if not await repo.delete_product(session, user.tenant_id, product_id):
         raise HTTPException(status_code=404, detail="Mahsulot topilmadi.")
     return {"status": "success", "message": "Mahsulot o'chirildi."}
 
 
-# ─── Orders ──────────────────────────────────────────────────────────────────
+# ─── Orders ───────────────────────────────────────────────────────────────────
 @router.get("/orders", response_model=List[Order])
-async def list_orders(db=Depends(get_db)):
-    return db.get_orders()
+async def list_orders(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    return await repo.list_orders(session, user.tenant_id)
 
 
 @router.put("/orders/{order_id}/status", response_model=Order)
-async def update_order_status(order_id: str, status: str = Body(..., embed=True), db=Depends(get_db)):
-    updated = db.update_order_status(order_id, status)
+async def update_order_status(order_id: str, status: str = Body(..., embed=True), user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    updated = await repo.update_order_status(session, user.tenant_id, order_id, status)
     if not updated:
         raise HTTPException(status_code=404, detail="Buyurtma topilmadi.")
     return updated
 
 
-# ─── Settings ────────────────────────────────────────────────────────────────
+# ─── Settings ─────────────────────────────────────────────────────────────────
 @router.get("/settings", response_model=SystemSettings)
-async def get_settings(db=Depends(get_db)):
-    return db.settings
+async def get_settings(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    return await repo.get_settings(session, user.tenant_id)
 
 
 @router.post("/settings", response_model=SystemSettings)
-async def save_settings(settings_data: SystemSettings, db=Depends(get_db)):
-    db.settings = settings_data
-    db.save_settings()
-    return db.settings
+async def save_settings(settings_data: SystemSettings, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    return await repo.save_settings(session, user.tenant_id, settings_data.model_dump())
 
 
 # ─── Image Upload ─────────────────────────────────────────────────────────────
-from fastapi import UploadFile, File
-import uuid
-
 UPLOADS_DIR = BASE_DIR / "static" / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @router.post("/upload")
-async def upload_image(file: UploadFile = File(...), tenant=Depends(require_auth)):
+async def upload_image(file: UploadFile = File(...), user: User = Depends(require_auth)):
     try:
         ext = file.filename.split(".")[-1] if "." in file.filename else "png"
         filename = f"img_{uuid.uuid4().hex[:10]}.{ext}"
@@ -141,11 +134,25 @@ async def upload_image(file: UploadFile = File(...), tenant=Depends(require_auth
         raise HTTPException(status_code=500, detail=f"Rasm yuklashda xatolik: {str(e)}")
 
 
-# ─── Integrations ────────────────────────────────────────────────────────────
+# ─── Analytics & Customers ────────────────────────────────────────────────────
+@router.get("/analytics")
+async def get_analytics(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    return await repo.analytics(session, user.tenant_id)
+
+
+@router.get("/customers")
+async def get_customers(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    return await repo.list_customers(session, user.tenant_id)
+
+
+# ─── Integrations ─────────────────────────────────────────────────────────────
 @router.get("/integrations/status")
-async def get_integrations_status(db=Depends(get_db)):
+async def get_integrations_status(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    tenant = await tenant_service.get_tenant(session, user.tenant_id)
+    s = await repo.get_settings(session, user.tenant_id)
     return {
         "google_sheets": sheets_service.is_connected(),
-        "telegram_bot": bot_service.is_configured(),
-        "ai_provider": db.settings.ai_provider
+        "telegram_bot": bool(tenant and tenant.telegram_bot_token),
+        "telegram_bot_username": tenant.telegram_bot_username if tenant else None,
+        "ai_provider": s.ai_provider,
     }

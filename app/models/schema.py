@@ -1,9 +1,17 @@
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _fmt_dt(v):
+    """Coerce a datetime (from ORM) into the app's string format."""
+    if isinstance(v, datetime):
+        return v.strftime("%Y-%m-%d %H:%M:%S")
+    return v
 
 
 class Category(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     name: str
     icon: str = "📁"
@@ -12,12 +20,13 @@ class Category(BaseModel):
 
 
 class Product(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     name: str
     category: str
     price: float
     currency: str = "UZS"
-    description: str
+    description: str = ""
     image_url: Optional[str] = None
     image_urls: List[str] = []
     in_stock: bool = True
@@ -25,6 +34,7 @@ class Product(BaseModel):
 
 
 class OrderItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     product_id: str
     product_name: str
     quantity: int
@@ -36,6 +46,7 @@ class OrderItem(BaseModel):
 
 
 class Order(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     customer_name: str
     customer_phone: str
@@ -46,6 +57,8 @@ class Order(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     delivery_address: Optional[str] = None
     notes: Optional[str] = None
+
+    _coerce_created = field_validator("created_at", mode="before")(_fmt_dt)
 
 
 class ChatMessage(BaseModel):
@@ -73,13 +86,19 @@ class ChatResponse(BaseModel):
 
 
 class SystemSettings(BaseModel):
-    model_config = {"protected_namespaces": ()}
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
     system_prompt: str
     ai_provider: str = "gemini"  # gemini, anthropic, demo
     model_name: str = "gemini-2.5-flash"
     temperature: float = 0.7
     bot_enabled: bool = True
     sheets_sync_enabled: bool = True
+    # persona (optional in responses)
+    ai_name: Optional[str] = None
+    ai_tone: Optional[str] = None
+    ai_language: Optional[str] = None
+    greeting_message: Optional[str] = None
+    auto_handoff_after: Optional[int] = None
 
 
 class DashboardStats(BaseModel):

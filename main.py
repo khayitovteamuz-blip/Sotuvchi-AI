@@ -6,6 +6,9 @@ venv_site_packages = Path(__file__).parent / ".venv" / "lib" / "python3.9" / "si
 if venv_site_packages.exists() and str(venv_site_packages) not in sys.path:
     sys.path.insert(0, str(venv_site_packages))
 
+import logging
+from contextlib import asynccontextmanager
+
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -17,11 +20,31 @@ from app.api.chat_api import router as chat_router
 from app.api.admin_api import router as admin_router
 from app.api.bot_webhook import router as bot_router
 from app.api.auth_api import router as auth_router
+from app.api.inbox_api import router as inbox_router
+from app.api.integrations_api import router as integrations_router
+from app.services.telegram_poller import telegram_poller
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Long-polling lets the Telegram bot work on localhost (no public URL).
+    if settings.TELEGRAM_POLLING:
+        await telegram_poller.start()
+    yield
+    if settings.TELEGRAM_POLLING:
+        await telegram_poller.stop()
+
 
 app = FastAPI(
     title="Sotuvchi AI - Enterprise Sales Agent",
     description="O'zbek tilidagi avtonom AI Sotuvchi agenti, Telegram bot integratsiyasi va Google Sheets CRM boshqaruv paneli.",
-    version="1.0.0"
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
 # CORS middleware
@@ -47,6 +70,8 @@ app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(admin_router)
 app.include_router(bot_router)
+app.include_router(inbox_router)
+app.include_router(integrations_router)
 
 
 @app.get("/")
