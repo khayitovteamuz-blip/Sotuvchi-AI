@@ -26,7 +26,7 @@ function initNavigation() {
 
     const titles = {
         'tab-overview': { title: 'Boshqaruv Paneli', sub: "Haftalik sotuv ko'rsatkichlari va tushum dinamikasi", btn: false },
-        'tab-products': { title: 'Mahsulotlar Katalogi', sub: "Kategoriyalar va ombordagi mahsulotlar ro'yxati", btn: true },
+        'tab-products': { title: 'Mahsulot Kategoriyalari', sub: "Kategoriyalar va ombordagi mahsulotlar ro'yxati", btn: true },
         'tab-orders': { title: 'Buyurtmalar', sub: "Mijozlar tomonidan berilgan barcha buyurtmalar", btn: false },
         'tab-settings': { title: 'AI Sozlamalari', sub: "AI sotuvchining xarakteri va provider sozlamalari", btn: false }
     };
