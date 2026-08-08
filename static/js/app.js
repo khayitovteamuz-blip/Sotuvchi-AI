@@ -812,42 +812,97 @@ async function deleteProduct(productId) {
     }
 }
 
+let currentOrders = [];
+let selectedOrderStatusFilter = 'all';
+
 // Load Orders
 async function loadOrders() {
     try {
         const resp = await fetch('/api/admin/orders');
-        const orders = await resp.json();
-
-        const tbody = document.getElementById('orders-tbody');
-        tbody.innerHTML = '';
-
-        orders.forEach(o => {
-            const itemsStr = o.items.map(i => `${i.product_name} (${i.quantity}x)`).join(', ');
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td><code>${o.id}</code></td>
-                <td><strong>${o.customer_name}</strong></td>
-                <td>${o.customer_phone}</td>
-                <td style="max-width: 200px;">${itemsStr}</td>
-                <td><strong>${o.total_amount.toLocaleString()} UZS</strong></td>
-                <td>
-                    <select onchange="updateOrderStatus('${o.id}', this.value)" style="background: rgba(255,255,255,0.05); color: #fff; border: 1px solid var(--card-border); padding: 4px 8px; border-radius: 6px;">
-                        <option value="Yangi" ${o.status==='Yangi'?'selected':''}>Yangi</option>
-                        <option value="Tasdiqlandi" ${o.status==='Tasdiqlandi'?'selected':''}>Tasdiqlandi</option>
-                        <option value="Yo'lda" ${o.status==="Yo'lda"?'selected':''}>Yo'lda</option>
-                        <option value="Yetkazildi" ${o.status==='Yetkazildi'?'selected':''}>Yetkazildi</option>
-                        <option value="Bekor qilindi" ${o.status==='Bekor qilindi'?'selected':''}>Bekor qilindi</option>
-                    </select>
-                </td>
-                <td>
-                    <span style="font-size: 11px; color: var(--text-dim);">${o.created_at}</span>
-                </td>
-            `;
-            tbody.appendChild(tr);
-        });
+        currentOrders = await resp.json();
+        renderOrdersTable();
     } catch (e) {
         console.error('Buyurtmalarni yuklashda xatolik:', e);
     }
+}
+
+function filterOrdersByStatus(status, el) {
+    selectedOrderStatusFilter = status;
+    if (el) {
+        document.querySelectorAll('.filter-pill').forEach(btn => btn.classList.remove('active'));
+        el.classList.add('active');
+    }
+    renderOrdersTable();
+}
+
+function renderOrdersTable() {
+    const tbody = document.getElementById('orders-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    // Update Pill Count Badges
+    const countAll = currentOrders.length;
+    const countYangi = currentOrders.filter(o => o.status === 'Yangi').length;
+    const countTasdiqlandi = currentOrders.filter(o => o.status === 'Tasdiqlandi').length;
+    const countYolda = currentOrders.filter(o => o.status === "Yo'lda").length;
+    const countYetkazildi = currentOrders.filter(o => o.status === 'Yetkazildi').length;
+    const countBekor = currentOrders.filter(o => o.status === 'Bekor qilindi').length;
+
+    if (document.getElementById('count-order-all')) document.getElementById('count-order-all').textContent = countAll;
+    if (document.getElementById('count-order-yangi')) document.getElementById('count-order-yangi').textContent = countYangi;
+    if (document.getElementById('count-order-tasdiqlandi')) document.getElementById('count-order-tasdiqlandi').textContent = countTasdiqlandi;
+    if (document.getElementById('count-order-yolda')) document.getElementById('count-order-yolda').textContent = countYolda;
+    if (document.getElementById('count-order-yetkazildi')) document.getElementById('count-order-yetkazildi').textContent = countYetkazildi;
+    if (document.getElementById('count-order-bekor')) document.getElementById('count-order-bekor').textContent = countBekor;
+
+    // Filter Logic
+    const searchTerm = (document.getElementById('order-search-input')?.value || '').toLowerCase();
+    const filtered = currentOrders.filter(o => {
+        const matchesStatus = selectedOrderStatusFilter === 'all' || o.status === selectedOrderStatusFilter;
+        const matchesSearch = !searchTerm || 
+            o.id.toLowerCase().includes(searchTerm) || 
+            o.customer_name.toLowerCase().includes(searchTerm) || 
+            o.customer_phone.toLowerCase().includes(searchTerm);
+        return matchesStatus && matchesSearch;
+    });
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 36px;">Ushbu holatda buyurtmalar topilmadi.</td></tr>`;
+        return;
+    }
+
+    filtered.forEach(o => {
+        const itemsStr = o.items.map(i => `${i.product_name} (${i.quantity}x)`).join(', ');
+        const badgeClass = o.status === 'Yangi' ? 'badge-yangi' :
+                           o.status === 'Tasdiqlandi' ? 'badge-tasdiqlandi' :
+                           o.status === "Yo'lda" ? 'badge-yolda' :
+                           o.status === 'Yetkazildi' ? 'badge-yetkazildi' : 'badge-bekor';
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><code>${o.id}</code></td>
+            <td style="font-size: 12px; color: var(--text-muted);">${o.created_at}</td>
+            <td><strong>${o.customer_name}</strong></td>
+            <td>${o.customer_phone}</td>
+            <td style="max-width: 220px; font-size: 13px;">${itemsStr}</td>
+            <td><strong>${o.total_amount.toLocaleString()} UZS</strong></td>
+            <td>
+                <select class="status-select ${badgeClass}" onchange="updateOrderStatus('${o.id}', this.value)">
+                    <option value="Yangi" ${o.status==='Yangi'?'selected':''}>🔥 Yangi</option>
+                    <option value="Tasdiqlandi" ${o.status==='Tasdiqlandi'?'selected':''}>⚡️ Tasdiqlandi</option>
+                    <option value="Yo'lda" ${o.status==="Yo'lda"?'selected':''}>🚚 Yo'lda</option>
+                    <option value="Yetkazildi" ${o.status==='Yetkazildi'?'selected':''}>✅ Yetkazildi</option>
+                    <option value="Bekor qilindi" ${o.status==='Bekor qilindi'?'selected':''}>❌ Bekor qilindi</option>
+                </select>
+            </td>
+            <td>
+                <button onclick="alert('Buyurtma manzili: ${o.delivery_address || 'Kiritilmagan'}\\nEslatma: ${o.notes || 'Yo\\'q'}')" style="background: rgba(2, 132, 199, 0.1); border: 1px solid rgba(2, 132, 199, 0.25); color: #0284c7; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 700;">
+                    👁 Tafsilotlar
+                </button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
 }
 
 async function updateOrderStatus(orderId, newStatus) {
@@ -857,7 +912,8 @@ async function updateOrderStatus(orderId, newStatus) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: newStatus })
         });
-        loadDashboardStats();
+        await loadOrders();
+        await loadDashboardStats();
     } catch (e) {
         console.error('Status o\'zgartirishda xatolik:', e);
     }

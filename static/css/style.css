@@ -561,6 +561,116 @@ tr:hover {
     background: #f8fafc;
 }
 
+/* Orders Status Filter Bar & Pills */
+.orders-filter-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    background: #ffffff;
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-lg);
+    padding: 14px 20px;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.03);
+    margin-bottom: 20px;
+}
+
+.filter-pills-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.filter-pill {
+    background: #f8fafc;
+    border: 1px solid var(--card-border);
+    color: var(--text-muted);
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.filter-pill:hover {
+    background: #f1f5f9;
+    color: var(--text-main);
+}
+
+.filter-pill.active {
+    background: var(--text-main);
+    color: #ffffff;
+    border-color: var(--text-main);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
+}
+
+.filter-pill.active .filter-count {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+}
+
+.filter-count {
+    background: #e2e8f0;
+    color: var(--text-muted);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 800;
+}
+
+/* Dynamic Status Select Dropdowns with Distinct Vivid Theme Colors */
+.status-select {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+    outline: none;
+    cursor: pointer;
+    transition: var(--transition);
+    border: 1px solid transparent;
+}
+
+.status-select option {
+    background: #ffffff;
+    color: #0f172a;
+    font-weight: 600;
+}
+
+.status-select.badge-yangi {
+    background: rgba(0, 184, 124, 0.12);
+    color: #00b87c;
+    border-color: rgba(0, 184, 124, 0.3);
+}
+
+.status-select.badge-tasdiqlandi {
+    background: rgba(2, 132, 199, 0.12);
+    color: #0284c7;
+    border-color: rgba(2, 132, 199, 0.3);
+}
+
+.status-select.badge-yolda {
+    background: rgba(217, 119, 6, 0.12);
+    color: #d97706;
+    border-color: rgba(217, 119, 6, 0.3);
+}
+
+.status-select.badge-yetkazildi {
+    background: rgba(147, 51, 234, 0.12);
+    color: #9333ea;
+    border-color: rgba(147, 51, 234, 0.3);
+}
+
+.status-select.badge-bekor {
+    background: rgba(225, 29, 72, 0.12);
+    color: #e11d48;
+    border-color: rgba(225, 29, 72, 0.3);
+}
+
 /* Status Badges */
 .badge {
     padding: 4px 12px;
@@ -573,7 +683,7 @@ tr:hover {
 .badge-yangi { background: rgba(0, 184, 124, 0.12); color: #00b87c; border: 1px solid rgba(0, 184, 124, 0.25); }
 .badge-tasdiqlandi { background: rgba(2, 132, 199, 0.12); color: #0284c7; border: 1px solid rgba(2, 132, 199, 0.25); }
 .badge-yolda { background: rgba(217, 119, 6, 0.12); color: #d97706; border: 1px solid rgba(217, 119, 6, 0.25); }
-.badge-yetkazildi { background: rgba(5, 150, 105, 0.12); color: #059669; border: 1px solid rgba(5, 150, 105, 0.25); }
+.badge-yetkazildi { background: rgba(147, 51, 234, 0.12); color: #9333ea; border: 1px solid rgba(147, 51, 234, 0.25); }
 .badge-bekor { background: rgba(225, 29, 72, 0.12); color: #e11d48; border: 1px solid rgba(225, 29, 72, 0.25); }
 
 /* Form Controls */

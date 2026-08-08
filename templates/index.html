@@ -192,12 +192,41 @@
 
             <!-- TAB 3: ORDERS -->
             <section id="tab-orders" class="tab-view">
+                <!-- Filter Pills Bar & Search Input -->
+                <div class="orders-filter-bar">
+                    <div class="filter-pills-group">
+                        <button class="filter-pill active" onclick="filterOrdersByStatus('all', this)">
+                            Barcha <span class="filter-count" id="count-order-all">0</span>
+                        </button>
+                        <button class="filter-pill" onclick="filterOrdersByStatus('Yangi', this)">
+                            🔥 Yangi <span class="filter-count" id="count-order-yangi">0</span>
+                        </button>
+                        <button class="filter-pill" onclick="filterOrdersByStatus('Tasdiqlandi', this)">
+                            ⚡️ Tasdiqlandi <span class="filter-count" id="count-order-tasdiqlandi">0</span>
+                        </button>
+                        <button class="filter-pill" onclick="filterOrdersByStatus('Yo\'lda', this)">
+                            🚚 Yo'lda <span class="filter-count" id="count-order-yolda">0</span>
+                        </button>
+                        <button class="filter-pill" onclick="filterOrdersByStatus('Yetkazildi', this)">
+                            ✅ Yetkazildi <span class="filter-count" id="count-order-yetkazildi">0</span>
+                        </button>
+                        <button class="filter-pill" onclick="filterOrdersByStatus('Bekor qilindi', this)">
+                            ❌ Bekor qilindi <span class="filter-count" id="count-order-bekor">0</span>
+                        </button>
+                    </div>
+
+                    <div style="min-width: 260px;">
+                        <input type="text" id="order-search-input" class="form-control" placeholder="🔍 Mijoz yoki ID bo'yicha qidiruv..." oninput="renderOrdersTable()">
+                    </div>
+                </div>
+
                 <div class="table-container">
                     <table>
                         <thead>
                             <tr>
                                 <th>Buyurtma ID</th>
-                                <th>Mijoz</th>
+                                <th>Sana</th>
+                                <th>Mijoz Nomi</th>
                                 <th>Telefon</th>
                                 <th>Mahsulotlar</th>
                                 <th>Summa</th>
