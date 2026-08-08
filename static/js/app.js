@@ -73,7 +73,10 @@ function renderCategoriesGrid() {
     if (!grid) return;
 
     grid.innerHTML = '';
-    document.getElementById('categories-count-text').textContent = `${currentCategories.length} ta kategoriya`;
+    const badge = document.getElementById('categories-count-text');
+    if (badge) {
+        badge.textContent = `${currentCategories.length} ta kategoriya`;
+    }
 
     currentCategories.forEach(cat => {
         const pCount = cat.product_count || 0;

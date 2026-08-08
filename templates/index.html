@@ -55,7 +55,8 @@
                     <p id="page-subtitle">Haftalik sotuv ko'rsatkichlari va tushum dinamikasi</p>
                 </div>
                 
-                <div id="header-action-group" style="display: none; gap: 12px;">
+                <div id="header-action-group" style="display: none; gap: 14px; align-items: center;">
+                    <span class="categories-badge-pill" id="categories-count-text">0 ta kategoriya</span>
                     <button class="btn-primary" onclick="openAddCategoryModal()">
                         <span>+</span> Yangi Kategoriya
                     </button>
@@ -140,16 +141,8 @@
             <!-- TAB 2: PRODUCTS KATALOGI (Kategoriyalar va Mahsulotlar) -->
             <section id="tab-products" class="tab-view">
                 
-                <!-- Level 1: Categories Cards Grid View (High-End Spacing & Typography) -->
+                <!-- Level 1: Categories Cards Grid View (Clean & Direct without duplicated headers) -->
                 <div id="categories-view">
-                    <div class="categories-header-row">
-                        <div>
-                            <h3 style="font-size: 20px; font-weight: 800; color: #ffffff; letter-spacing: -0.3px;">📁 Mahsulot Kategoriyalari</h3>
-                            <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Kategoriyani tanlang va mahsulotlar ro'yxatiga kiring</p>
-                        </div>
-                        <span class="categories-badge-pill" id="categories-count-text">0 ta kategoriya</span>
-                    </div>
-
                     <div id="categories-cards-grid" class="categories-cards-grid">
                         <!-- Dynamic Premium Categories Rendered by JS -->
                     </div>
