@@ -362,6 +362,34 @@ body {
     transform: translateX(4px);
 }
 
+/* Overview 2-Column Hero Layout */
+.overview-hero-grid {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 24px;
+    margin-bottom: 28px;
+    align-items: stretch;
+}
+
+.overview-hero-grid .revenue-chart-card {
+    margin-bottom: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.hero-stats-column {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    justify-content: space-between;
+}
+
+.hero-stats-column .stat-card {
+    flex: 1;
+    margin-bottom: 0;
+}
+
 /* Revenue Featured Chart Card */
 .revenue-chart-card {
     background: #ffffff;
