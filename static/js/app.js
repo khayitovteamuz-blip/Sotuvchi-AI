@@ -106,6 +106,30 @@ function getCategoryColorTheme(catName, index) {
     return themes[index % themes.length];
 }
 
+function getCategoryRealImage(cat) {
+    if (cat && cat.image_url && cat.image_url.trim().length > 0) {
+        return cat.image_url;
+    }
+    
+    const nameLower = ((cat && cat.name) || '').toLowerCase();
+    if (nameLower.includes('smart') || nameLower.includes('telefon')) {
+        return 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=300&auto=format&fit=crop&q=80';
+    }
+    if (nameLower.includes('noutbuk') || nameLower.includes('kompyuter')) {
+        return 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=300&auto=format&fit=crop&q=80';
+    }
+    if (nameLower.includes('akses') || nameLower.includes('quloq')) {
+        return 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=300&auto=format&fit=crop&q=80';
+    }
+    if (nameLower.includes('soat') || nameLower.includes('watch')) {
+        return 'https://images.unsplash.com/photo-1508685096489-7aacd43bd3b1?w=300&auto=format&fit=crop&q=80';
+    }
+    if (nameLower.includes('televizor') || nameLower.includes('texnika')) {
+        return 'https://images.unsplash.com/photo-1593359677879-a4bb92f829d1?w=300&auto=format&fit=crop&q=80';
+    }
+    return 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=300&auto=format&fit=crop&q=80';
+}
+
 function renderCategoriesGrid() {
     const grid = document.getElementById('categories-cards-grid');
     if (!grid) return;
@@ -127,11 +151,8 @@ function renderCategoriesGrid() {
         };
 
         const theme = getCategoryColorTheme(cat.name, idx);
-        
-        // Real image avatar or fallback SVG icon
-        const avatarHtml = cat.image_url ? 
-            `<img src="${cat.image_url}" alt="${cat.name}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 10px;">` :
-            getCategorySvgIcon(cat.icon, cat.name);
+        const realImgUrl = getCategoryRealImage(cat);
+        const avatarHtml = `<img src="${realImgUrl}" alt="${cat.name}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 10px;">`;
 
         card.innerHTML = `
             <div class="category-card-header">
