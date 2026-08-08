@@ -90,11 +90,11 @@ function getCategorySvgIcon(iconEmoji, catName) {
 
 function getCategoryColorTheme(catName, index) {
     const themes = [
-        { bg: 'rgba(6, 182, 212, 0.12)', border: 'rgba(6, 182, 212, 0.3)', color: '#06b6d4' }, // Cyan / Blue
-        { bg: 'rgba(245, 158, 11, 0.12)', border: 'rgba(245, 158, 11, 0.3)', color: '#f59e0b' }, // Amber / Yellow
-        { bg: 'rgba(168, 85, 247, 0.12)', border: 'rgba(168, 85, 247, 0.3)', color: '#a855f7' }, // Purple
-        { bg: 'rgba(0, 245, 160, 0.12)', border: 'rgba(0, 245, 160, 0.3)', color: '#00F5A0' }, // Emerald Green
-        { bg: 'rgba(244, 63, 94, 0.12)', border: 'rgba(244, 63, 94, 0.3)', color: '#f43f5e' }   // Rose / Red
+        { bg: 'rgba(2, 132, 199, 0.1)', border: 'rgba(2, 132, 199, 0.25)', color: '#0284c7' },  // Blue
+        { bg: 'rgba(217, 119, 6, 0.1)', border: 'rgba(217, 119, 6, 0.25)', color: '#d97706' },   // Amber
+        { bg: 'rgba(126, 34, 206, 0.1)', border: 'rgba(126, 34, 206, 0.25)', color: '#7e22ce' }, // Purple
+        { bg: 'rgba(5, 150, 105, 0.1)', border: 'rgba(5, 150, 105, 0.25)', color: '#059669' },   // Emerald Green
+        { bg: 'rgba(225, 29, 72, 0.1)', border: 'rgba(225, 29, 72, 0.25)', color: '#e11d48' }    // Rose / Red
     ];
     
     const nameLower = (catName || '').toLowerCase();
@@ -291,10 +291,9 @@ function renderRevenueChart(labels, values) {
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
-
     const gradient = ctx.createLinearGradient(0, 0, 0, 200);
-    gradient.addColorStop(0, 'rgba(0, 245, 160, 0.35)');
-    gradient.addColorStop(1, 'rgba(0, 245, 160, 0.0)');
+    gradient.addColorStop(0, 'rgba(0, 184, 124, 0.35)');
+    gradient.addColorStop(1, 'rgba(0, 184, 124, 0.01)');
 
     if (revenueChartInstance) {
         revenueChartInstance.destroy();
@@ -305,21 +304,18 @@ function renderRevenueChart(labels, values) {
         data: {
             labels: labels,
             datasets: [{
-                label: 'Kunlik Tushum (UZS)',
+                label: "Kunlik Tushum (UZS)",
                 data: values,
-                borderColor: '#00F5A0',
-                borderWidth: 3.5,
-                backgroundColor: gradient,
-                fill: true,
-                tension: 0.42,
-                pointBackgroundColor: '#00F5A0',
-                pointBorderColor: '#070A11',
+                borderColor: '#00b87c',
+                borderWidth: 3,
+                pointBackgroundColor: '#00b87c',
+                pointBorderColor: '#ffffff',
                 pointBorderWidth: 2,
                 pointRadius: 5,
-                pointHoverRadius: 9,
-                pointHoverBackgroundColor: '#FFFFFF',
-                pointHoverBorderColor: '#00F5A0',
-                pointHoverBorderWidth: 3
+                pointHoverRadius: 7,
+                fill: true,
+                backgroundColor: gradient,
+                tension: 0.35
             }]
         },
         options: {
@@ -328,35 +324,32 @@ function renderRevenueChart(labels, values) {
             plugins: {
                 legend: { display: false },
                 tooltip: {
-                    backgroundColor: 'rgba(11, 16, 26, 0.95)',
-                    titleColor: '#94a3b8',
-                    bodyColor: '#00F5A0',
-                    bodyFont: { weight: 'bold', size: 14 },
-                    borderColor: 'rgba(0, 245, 160, 0.3)',
-                    borderWidth: 1,
+                    backgroundColor: '#0f172a',
+                    titleColor: '#ffffff',
+                    bodyColor: '#00b87c',
                     padding: 12,
                     displayColors: false,
                     callbacks: {
                         label: function(context) {
-                            return 'Kunlik Tushum: ' + context.parsed.y.toLocaleString() + ' UZS';
+                            return `${context.parsed.y.toLocaleString()} UZS`;
                         }
                     }
                 }
             },
             scales: {
                 x: {
-                    grid: { color: 'rgba(255, 255, 255, 0.03)', drawBorder: false },
-                    ticks: { color: '#64748b', font: { size: 12, weight: '600' } }
+                    grid: { display: false },
+                    ticks: { color: '#64748b', font: { family: 'Plus Jakarta Sans', size: 12, weight: '600' } }
                 },
                 y: {
-                    grid: { color: 'rgba(255, 255, 255, 0.03)', drawBorder: false },
+                    grid: { color: '#e2e8f0' },
                     ticks: {
                         color: '#64748b',
-                        font: { size: 11 },
-                        callback: function(value) {
-                            if (value >= 1000000) return (value / 1000000) + ' mln';
-                            if (value >= 1000) return (value / 1000) + ' ming';
-                            return value;
+                        font: { family: 'Plus Jakarta Sans', size: 11 },
+                        callback: function(val) {
+                            if (val >= 1000000) return (val / 1000000) + ' mln';
+                            if (val >= 1000) return (val / 1000) + ' ming';
+                            return val;
                         }
                     }
                 }
