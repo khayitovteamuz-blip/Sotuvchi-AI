@@ -68,6 +68,26 @@ async function loadCategories() {
     }
 }
 
+function getCategorySvgIcon(iconEmoji, catName) {
+    const nameLower = (catName || '').toLowerCase();
+    if (nameLower.includes('smart') || nameLower.includes('telefon')) {
+        return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>`;
+    }
+    if (nameLower.includes('noutbuk') || nameLower.includes('kompyuter')) {
+        return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="2" y1="20" x2="22" y2="20"></line></svg>`;
+    }
+    if (nameLower.includes('akses') || nameLower.includes('quloq')) {
+        return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"></path><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path></svg>`;
+    }
+    if (nameLower.includes('soat') || nameLower.includes('watch')) {
+        return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"></circle><polyline points="12 9 12 12 13.5 13.5"></polyline><path d="M16.51 17.35l-.85 3.83a2 2 0 0 1-1.96 1.57h-3.4a2 2 0 0 1-1.96-1.57l-.85-3.83M16.51 6.65l-.85-3.83A2 2 0 0 0 12.8 1.25h-3.4a2 2 0 0 0-1.96 1.57l-.85 3.83"></path></svg>`;
+    }
+    if (nameLower.includes('televizor') || nameLower.includes('texnika')) {
+        return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect><polyline points="17 2 12 7 7 2"></polyline></svg>`;
+    }
+    return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
+}
+
 function renderCategoriesGrid() {
     const grid = document.getElementById('categories-cards-grid');
     if (!grid) return;
@@ -88,20 +108,24 @@ function renderCategoriesGrid() {
             openCategoryProducts(cat.name);
         };
 
+        const svgIcon = getCategorySvgIcon(cat.icon, cat.name);
+
         card.innerHTML = `
             <div class="category-card-header">
-                <div class="category-icon-wrapper">${cat.icon || '📁'}</div>
-                <button class="btn-delete-cat-icon" onclick="deleteCategory('${cat.id}', '${cat.name}', event)" title="Kategoriyani o'chirish">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                </button>
+                <div class="category-icon-wrapper">${svgIcon}</div>
+                <div class="category-card-header-right">
+                    <span class="category-count-pill">${pCount} ta mahsulot</span>
+                    <button class="btn-delete-cat-icon" onclick="deleteCategory('${cat.id}', '${cat.name}', event)" title="O'chirish">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
             
             <div class="category-card-body">
                 <h4 class="category-card-title">${cat.name}</h4>
-                <span class="category-count-pill">${pCount} ta mahsulot</span>
             </div>
 
             <div class="category-card-footer">
