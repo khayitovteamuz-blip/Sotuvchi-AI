@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sotuvchi AI - Boshqaruv Paneli</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
+    <!-- Chart.js for clean graph visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <img src="/static/images/logo.svg" alt="Sotuvchi AI Logo" class="brand-icon-img">
+                <div class="brand-text">
+                    <h1>Sotuvchi AI</h1>
+                    <span>Tizim v1.0</span>
+                </div>
+            </div>
+
+            <nav class="nav-menu">
+                <div class="nav-item active" data-tab="tab-overview">
+                    <span>📊</span> Boshqaruv Paneli
+                </div>
+                <div class="nav-item" data-tab="tab-products">
+                    <span>🛍</span> Mahsulotlar Katalogi
+                </div>
+                <div class="nav-item" data-tab="tab-orders">
+                    <span>📦</span> Buyurtmalar
+                </div>
+                <div class="nav-item" data-tab="tab-settings">
+                    <span>⚙️</span> AI Sozlamalari
+                </div>
+            </nav>
+
+            <div class="sidebar-status">
+                <div class="status-badge">
+                    <span class="pulse-dot"></span> Tizim Faol
+                </div>
+                <p style="font-size: 11px; color: var(--text-dim); margin-top: 6px;" id="ai-provider-badge">
+                    Model: Gemini AI
+                </p>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="top-header">
+                <div class="header-title">
+                    <h2 id="page-title">Boshqaruv Paneli</h2>
+                    <p id="page-subtitle">Haftalik sotuv ko'rsatkichlari va tushum dinamikasi</p>
+                </div>
+                
+                <div id="header-action-group" style="display: none; gap: 12px;">
+                    <button class="btn-primary" onclick="openAddCategoryModal()">
+                        <span>+</span> Yangi Kategoriya
+                    </button>
+                </div>
+            </header>
+
+            <!-- TAB 1: OVERVIEW -->
+            <section id="tab-overview" class="tab-view active">
+                
+                <!-- Main Revenue Chart Card -->
+                <div class="revenue-chart-card">
+                    <div class="chart-card-header">
+                        <div>
+                            <div class="chart-title-row">
+                                <span class="chart-title">Kunlik Tushum</span>
+                                <span class="period-badge">Avgust, 2026</span>
+                            </div>
+                            <div class="chart-value-row">
+                                <h2 id="stat-revenue" class="chart-total-value">0 UZS</h2>
+                                <span class="growth-tag">▲ +18.5%</span>
+                            </div>
+                        </div>
+                        <div class="revenue-icon-box">
+                            💰
+                        </div>
+                    </div>
+                    
+                    <!-- Graph Canvas Area -->
+                    <div class="chart-canvas-wrapper">
+                        <canvas id="revenueChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Secondary Metric Cards Grid -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: rgba(6, 182, 212, 0.12); color: #06b6d4;">📦</div>
+                        <div class="stat-info">
+                            <span>Buyurtmalar</span>
+                            <h3 id="stat-orders">0</h3>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: rgba(245, 158, 11, 0.12); color: #f59e0b;">👥</div>
+                        <div class="stat-info">
+                            <span>Mijozlar Suhbatlari</span>
+                            <h3 id="stat-leads">0</h3>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: rgba(168, 85, 247, 0.12); color: #a855f7;">📈</div>
+                        <div class="stat-info">
+                            <span>Sotuv Konversiyasi</span>
+                            <h3 id="stat-conversion">0%</h3>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Orders Table -->
+                <div class="table-container">
+                    <div style="padding: 20px 24px; border-bottom: 1px solid var(--card-border); font-weight: 700; font-size: 15px;">
+                        🔥 Oxirgi Buyurtmalar
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Buyurtma ID</th>
+                                <th>Mijoz</th>
+                                <th>Telefon</th>
+                                <th>Summa</th>
+                                <th>Holati</th>
+                                <th>Sana</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recent-orders-tbody">
+                            <!-- Dynamic Content -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- TAB 2: PRODUCTS KATALOGI (Kategoriyalar va Mahsulotlar) -->
+            <section id="tab-products" class="tab-view">
+                
+                <!-- Level 1: Categories Cards Grid View -->
+                <div id="categories-view">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3 style="font-size: 18px; font-weight: 700;">📂 Mahsulot Kategoriyalari</h3>
+                        <span style="font-size: 12px; color: var(--text-muted);" id="categories-count-text">Barcha kategoriyalar ro'yxati</span>
+                    </div>
+
+                    <div id="categories-cards-grid" class="categories-cards-grid">
+                        <!-- Dynamic Categories Rendered by JS -->
+                    </div>
+                </div>
+
+                <!-- Level 2: Category Products Table View (Shown when category clicked) -->
+                <div id="category-products-view" style="display: none;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; border-bottom: 1px solid var(--card-border); padding-bottom: 16px;">
+                        <div style="display: flex; align-items: center; gap: 14px;">
+                            <button onclick="showCategoriesView()" style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--card-border); color: #fff; padding: 8px 16px; border-radius: var(--radius-md); cursor: pointer; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;">
+                                ⬅️ Kategoriyalar
+                            </button>
+                            <h3 id="current-category-title" style="font-size: 20px; font-weight: 800; color: #ffffff;">Smartfonlar</h3>
+                        </div>
+                        
+                        <!-- Prominent Add Product Button inside Category View -->
+                        <button onclick="openAddProductModalForCurrentCategory()" class="btn-primary" id="btn-add-product-in-category">
+                            <span>+</span> Mahsulot Qo'shish
+                        </button>
+                    </div>
+
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Rasm</th>
+                                    <th>ID</th>
+                                    <th>Mahsulot Nomi</th>
+                                    <th>Narxi</th>
+                                    <th>Ombor Qoldig'i</th>
+                                    <th>Amallar</th>
+                                </tr>
+                            </thead>
+                            <tbody id="products-tbody">
+                                <!-- Dynamic Content -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 3: ORDERS -->
+            <section id="tab-orders" class="tab-view">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Buyurtma ID</th>
+                                <th>Mijoz</th>
+                                <th>Telefon</th>
+                                <th>Mahsulotlar</th>
+                                <th>Summa</th>
+                                <th>Holati</th>
+                                <th>Amallar</th>
+                            </tr>
+                        </thead>
+                        <tbody id="orders-tbody">
+                            <!-- Dynamic Content -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- TAB 4: SETTINGS -->
+            <section id="tab-settings" class="tab-view">
+                <div style="background: var(--card-bg); backdrop-filter: var(--glass-blur); border: 1px solid var(--card-border); border-radius: var(--radius-lg); padding: 32px; max-width: 760px;">
+                    <h3 style="margin-bottom: 24px; font-size: 18px;">⚙️ AI Sotuvchi Sozlamalari</h3>
+                    
+                    <div class="form-group">
+                        <label>AI Model Tizimi</label>
+                        <select id="setting-provider" class="form-control">
+                            <option value="gemini">Google Gemini AI (gemini-2.5-flash)</option>
+                            <option value="anthropic">Anthropic Claude (claude-3-5-sonnet)</option>
+                            <option value="demo">Demo Uzbek Sales Engine (API Kalitsiz)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>AI Sotuvchi Yo'riqnomasi (System Prompt)</label>
+                        <textarea id="setting-prompt" class="form-control" placeholder="AI sotuvchining xarakteri va ko'rsatmalari..."></textarea>
+                    </div>
+
+                    <button class="btn-primary" onclick="saveSettings()">
+                        Sozlamalarni Saqlash
+                    </button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Add Category Modal -->
+    <div class="modal-overlay" id="category-modal">
+        <div class="modal-card" style="max-width: 440px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--card-border); padding-bottom: 12px;">
+                <h3 style="font-size: 18px; font-weight: 800;">Yangi Kategoriya Qo'shish</h3>
+                <button onclick="closeCategoryModal()" style="background: transparent; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer;">✕</button>
+            </div>
+
+            <div class="form-group">
+                <label>Ikonka (Emoji)</label>
+                <select id="cat-icon" class="form-control">
+                    <option value="📱">📱 Smartfonlar / Telefonlar</option>
+                    <option value="💻">💻 Noutbuklar / Kompyuterlar</option>
+                    <option value="🎧">🎧 Aksessuarlar / Quloqchinlar</option>
+                    <option value="⌚️">⌚️ Aqlli soatlar / Gadjetlar</option>
+                    <option value="📺">📺 Televizorlar / Texnika</option>
+                    <option value="👕">👕 Kiyim-kechak / Moda</option>
+                    <option value="👟">👟 Poyabzallar / Sport</option>
+                    <option value="📁">📁 Boshqa Kategoriya</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Kategoriya Nomi</label>
+                <input type="text" id="cat-name" class="form-control" placeholder="Masalan: Maishiy Texnika">
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
+                <button onclick="closeCategoryModal()" style="background: transparent; border: 1px solid var(--card-border); color: #fff; padding: 10px 20px; border-radius: var(--radius-md); cursor: pointer;">Bekor qilish</button>
+                <button onclick="saveCategoryForm()" class="btn-primary">Saqlash</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Product Add/Edit Modal (Multi-Image Gallery & Vector Trash Icon) -->
+    <div class="modal-overlay" id="product-modal">
+        <div class="modal-card wide-modal">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--card-border); padding-bottom: 16px;">
+                <h3 id="modal-title" style="font-size: 20px; font-weight: 800;">Mahsulotni Tahrirlash</h3>
+                <button onclick="closeProductModal()" style="background: transparent; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer;">✕</button>
+            </div>
+            
+            <input type="hidden" id="prod-edit-mode" value="add">
+
+            <div class="modal-body-grid">
+                <!-- Left Column: Multi-Image Gallery (3-5 Images) with Clean Hover Vector SVG Trash -->
+                <div class="image-upload-section">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <label style="font-size: 13px; font-weight: 600; color: var(--text-muted);">Mahsulot Rasmlari (3-5 ta)</label>
+                        <span id="image-count-badge" style="font-size: 11px; color: var(--primary); font-weight: 700;">0 / 5</span>
+                    </div>
+                    
+                    <!-- Active Main Image Preview Box -->
+                    <div class="upload-dropzone" id="main-preview-box">
+                        <div id="image-preview-container" style="display: none;">
+                            <img id="modal-image-preview" src="" alt="Preview">
+                            <!-- Clean Vector SVG Trash Icon (Appears ONLY on Hover) -->
+                            <button type="button" class="btn-remove-image" title="Ushbu rasmni o'chirish" onclick="removeActiveImage(event)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        
+                        <div class="upload-hint" id="upload-hint-text" onclick="triggerFileInput()">
+                            <span style="font-size: 28px;">📷</span>
+                            <p style="font-size: 13px; font-weight: 600; margin-top: 6px;">Rasm yuklash uchun bosing</p>
+                            <span style="font-size: 11px; color: var(--text-muted);">PNG, JPG (max 5MB)</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Thumbnails Row for 3-5 Images -->
+                    <div id="gallery-thumbnails-grid" class="gallery-thumbnails-grid" style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+                        <!-- Dynamic Thumbnails Rendered by JS -->
+                    </div>
+
+                    <input type="file" id="prod-file-input" accept="image/*" style="display: none;" onchange="handleFileSelect(event)">
+                    
+                    <!-- "+ Rasm Qo'shish" Trigger Button -->
+                    <div style="margin-top: 12px;">
+                        <button type="button" class="btn-add-image-trigger" onclick="triggerFileInput()" id="btn-add-img">
+                            <span>+</span> Rasm Qo'shish (3-5 ta)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right Column: Product Fields -->
+                <div class="fields-section">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                        <div class="form-group">
+                            <label>Mahsulot ID</label>
+                            <input type="text" id="prod-id" class="form-control" placeholder="PROD-105">
+                        </div>
+                        <div class="form-group">
+                            <label>Kategoriya</label>
+                            <select id="prod-category" class="form-control">
+                                <!-- Dynamic Options Populated from Categories -->
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Mahsulot Nomi</label>
+                        <input type="text" id="prod-name" class="form-control" placeholder="iPhone 15 Pro Max 256GB">
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                        <div class="form-group">
+                            <label>Narxi (UZS)</label>
+                            <input type="number" id="prod-price" class="form-control" placeholder="15200000">
+                        </div>
+                        <div class="form-group">
+                            <label>Ombor Qoldig'i (Soni)</label>
+                            <input type="number" id="prod-stock" class="form-control" placeholder="10" value="10">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Tavsif (Opisaniya)</label>
+                        <textarea id="prod-desc" class="form-control" style="min-height: 100px;" placeholder="Mahsulot xususiyatlari, rangi, kafolat muddatlari..."></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer Actions -->
+            <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; border-top: 1px solid var(--card-border); padding-top: 18px;">
+                <button onclick="closeProductModal()" style="background: transparent; border: 1px solid var(--card-border); color: #fff; padding: 10px 22px; border-radius: var(--radius-md); cursor: pointer; font-weight: 600;">Bekor qilish</button>
+                <button onclick="saveProductForm()" class="btn-primary" id="modal-save-btn">O'zgarishlarni Saqlash</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
