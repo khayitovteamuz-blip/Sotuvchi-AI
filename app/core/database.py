@@ -77,10 +77,10 @@ class Database:
         )
         # Default Initial Categories
         self.categories: List[Category] = [
-            Category(id="cat-1", name="Smartfonlar", icon="📱", product_count=1),
-            Category(id="cat-2", name="Noutbuklar", icon="💻", product_count=1),
-            Category(id="cat-3", name="Aksessuarlar", icon="🎧", product_count=1),
-            Category(id="cat-4", name="Aqlli soatlar", icon="⌚️", product_count=1),
+            Category(id="cat-1", name="Smartfonlar", icon="📱", image_url="https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=300&auto=format&fit=crop&q=80", product_count=1),
+            Category(id="cat-2", name="Noutbuklar", icon="💻", image_url="https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=300&auto=format&fit=crop&q=80", product_count=1),
+            Category(id="cat-3", name="Aksessuarlar", icon="🎧", image_url="https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=300&auto=format&fit=crop&q=80", product_count=1),
+            Category(id="cat-4", name="Aqlli soatlar", icon="⌚️", image_url="https://images.unsplash.com/photo-1508685096489-7aacd43bd3b1?w=300&auto=format&fit=crop&q=80", product_count=1),
         ]
         
         self.load_all()
@@ -94,6 +94,20 @@ class Database:
     def add_category(self, category: Category) -> Category:
         self.categories.append(category)
         return category
+
+    def update_category(self, category_id: str, category: Category) -> Optional[Category]:
+        for i, c in enumerate(self.categories):
+            if c.id == category_id:
+                old_name = c.name
+                self.categories[i] = category
+                # If category name changed, update products in that category
+                if old_name.lower() != category.name.lower():
+                    for p in self.products.values():
+                        if p.category.lower() == old_name.lower():
+                            p.category = category.name
+                    self.save_products()
+                return category
+        return None
 
     def delete_category(self, category_id: str) -> bool:
         initial_len = len(self.categories)

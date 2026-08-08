@@ -7,6 +7,7 @@ class Category(BaseModel):
     id: str
     name: str
     icon: str = "📁"
+    image_url: Optional[str] = None
     product_count: int = 0
 
 

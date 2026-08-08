@@ -43,6 +43,14 @@ async def create_category(category: Category):
     return db.add_category(category)
 
 
+@router.put("/categories/{category_id}", response_model=Category)
+async def update_category(category_id: str, category: Category):
+    updated = db.update_category(category_id, category)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Kategoriya topilmadi.")
+    return updated
+
+
 @router.delete("/categories/{category_id}")
 async def delete_category(category_id: str):
     success = db.delete_category(category_id)

@@ -277,6 +277,33 @@ body {
     border: 1px solid transparent;
 }
 
+.btn-edit-cat-icon {
+    width: 26px;
+    height: 26px;
+    background: rgba(2, 132, 199, 0.1);
+    border: 1px solid rgba(2, 132, 199, 0.25);
+    color: var(--accent-cyan);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    visibility: hidden;
+    transition: var(--transition);
+}
+
+.category-card:hover .btn-edit-cat-icon {
+    opacity: 1;
+    visibility: visible;
+}
+
+.btn-edit-cat-icon:hover {
+    background: var(--accent-cyan);
+    color: #ffffff;
+    transform: scale(1.1);
+}
+
 .btn-delete-cat-icon {
     width: 26px;
     height: 26px;

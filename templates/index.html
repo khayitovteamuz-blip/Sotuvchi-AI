@@ -233,26 +233,31 @@
         </main>
     </div>
 
-    <!-- Add Category Modal -->
+    <!-- Add/Edit Category Modal with Real Image Upload -->
     <div class="modal-overlay" id="category-modal">
-        <div class="modal-card" style="max-width: 440px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--card-border); padding-bottom: 12px;">
-                <h3 style="font-size: 18px; font-weight: 800;">Yangi Kategoriya Qo'shish</h3>
+        <div class="modal-card" style="max-width: 460px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--card-border); padding-bottom: 14px;">
+                <h3 id="cat-modal-title" style="font-size: 18px; font-weight: 800;">Yangi Kategoriya Qo'shish</h3>
                 <button onclick="closeCategoryModal()" style="background: transparent; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer;">✕</button>
             </div>
 
+            <input type="hidden" id="cat-edit-mode" value="add">
+            <input type="hidden" id="cat-id-val" value="">
+            <input type="hidden" id="cat-image-url-val" value="">
+
             <div class="form-group">
-                <label>Ikonka (Emoji)</label>
-                <select id="cat-icon" class="form-control">
-                    <option value="📱">📱 Smartfonlar / Telefonlar</option>
-                    <option value="💻">💻 Noutbuklar / Kompyuterlar</option>
-                    <option value="🎧">🎧 Aksessuarlar / Quloqchinlar</option>
-                    <option value="⌚️">⌚️ Aqlli soatlar / Gadjetlar</option>
-                    <option value="📺">📺 Televizorlar / Texnika</option>
-                    <option value="👕">👕 Kiyim-kechak / Moda</option>
-                    <option value="👟">👟 Poyabzallar / Sport</option>
-                    <option value="📁">📁 Boshqa Kategoriya</option>
-                </select>
+                <label>Kategoriya Rasmi</label>
+                <div class="upload-dropzone" id="cat-upload-dropzone" onclick="triggerCatFileInput()" style="height: 140px;">
+                    <div id="cat-image-preview-container" style="display: none; width: 100%; height: 100%; position: relative;">
+                        <img id="cat-image-preview" src="" alt="Category Preview" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;">
+                    </div>
+                    <div class="upload-hint" id="cat-upload-hint-text">
+                        <span style="font-size: 24px;">🖼️</span>
+                        <p style="font-size: 13px; font-weight: 600; margin-top: 4px;">Kategoriya rasmini yuklash</p>
+                        <span style="font-size: 11px; color: var(--text-muted);">PNG, JPG (max 5MB)</span>
+                    </div>
+                </div>
+                <input type="file" id="cat-file-input" accept="image/*" style="display: none;" onchange="handleCatFileSelect(event)">
             </div>
 
             <div class="form-group">
@@ -261,8 +266,8 @@
             </div>
 
             <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
-                <button onclick="closeCategoryModal()" style="background: transparent; border: 1px solid var(--card-border); color: #fff; padding: 10px 20px; border-radius: var(--radius-md); cursor: pointer;">Bekor qilish</button>
-                <button onclick="saveCategoryForm()" class="btn-primary">Saqlash</button>
+                <button onclick="closeCategoryModal()" style="background: transparent; border: 1px solid var(--card-border); color: var(--text-main); padding: 10px 20px; border-radius: var(--radius-md); cursor: pointer; font-weight: 600;">Bekor qilish</button>
+                <button onclick="saveCategoryForm()" class="btn-primary" id="cat-save-btn">Saqlash</button>
             </div>
         </div>
     </div>

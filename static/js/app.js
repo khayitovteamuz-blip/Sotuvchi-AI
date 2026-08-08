@@ -122,22 +122,32 @@ function renderCategoriesGrid() {
         card.className = 'category-card';
         
         card.onclick = (e) => {
-            if (e.target.closest('.btn-delete-cat-icon')) return;
+            if (e.target.closest('.btn-delete-cat-icon') || e.target.closest('.btn-edit-cat-icon')) return;
             openCategoryProducts(cat.name);
         };
 
-        const svgIcon = getCategorySvgIcon(cat.icon, cat.name);
         const theme = getCategoryColorTheme(cat.name, idx);
+        
+        // Real image avatar or fallback SVG icon
+        const avatarHtml = cat.image_url ? 
+            `<img src="${cat.image_url}" alt="${cat.name}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 10px;">` :
+            getCategorySvgIcon(cat.icon, cat.name);
 
         card.innerHTML = `
             <div class="category-card-header">
-                <div class="category-icon-wrapper" style="background: ${theme.bg}; border: 1px solid ${theme.border}; color: ${theme.color};">
-                    ${svgIcon}
+                <div class="category-icon-wrapper" style="background: ${theme.bg}; border: 1px solid ${theme.border}; color: ${theme.color}; overflow: hidden; padding: 0;">
+                    ${avatarHtml}
                 </div>
                 <div class="category-card-header-right">
                     <span class="category-count-pill" style="background: ${theme.bg}; border: 1px solid ${theme.border}; color: ${theme.color};">
                         ${pCount} ta mahsulot
                     </span>
+                    <button class="btn-edit-cat-icon" onclick="openEditCategoryModal('${cat.id}', event)" title="Tahrirlash">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 20h9"></path>
+                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                        </svg>
+                    </button>
                     <button class="btn-delete-cat-icon" onclick="deleteCategory('${cat.id}', '${cat.name}', event)" title="O'chirish">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                             <polyline points="3 6 5 6 21 6"></polyline>
@@ -158,6 +168,119 @@ function renderCategoriesGrid() {
         `;
         grid.appendChild(card);
     });
+}
+
+// Category Modal & Real Image Upload Handlers
+function openAddCategoryModal() {
+    document.getElementById('cat-edit-mode').value = 'add';
+    document.getElementById('cat-id-val').value = '';
+    document.getElementById('cat-image-url-val').value = '';
+    document.getElementById('cat-name').value = '';
+    document.getElementById('cat-modal-title').textContent = "Yangi Kategoriya Qo'shish";
+    document.getElementById('cat-save-btn').textContent = "Saqlash";
+    
+    // Reset image preview
+    document.getElementById('cat-image-preview-container').style.display = 'none';
+    document.getElementById('cat-upload-hint-text').style.display = 'block';
+    
+    document.getElementById('category-modal').style.display = 'flex';
+}
+
+function openEditCategoryModal(catId, event) {
+    if (event) event.stopPropagation();
+    const cat = currentCategories.find(c => c.id === catId);
+    if (!cat) return;
+
+    document.getElementById('cat-edit-mode').value = 'edit';
+    document.getElementById('cat-id-val').value = cat.id;
+    document.getElementById('cat-image-url-val').value = cat.image_url || '';
+    document.getElementById('cat-name').value = cat.name;
+    document.getElementById('cat-modal-title').textContent = "Kategoriyani Tahrirlash";
+    document.getElementById('cat-save-btn').textContent = "O'zgarishlarni Saqlash";
+
+    if (cat.image_url) {
+        document.getElementById('cat-image-preview').src = cat.image_url;
+        document.getElementById('cat-image-preview-container').style.display = 'block';
+        document.getElementById('cat-upload-hint-text').style.display = 'none';
+    } else {
+        document.getElementById('cat-image-preview-container').style.display = 'none';
+        document.getElementById('cat-upload-hint-text').style.display = 'block';
+    }
+
+    document.getElementById('category-modal').style.display = 'flex';
+}
+
+function closeCategoryModal() {
+    document.getElementById('category-modal').style.display = 'none';
+}
+
+function triggerCatFileInput() {
+    document.getElementById('cat-file-input').click();
+}
+
+async function handleCatFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const res = await fetch('/api/admin/upload', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+        if (data.status === 'success' && data.image_url) {
+            document.getElementById('cat-image-url-val').value = data.image_url;
+            document.getElementById('cat-image-preview').src = data.image_url;
+            document.getElementById('cat-image-preview-container').style.display = 'block';
+            document.getElementById('cat-upload-hint-text').style.display = 'none';
+        }
+    } catch (e) {
+        console.error('Kategoriya rasmini yuklashda xatolik:', e);
+        alert('Rasm yuklashda xatolik yuz berdi!');
+    }
+}
+
+async function saveCategoryForm() {
+    const mode = document.getElementById('cat-edit-mode').value;
+    const catId = document.getElementById('cat-id-val').value || `cat-${Date.now()}`;
+    const name = document.getElementById('cat-name').value.trim();
+    const imageUrl = document.getElementById('cat-image-url-val').value.trim();
+
+    if (!name) {
+        alert('Iltimos, kategoriya nomini kiriting!');
+        return;
+    }
+
+    const payload = {
+        id: catId,
+        name: name,
+        icon: '📁',
+        image_url: imageUrl || null
+    };
+
+    try {
+        if (mode === 'edit') {
+            await fetch(`/api/admin/categories/${catId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        } else {
+            await fetch('/api/admin/categories', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        }
+        closeCategoryModal();
+        loadCategories();
+    } catch (e) {
+        console.error('Kategoriyani saqlashda xatolik:', e);
+        alert('Kategoriyani saqlashda xatolik yuz berdi!');
+    }
 }
 
 function populateCategoryDropdown() {
