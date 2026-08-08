@@ -1,8 +1,8 @@
 [
   {
     "id": "ORD-79871",
-    "customer_name": "Sardor",
-    "customer_phone": "+998901234567",
+    "customer_name": "Sardorbek Rahimov",
+    "customer_phone": "+998 90 123 45 67",
     "telegram_id": null,
     "items": [
       {
@@ -14,8 +14,65 @@
     ],
     "total_amount": 15200000.0,
     "status": "Yangi",
-    "created_at": "2026-08-08 13:21:41",
-    "delivery_address": "Toshkent shahri (muloqotda ko'rsatilgan)",
-    "notes": "AI Sotuvchi orqali avtomatik shakllantirilgan buyurtma"
+    "created_at": "2026-08-08 14:15:20",
+    "delivery_address": "Toshkent shahri, Yunusobod tumani",
+    "notes": "AI Sotuvchi orqali shakllantirildi"
+  },
+  {
+    "id": "ORD-79870",
+    "customer_name": "Alisher Qodirov",
+    "customer_phone": "+998 97 765 43 21",
+    "telegram_id": null,
+    "items": [
+      {
+        "product_id": "PROD-102",
+        "product_name": "MacBook Air M3 15-inch 16/512GB",
+        "quantity": 1,
+        "unit_price": 18900000.0
+      }
+    ],
+    "total_amount": 18900000.0,
+    "status": "Tasdiqlandi",
+    "created_at": "2026-08-08 13:40:12",
+    "delivery_address": "Toshkent shahri, Chilonzor tumani",
+    "notes": "To'lov naqd shaklda"
+  },
+  {
+    "id": "ORD-79869",
+    "customer_name": "Malika Umarova",
+    "customer_phone": "+998 93 456 78 90",
+    "telegram_id": null,
+    "items": [
+      {
+        "product_id": "PROD-103",
+        "product_name": "AirPods Pro 2-avlod USB-C",
+        "quantity": 2,
+        "unit_price": 3100000.0
+      }
+    ],
+    "total_amount": 6200000.0,
+    "status": "Yo'lda",
+    "created_at": "2026-08-08 11:20:00",
+    "delivery_address": "Samarqand shahri, Registon ko'chasi",
+    "notes": "Kuryer yo'lga chiqqan"
+  },
+  {
+    "id": "ORD-79868",
+    "customer_name": "Jasur Abdullayev",
+    "customer_phone": "+998 99 888 11 22",
+    "telegram_id": null,
+    "items": [
+      {
+        "product_id": "PROD-104",
+        "product_name": "Apple Watch Series 9 GPS 45mm",
+        "quantity": 1,
+        "unit_price": 5400000.0
+      }
+    ],
+    "total_amount": 5400000.0,
+    "status": "Yetkazildi",
+    "created_at": "2026-08-07 18:30:00",
+    "delivery_address": "Buxoro shahri, Mustaqillik ko'chasi",
+    "notes": "Mijoz buyurtmani qabul qildi"
   }
 ]

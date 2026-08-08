@@ -63,6 +63,8 @@ async def health_check():
 
 
 if __name__ == "__main__":
+    import os
+    os.system("lsof -ti:8080 | xargs kill -9 2>/dev/null || true")
     uvicorn.run(
         app,
         host="127.0.0.1",
