@@ -4,12 +4,9 @@ from typing import List, Dict, Optional, Any
 from app.models.schema import Product, Order, ChatMessage, SystemSettings, Category
 from app.core.config import settings, BASE_DIR
 
+# Legacy global data dir (used only for backward compat / migration)
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
-
-PRODUCTS_FILE = DATA_DIR / "products.json"
-ORDERS_FILE = DATA_DIR / "orders.json"
-SETTINGS_FILE = DATA_DIR / "settings.json"
 
 
 # Default Initial Demo Products
@@ -64,9 +61,37 @@ DEFAULT_PRODUCTS = [
     )
 ]
 
+DEFAULT_CATEGORIES = [
+    Category(id="cat-1", name="Smartfonlar", icon="📱",
+             image_url="https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=300&auto=format&fit=crop&q=80",
+             product_count=1),
+    Category(id="cat-2", name="Noutbuklar", icon="💻",
+             image_url="https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=300&auto=format&fit=crop&q=80",
+             product_count=1),
+    Category(id="cat-3", name="Aksessuarlar", icon="🎧",
+             image_url="https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=300&auto=format&fit=crop&q=80",
+             product_count=1),
+    Category(id="cat-4", name="Aqlli soatlar", icon="⌚️",
+             image_url="https://images.unsplash.com/photo-1508685096489-7aacd43bd3b1?w=300&auto=format&fit=crop&q=80",
+             product_count=1),
+]
+
 
 class Database:
-    def __init__(self):
+    """
+    Per-tenant database.
+    Pass tenant_data_dir to use a tenant-isolated data directory.
+    Falls back to legacy DATA_DIR if not specified.
+    """
+    def __init__(self, tenant_data_dir: Optional[Path] = None):
+        data_dir = tenant_data_dir or DATA_DIR
+        data_dir.mkdir(parents=True, exist_ok=True)
+
+        self._products_file = data_dir / "products.json"
+        self._orders_file = data_dir / "orders.json"
+        self._settings_file = data_dir / "settings.json"
+        self._categories_file = data_dir / "categories.json"
+
         self.products: Dict[str, Product] = {}
         self.orders: List[Order] = []
         self.chat_history: Dict[str, List[ChatMessage]] = {}
@@ -75,24 +100,21 @@ class Database:
             ai_provider=settings.AI_PROVIDER,
             model_name="gemini-2.5-flash"
         )
-        # Default Initial Categories
-        self.categories: List[Category] = [
-            Category(id="cat-1", name="Smartfonlar", icon="📱", image_url="https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=300&auto=format&fit=crop&q=80", product_count=1),
-            Category(id="cat-2", name="Noutbuklar", icon="💻", image_url="https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=300&auto=format&fit=crop&q=80", product_count=1),
-            Category(id="cat-3", name="Aksessuarlar", icon="🎧", image_url="https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=300&auto=format&fit=crop&q=80", product_count=1),
-            Category(id="cat-4", name="Aqlli soatlar", icon="⌚️", image_url="https://images.unsplash.com/photo-1508685096489-7aacd43bd3b1?w=300&auto=format&fit=crop&q=80", product_count=1),
-        ]
-        
-        self.load_all()
+        self.categories: List[Category] = [c.model_copy() for c in DEFAULT_CATEGORIES]
+        self._load_data()
 
+    # ─── Categories ──────────────────────────────────────────────────────────
     def get_categories(self) -> List[Category]:
-        # Recalculate product counts for each category
         for cat in self.categories:
-            cat.product_count = sum(1 for p in self.products.values() if p.category.lower() == cat.name.lower())
+            cat.product_count = sum(
+                1 for p in self.products.values()
+                if p.category.lower() == cat.name.lower()
+            )
         return self.categories
 
     def add_category(self, category: Category) -> Category:
         self.categories.append(category)
+        self._save_categories()
         return category
 
     def update_category(self, category_id: str, category: Category) -> Optional[Category]:
@@ -100,28 +122,33 @@ class Database:
             if c.id == category_id:
                 old_name = c.name
                 self.categories[i] = category
-                # If category name changed, update products in that category
                 if old_name.lower() != category.name.lower():
                     for p in self.products.values():
                         if p.category.lower() == old_name.lower():
                             p.category = category.name
                     self.save_products()
+                self._save_categories()
                 return category
         return None
 
     def delete_category(self, category_id: str) -> bool:
-        initial_len = len(self.categories)
+        old_len = len(self.categories)
         self.categories = [c for c in self.categories if c.id != category_id]
-        return len(self.categories) < initial_len
+        if len(self.categories) < old_len:
+            self._save_categories()
+            return True
+        return False
 
-    def load_all(self):
-        self._load_data()
+    def _save_categories(self):
+        with open(self._categories_file, "w", encoding="utf-8") as f:
+            json.dump([c.model_dump() for c in self.categories], f, ensure_ascii=False, indent=2)
 
+    # ─── Persistence ─────────────────────────────────────────────────────────
     def _load_data(self):
-        # Load products
-        if PRODUCTS_FILE.exists():
+        # Products
+        if self._products_file.exists():
             try:
-                with open(PRODUCTS_FILE, "r", encoding="utf-8") as f:
+                with open(self._products_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     for item in data:
                         p = Product(**item)
@@ -131,19 +158,28 @@ class Database:
         else:
             self._load_default_products()
 
-        # Load orders
-        if ORDERS_FILE.exists():
+        # Categories
+        if self._categories_file.exists():
             try:
-                with open(ORDERS_FILE, "r", encoding="utf-8") as f:
+                with open(self._categories_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.categories = [Category(**item) for item in data]
+            except Exception:
+                pass  # use DEFAULT_CATEGORIES already set in __init__
+
+        # Orders
+        if self._orders_file.exists():
+            try:
+                with open(self._orders_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     self.orders = [Order(**item) for item in data]
             except Exception:
                 self.orders = []
 
-        # Load settings
-        if SETTINGS_FILE.exists():
+        # Settings
+        if self._settings_file.exists():
             try:
-                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                with open(self._settings_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     self.settings = SystemSettings(**data)
             except Exception:
@@ -154,18 +190,18 @@ class Database:
         self.save_products()
 
     def save_products(self):
-        with open(PRODUCTS_FILE, "w", encoding="utf-8") as f:
+        with open(self._products_file, "w", encoding="utf-8") as f:
             json.dump([p.model_dump() for p in self.products.values()], f, ensure_ascii=False, indent=2)
 
     def save_orders(self):
-        with open(ORDERS_FILE, "w", encoding="utf-8") as f:
+        with open(self._orders_file, "w", encoding="utf-8") as f:
             json.dump([o.model_dump() for o in self.orders], f, ensure_ascii=False, indent=2)
 
     def save_settings(self):
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        with open(self._settings_file, "w", encoding="utf-8") as f:
             json.dump(self.settings.model_dump(), f, ensure_ascii=False, indent=2)
 
-    # Products CRUD
+    # ─── Products CRUD ───────────────────────────────────────────────────────
     def get_products(self) -> List[Product]:
         return list(self.products.values())
 
@@ -191,7 +227,7 @@ class Database:
             return True
         return False
 
-    # Orders CRUD
+    # ─── Orders CRUD ─────────────────────────────────────────────────────────
     def get_orders(self) -> List[Order]:
         return sorted(self.orders, key=lambda x: x.created_at, reverse=True)
 
@@ -208,7 +244,7 @@ class Database:
                 return o
         return None
 
-    # Chat Sessions
+    # ─── Chat Sessions ───────────────────────────────────────────────────────
     def get_session_history(self, session_id: str) -> List[ChatMessage]:
         return self.chat_history.get(session_id, [])
 
@@ -218,4 +254,5 @@ class Database:
         self.chat_history[message.session_id].append(message)
 
 
+# Legacy singleton — kept for chat_api and bot compatibility (not tenant-aware)
 db = Database()

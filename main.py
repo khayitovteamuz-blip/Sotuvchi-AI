@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.api.chat_api import router as chat_router
 from app.api.admin_api import router as admin_router
 from app.api.bot_webhook import router as bot_router
+from app.api.auth_api import router as auth_router
 
 app = FastAPI(
     title="Sotuvchi AI - Enterprise Sales Agent",
@@ -42,6 +43,7 @@ templates_dir.mkdir(exist_ok=True)
 templates = Jinja2Templates(directory=str(templates_dir))
 
 # Include API Routers
+app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(admin_router)
 app.include_router(bot_router)

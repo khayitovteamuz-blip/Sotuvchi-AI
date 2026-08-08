@@ -7,13 +7,166 @@ let selectedCategoryFilter = null;
 let modalImages = []; 
 let activeImageIndex = 0;
 
-document.addEventListener('DOMContentLoaded', () => {
-    initNavigation();
-    loadDashboardStats();
-    loadCategories();
-    loadProducts();
-    loadOrders();
-    loadSettings();
+// ════════════════════════════════════════════════════════
+// AUTH — Login, Register, Logout
+// ════════════════════════════════════════════════════════
+
+function showAuthOverlay() {
+    document.getElementById('auth-overlay').style.display = 'flex';
+    document.getElementById('app-container').style.display = 'none';
+}
+
+function showAppDashboard(tenant) {
+    document.getElementById('auth-overlay').style.display = 'none';
+    document.getElementById('app-container').style.display = 'flex';
+    // Show tenant info in sidebar
+    if (tenant) {
+        document.getElementById('tenant-biz-name').textContent = tenant.business_name || '—';
+        document.getElementById('tenant-email').textContent = tenant.email || '—';
+    }
+}
+
+function showLoginPanel() {
+    document.getElementById('auth-login-panel').style.display = 'block';
+    document.getElementById('auth-register-panel').style.display = 'none';
+    document.getElementById('auth-error').style.display = 'none';
+    return false;
+}
+
+function showRegisterPanel() {
+    document.getElementById('auth-login-panel').style.display = 'none';
+    document.getElementById('auth-register-panel').style.display = 'block';
+    document.getElementById('register-error').style.display = 'none';
+    return false;
+}
+
+async function doLogin() {
+    const email = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    const errEl = document.getElementById('auth-error');
+    const btn = document.getElementById('login-btn');
+
+    if (!email || !password) {
+        errEl.textContent = 'Email va parolni to\'liq kiriting.';
+        errEl.style.display = 'block';
+        return;
+    }
+
+    btn.textContent = 'Kirish...';
+    btn.style.opacity = '0.7';
+    errEl.style.display = 'none';
+
+    try {
+        const resp = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+            errEl.textContent = data.detail || 'Xatolik yuz berdi.';
+            errEl.style.display = 'block';
+            return;
+        }
+
+        showAppDashboard(data.tenant);
+        loadDashboardStats();
+        loadCategories();
+        loadProducts();
+        loadOrders();
+        loadSettings();
+    } catch (e) {
+        errEl.textContent = 'Server bilan bog\'lanishda xatolik.';
+        errEl.style.display = 'block';
+    } finally {
+        btn.textContent = 'Kirish →';
+        btn.style.opacity = '1';
+    }
+}
+
+async function doRegister() {
+    const business_name = document.getElementById('reg-biz-name').value.trim();
+    const email = document.getElementById('reg-email').value.trim();
+    const password = document.getElementById('reg-password').value;
+    const errEl = document.getElementById('register-error');
+    const btn = document.getElementById('register-btn');
+
+    if (!business_name || !email || !password) {
+        errEl.textContent = 'Barcha maydonlarni to\'ldiring.';
+        errEl.style.display = 'block';
+        return;
+    }
+    if (password.length < 6) {
+        errEl.textContent = 'Parol kamida 6 ta belgidan iborat bo\'lishi kerak.';
+        errEl.style.display = 'block';
+        return;
+    }
+
+    btn.textContent = 'Ro\'yxatdan o\'tilmoqda...';
+    btn.style.opacity = '0.7';
+    errEl.style.display = 'none';
+
+    try {
+        const resp = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ business_name, email, password })
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+            errEl.textContent = data.detail || 'Ro\'yxatdan o\'tishda xatolik.';
+            errEl.style.display = 'block';
+            return;
+        }
+
+        // Auto-login after register
+        document.getElementById('login-email').value = email;
+        document.getElementById('login-password').value = password;
+        showLoginPanel();
+        await doLogin();
+    } catch (e) {
+        errEl.textContent = 'Server bilan bog\'lanishda xatolik.';
+        errEl.style.display = 'block';
+    } finally {
+        btn.textContent = 'Ro\'yxatdan O\'tish →';
+        btn.style.opacity = '1';
+    }
+}
+
+async function doLogout() {
+    try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+    } finally {
+        showAuthOverlay();
+        showLoginPanel();
+    }
+}
+
+// ════════════════════════════════════════════════════════
+// INIT — Check auth on page load
+// ════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        const resp = await fetch('/api/auth/me');
+        if (resp.ok) {
+            const tenant = await resp.json();
+            showAppDashboard(tenant);
+            initNavigation();
+            loadDashboardStats();
+            loadCategories();
+            loadProducts();
+            loadOrders();
+            loadSettings();
+        } else {
+            showAuthOverlay();
+            showLoginPanel();
+        }
+    } catch (e) {
+        showAuthOverlay();
+        showLoginPanel();
+    }
 });
 
 // Navigation Tabs

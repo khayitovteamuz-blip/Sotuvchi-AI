@@ -1,0 +1,10 @@
+[
+  {
+    "id": "tenant-demo",
+    "business_name": "Demo Biznes",
+    "email": "admin@demo.com",
+    "password_hash": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
+    "created_at": "2026-08-08 15:21:06",
+    "is_active": true
+  }
+]
