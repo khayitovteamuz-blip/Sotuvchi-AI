@@ -55,6 +55,13 @@ function initNavigation() {
     });
 }
 
+function switchToTab(targetTab) {
+    const navItem = document.querySelector(`.nav-item[data-tab="${targetTab}"]`);
+    if (navItem) {
+        navItem.click();
+    }
+}
+
 // Load Categories
 async function loadCategories() {
     try {

@@ -94,7 +94,7 @@
 
                     <!-- Right Column: 3 Metric Cards Stacked Vertically -->
                     <div class="hero-stats-column">
-                        <div class="stat-card">
+                        <div class="stat-card" onclick="switchToTab('tab-orders')" style="cursor: pointer;" title="Barcha buyurtmalarni ko'rish">
                             <div class="stat-icon" style="background: rgba(6, 182, 212, 0.12); color: #06b6d4;">📦</div>
                             <div class="stat-info">
                                 <span>Buyurtmalar</span>
@@ -120,8 +120,11 @@
 
                 <!-- Recent Orders Table -->
                 <div class="table-container">
-                    <div style="padding: 20px 24px; border-bottom: 1px solid var(--card-border); font-weight: 700; font-size: 15px; color: var(--text-main);">
-                        🔥 Oxirgi Buyurtmalar
+                    <div style="padding: 20px 24px; border-bottom: 1px solid var(--card-border); font-weight: 700; font-size: 15px; color: var(--text-main); display: flex; justify-content: space-between; align-items: center;">
+                        <span>🔥 Oxirgi Buyurtmalar</span>
+                        <button onclick="switchToTab('tab-orders')" style="background: transparent; border: none; color: var(--primary); font-size: 13px; font-weight: 700; cursor: pointer;">
+                            Barchasini ko'rish →
+                        </button>
                     </div>
                     <table>
                         <thead>
