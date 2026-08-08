@@ -203,11 +203,29 @@ body {
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* Categories Cards Grid Layout */
+/* Categories Section Header & Pill Badge */
+.categories-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.categories-badge-pill {
+    background: rgba(0, 245, 160, 0.12);
+    border: 1px solid rgba(0, 245, 160, 0.3);
+    color: var(--primary);
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+/* High-End Premium Categories Cards Grid Layout */
 .categories-cards-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: 24px;
     margin-bottom: 32px;
 }
 
@@ -220,91 +238,117 @@ body {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    transition: var(--transition);
+    min-height: 200px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
+    cursor: pointer;
 }
 
 .category-card:hover {
     border-color: var(--card-hover-border);
-    transform: translateY(-3px);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(0, 245, 160, 0.12), 0 20px 40px rgba(0, 0, 0, 0.5);
 }
 
-.category-card-top {
+.category-card-header {
     display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-bottom: 20px;
+    justify-content: space-between;
+    align-items: flex-start;
 }
 
-.category-icon-box {
-    width: 50px;
-    height: 50px;
+.category-icon-wrapper {
+    width: 52px;
+    height: 52px;
     background: rgba(0, 245, 160, 0.1);
-    border: 1px solid rgba(0, 245, 160, 0.2);
-    border-radius: var(--radius-md);
+    border: 1px solid rgba(0, 245, 160, 0.25);
+    border-radius: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 24px;
-}
-
-.category-title-area h4 {
-    font-size: 17px;
-    font-weight: 700;
-    color: #ffffff;
-}
-
-.category-title-area span {
-    font-size: 12px;
-    color: var(--text-muted);
-    font-weight: 500;
-}
-
-.category-card-actions {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-top: 1px solid var(--card-border);
-    padding-top: 16px;
-}
-
-.btn-view-cat {
-    background: rgba(0, 245, 160, 0.12);
-    border: 1px solid rgba(0, 245, 160, 0.3);
-    color: #00F5A0;
-    padding: 8px 16px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 700;
-    cursor: pointer;
+    font-size: 26px;
     transition: var(--transition);
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
 }
 
-.btn-view-cat:hover {
-    background: #00F5A0;
-    color: #070A11;
+.category-card:hover .category-icon-wrapper {
+    background: rgba(0, 245, 160, 0.2);
+    border-color: var(--primary);
 }
 
-.btn-delete-cat {
+/* Discreet Trash Delete Button in Top Right of Category Card on Hover */
+.btn-delete-cat-icon {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    width: 32px;
+    height: 32px;
     background: rgba(239, 68, 68, 0.12);
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    border: 1px solid rgba(239, 68, 68, 0.25);
     color: #f87171;
-    padding: 8px 12px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 600;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
+    opacity: 0;
+    visibility: hidden;
     transition: var(--transition);
+    z-index: 20;
 }
 
-.btn-delete-cat:hover {
+.category-card:hover .btn-delete-cat-icon {
+    opacity: 1;
+    visibility: visible;
+}
+
+.btn-delete-cat-icon:hover {
     background: #ef4444;
-    color: #fff;
+    color: #ffffff;
+    transform: scale(1.1);
+}
+
+.category-card-body {
+    margin-top: 16px;
+}
+
+.category-card-title {
+    font-size: 19px;
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: -0.3px;
+}
+
+.category-count-pill {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 4px 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.category-card-footer {
+    margin-top: 20px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.category-card-footer .arrow {
+    transition: transform 0.25s ease;
+    font-size: 16px;
+}
+
+.category-card:hover .category-card-footer .arrow {
+    transform: translateX(4px);
 }
 
 /* Revenue Featured Chart Card */

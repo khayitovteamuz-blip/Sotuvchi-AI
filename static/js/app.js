@@ -73,35 +73,37 @@ function renderCategoriesGrid() {
     if (!grid) return;
 
     grid.innerHTML = '';
-    document.getElementById('categories-count-text').textContent = `Jami ${currentCategories.length} ta kategoriya`;
+    document.getElementById('categories-count-text').textContent = `${currentCategories.length} ta kategoriya`;
 
     currentCategories.forEach(cat => {
         const pCount = cat.product_count || 0;
         const card = document.createElement('div');
         card.className = 'category-card';
-        card.style.cursor = 'pointer';
         
-        // Clicking card body opens category products
         card.onclick = (e) => {
-            if (e.target.closest('.btn-delete-cat')) return; // Ignore delete button click
+            if (e.target.closest('.btn-delete-cat-icon')) return;
             openCategoryProducts(cat.name);
         };
 
         card.innerHTML = `
-            <div class="category-card-top">
-                <div class="category-icon-box">${cat.icon || '📁'}</div>
-                <div class="category-title-area">
-                    <h4>${cat.name}</h4>
-                    <span>${pCount} ta mahsulot</span>
-                </div>
+            <div class="category-card-header">
+                <div class="category-icon-wrapper">${cat.icon || '📁'}</div>
+                <button class="btn-delete-cat-icon" onclick="deleteCategory('${cat.id}', '${cat.name}', event)" title="Kategoriyani o'chirish">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                </button>
             </div>
-            <div class="category-card-actions">
-                <button class="btn-view-cat">
-                    👁 Kirish va Mahsulotlar (${pCount})
-                </button>
-                <button class="btn-delete-cat" onclick="deleteCategory('${cat.id}', '${cat.name}')" title="Kategoriyani o'chirish">
-                    🗑 O'chirish
-                </button>
+            
+            <div class="category-card-body">
+                <h4 class="category-card-title">${cat.name}</h4>
+                <span class="category-count-pill">${pCount} ta mahsulot</span>
+            </div>
+
+            <div class="category-card-footer">
+                <span>Mahsulotlarni ko'rish</span>
+                <span class="arrow">→</span>
             </div>
         `;
         grid.appendChild(card);
@@ -205,7 +207,8 @@ async function saveCategoryForm() {
     }
 }
 
-async function deleteCategory(catId, catName) {
+async function deleteCategory(catId, catName, event) {
+    if (event) event.stopPropagation();
     if (!confirm(`"${catName}" kategoriyasini o'chirmoqchimisiz?`)) return;
     try {
         await fetch(`/api/admin/categories/${catId}`, { method: 'DELETE' });

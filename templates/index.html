@@ -140,26 +140,29 @@
             <!-- TAB 2: PRODUCTS KATALOGI (Kategoriyalar va Mahsulotlar) -->
             <section id="tab-products" class="tab-view">
                 
-                <!-- Level 1: Categories Cards Grid View -->
+                <!-- Level 1: Categories Cards Grid View (High-End Spacing & Typography) -->
                 <div id="categories-view">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <h3 style="font-size: 18px; font-weight: 700;">📂 Mahsulot Kategoriyalari</h3>
-                        <span style="font-size: 12px; color: var(--text-muted);" id="categories-count-text">Barcha kategoriyalar ro'yxati</span>
+                    <div class="categories-header-row">
+                        <div>
+                            <h3 style="font-size: 20px; font-weight: 800; color: #ffffff; letter-spacing: -0.3px;">📁 Mahsulot Kategoriyalari</h3>
+                            <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Kategoriyani tanlang va mahsulotlar ro'yxatiga kiring</p>
+                        </div>
+                        <span class="categories-badge-pill" id="categories-count-text">0 ta kategoriya</span>
                     </div>
 
                     <div id="categories-cards-grid" class="categories-cards-grid">
-                        <!-- Dynamic Categories Rendered by JS -->
+                        <!-- Dynamic Premium Categories Rendered by JS -->
                     </div>
                 </div>
 
                 <!-- Level 2: Category Products Table View (Shown when category clicked) -->
                 <div id="category-products-view" style="display: none;">
-                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; border-bottom: 1px solid var(--card-border); padding-bottom: 16px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; border-bottom: 1px solid var(--card-border); padding-bottom: 18px;">
                         <div style="display: flex; align-items: center; gap: 14px;">
-                            <button onclick="showCategoriesView()" style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--card-border); color: #fff; padding: 8px 16px; border-radius: var(--radius-md); cursor: pointer; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;">
+                            <button onclick="showCategoriesView()" style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--card-border); color: #fff; padding: 10px 18px; border-radius: var(--radius-md); cursor: pointer; font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 8px;">
                                 ⬅️ Kategoriyalar
                             </button>
-                            <h3 id="current-category-title" style="font-size: 20px; font-weight: 800; color: #ffffff;">Smartfonlar</h3>
+                            <h3 id="current-category-title" style="font-size: 22px; font-weight: 800; color: #ffffff; letter-spacing: -0.3px;">Smartfonlar</h3>
                         </div>
                         
                         <!-- Prominent Add Product Button inside Category View -->
