@@ -193,8 +193,11 @@
             <!-- TAB 3: ORDERS -->
             <section id="tab-orders" class="tab-view">
                 <!-- Filter Pills Bar & Search Input -->
-                <div class="orders-filter-bar">
-                    <div class="filter-pills-group">
+                <div class="orders-filter-bar" style="display: flex; align-items: center; gap: 12px; flex-wrap: nowrap; overflow-x: auto;">
+                    <div style="flex-shrink: 0; min-width: 230px;">
+                        <input type="text" id="order-search-input" class="form-control" placeholder="🔍 Mijoz yoki ID bo'yicha qidiruv..." oninput="renderOrdersTable()" style="margin: 0;">
+                    </div>
+                    <div class="filter-pills-group" style="display: flex; gap: 8px; flex-wrap: nowrap; align-items: center;">
                         <button class="filter-pill active" onclick="filterOrdersByStatus('all', this)">
                             Barcha <span class="filter-count" id="count-order-all">0</span>
                         </button>
@@ -213,10 +216,6 @@
                         <button class="filter-pill" onclick="filterOrdersByStatus('Bekor qilindi', this)">
                             ❌ Bekor qilindi <span class="filter-count" id="count-order-bekor">0</span>
                         </button>
-                    </div>
-
-                    <div style="min-width: 260px;">
-                        <input type="text" id="order-search-input" class="form-control" placeholder="🔍 Mijoz yoki ID bo'yicha qidiruv..." oninput="renderOrdersTable()">
                     </div>
                 </div>
 
