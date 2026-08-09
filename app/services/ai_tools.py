@@ -63,6 +63,25 @@ def tool_declarations() -> List[types.Tool]:
             parameters=types.Schema(type=types.Type.OBJECT, properties={}),
         ),
         types.FunctionDeclaration(
+            name="send_product_photo",
+            description=(
+                "Mahsulot(lar) rasmini mijozga yuborish. Mijoz mahsulotga qiziqqanda, "
+                "'rasmini ko'rsating' desa, yoki bir nechta variantni taqqoslaganda ishlating. "
+                "Maksimal 4 ta. Rasm yuborgandan keyin matnda uni takrorlab tasvirlamang."
+            ),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "product_ids": types.Schema(
+                        type=types.Type.ARRAY,
+                        items=types.Schema(type=types.Type.STRING),
+                        description="search_product qaytargan mahsulot ID lari",
+                    ),
+                },
+                required=["product_ids"],
+            ),
+        ),
+        types.FunctionDeclaration(
             name="check_stock",
             description="Aniq mahsulotning omborda bor-yo'qligini va sonini tekshirish. Sotishdan oldin majburiy.",
             parameters=types.Schema(
@@ -134,6 +153,8 @@ async def execute_tool(
             return await _search_product(session, tenant_id, args)
         if name == "list_categories":
             return await _list_categories(session, tenant_id)
+        if name == "send_product_photo":
+            return await _send_product_photo(session, tenant_id, args)
         if name == "check_stock":
             return await _check_stock(session, tenant_id, args.get("product_id", ""))
         if name == "calc_delivery":
@@ -231,6 +252,49 @@ def _row_brief(r) -> Dict[str, Any]:
         "currency": r["currency"],
         "category": r["category"],
         "available": bool(r["in_stock"] and r["stock_quantity"] > 0),
+    }
+
+
+MAX_PHOTOS = 4
+
+
+async def _send_product_photo(session, tenant_id: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Collect image URLs for the channel to deliver.
+
+    The tool doesn't send anything itself — the agent is channel-agnostic, so it
+    returns the photos and Telegram (or a future web widget) does the sending.
+    """
+    ids = args.get("product_ids") or []
+    if isinstance(ids, str):
+        ids = [ids]
+
+    photos, missing = [], []
+    for pid in ids[:MAX_PHOTOS]:
+        p = await repo.get_product(session, tenant_id, str(pid).strip())
+        if not p:
+            missing.append(pid)
+            continue
+        url = (p.image_urls[0] if p.image_urls else None) or p.image_url
+        if not url or not url.startswith("http"):
+            missing.append(p.name)     # locally-uploaded images aren't reachable by Telegram
+            continue
+        photos.append({
+            "url": url,
+            "caption": f"*{p.name}*\n{p.price:,.0f} {p.currency}",
+            "product_id": p.id,
+        })
+
+    if not photos:
+        return {
+            "sent": 0,
+            "message": "Bu mahsulotlarda rasm yo'q. Mijozga matn bilan tasvirlab bering.",
+            "missing": missing,
+        }
+    return {
+        "sent": len(photos),
+        "photos": photos,
+        "message": f"{len(photos)} ta rasm mijozga yuborildi. Matnda qisqa izoh bering.",
+        "missing": missing,
     }
 
 

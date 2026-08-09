@@ -1231,9 +1231,14 @@ function renderMessages(containerId, messages) {
         const side = m.sender === 'user' ? 'left' : 'right';
         const who = { user: 'Mijoz', assistant: '🤖 AI', operator: '👨‍💼 Operator', system: 'Tizim' }[m.sender] || m.sender;
         const meta = m.model_name && m.model_name !== 'fallback' ? ` · ${m.model_name}` : (m.model_name === 'fallback' ? ' · demo' : '');
+        // Show the product images the AI sent, so the operator sees the full exchange
+        const photos = (m.photos || []).map(p =>
+            `<img src="${escapeHtml(p.url)}" class="msg-photo" loading="lazy"
+                  onerror="this.style.display='none'" alt="">`).join('');
         return `<div class="msg msg-${side} sender-${m.sender}">
             <div class="msg-who">${who}${meta}</div>
             <div class="msg-bubble">${escapeHtml(m.text).replace(/\n/g, '<br>')}</div>
+            ${photos ? `<div class="msg-photos">${photos}</div>` : ''}
             <div class="msg-time">${m.created_at || ''}</div>
         </div>`;
     }).join('');

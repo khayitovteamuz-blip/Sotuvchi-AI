@@ -83,6 +83,8 @@ class ChatResponse(BaseModel):
     intent: str = "general_query"  # greeting, query, recommendation, order_intent, objection, closing
     recommended_products: List[Product] = []
     order_draft: Optional[Order] = None
+    # Product images the agent chose to show; the channel decides how to deliver
+    photos: List[Dict[str, Any]] = []
 
 
 class SystemSettings(BaseModel):

@@ -75,6 +75,14 @@ QAT'IY QOIDALAR (buzilishi mumkin emas):
 9. Texnik tafsilotlarni mijozga KO'RSATMANG: funksiya nomlari, maydon nomlari
    (in_stock, product_id, PROD-101 kabi), JSON yoki xato matnlarini yozmang.
    Ularni oddiy odam tilida ayting ("hozircha omborda tugagan").
+10. Mijoz RASM yuborsa: rasmda nima borligini o'zingiz ko'rasiz. Uni tavsiflab
+   o'tirmang — darhol search_product bilan katalogdan shunga o'xshashini qidiring
+   va topganingizni ayting. Topilmasa, eng yaqin muqobilni taklif qiling.
+11. Mijoz OVOZLI xabar yuborsa: uni eshitasiz. "Ovozingizni eshitdim" deb
+   yozmang, shunchaki so'raganiga javob bering.
+12. Mahsulot haqida gapirganda RASMINI ham yuboring — send_product_photo
+   chaqiring. Rasm matndan ko'ra yaxshiroq sotadi. Lekin har javobda emas:
+   mijoz aniq mahsulotga qiziqqanda yoki variantlarni taqqoslaganda.
 """
 
 
@@ -86,12 +94,21 @@ class AISalesAgent:
         conversation: Conversation,
         user_message: str,
         user_name: str = "Mijoz",
+        media: Optional[List[Dict[str, Any]]] = None,
     ) -> ChatResponse:
+        """media: [{"data": bytes, "mime_type": "image/jpeg"}] — photos or voice
+        the customer sent. Gemini reads both natively."""
         tenant_id = tenant.id
         cfg = await repo.get_settings(session, tenant_id)
         history = await repo.recent_messages(session, conversation.id, limit=10)
 
-        await repo.add_message(session, tenant_id, conversation, "user", user_message)
+        # A voice note or bare photo has no text — store a label so the Inbox
+        # shows something meaningful instead of an empty bubble.
+        stored_text = user_message or self._media_label(media)
+        await repo.add_message(
+            session, tenant_id, conversation, "user", stored_text,
+            meta={"media": [m["mime_type"] for m in media]} if media else None,
+        )
 
         t0 = time.monotonic()
         reply_text, tokens, model_used = "", 0, None
@@ -101,16 +118,29 @@ class AISalesAgent:
         use_gemini = cfg.ai_provider == "gemini" and settings.GEMINI_API_KEY
         if use_gemini:
             reply_text, tokens, tool_trace = await self._run_gemini_with_tools(
-                session, tenant_id, conversation, cfg, history, user_message, user_name
+                session, tenant_id, conversation, cfg, history, user_message, user_name, media
             )
             model_used = cfg.model_name
+        elif media:
+            # No key: we can't read a photo or voice note, so say so plainly
+            # instead of answering as if the message was empty.
+            reply_text = ("Kechirasiz, hozir rasm va ovozli xabarlarni o'qiy olmayapman. "
+                          "Iltimos, matn bilan yozib yuboring 🙏")
+            model_used = "fallback"
 
         if not reply_text:
-            products = await repo.list_products(session, tenant_id)
-            intent = self._detect_intent(user_message)
-            matched = self._match_products(user_message, products)
-            reply_text = self._fallback(user_message, intent, matched, products, user_name, cfg)
-            model_used = model_used or "fallback"
+            if media:
+                # The keyword engine can't see a photo or hear a voice note —
+                # answering from the (empty) text would produce nonsense.
+                reply_text = ("Kechirasiz, xabaringizni ocholmadim 😔 "
+                              "Iltimos, yozib yuboring yoki qaytadan urinib ko'ring.")
+                model_used = model_used or "media-failed"
+            else:
+                products = await repo.list_products(session, tenant_id)
+                intent = self._detect_intent(user_message)
+                matched = self._match_products(user_message, products)
+                reply_text = self._fallback(user_message, intent, matched, products, user_name, cfg)
+                model_used = model_used or "fallback"
 
         # If a tool created an order, surface it in the API response
         for t in tool_trace:
@@ -136,17 +166,24 @@ class AISalesAgent:
         # recommend whatever the model actually looked up
         recommended = await self._recommended_from_trace(session, tenant_id, tool_trace, user_message)
 
+        # Photos the model asked for — the channel delivers them
+        photos = []
+        for t in tool_trace:
+            if t["name"] == "send_product_photo":
+                photos.extend(t["result"].get("photos") or [])
+
         return ChatResponse(
             session_id=conversation.id,
             reply_text=reply_text,
             intent=intent,
             recommended_products=recommended[:3],
             order_draft=None,  # orders are persisted by the tool; see meta/tool_trace
+            photos=photos,
         )
 
     # ─── Gemini tool-calling loop ─────────────────────────────────────────────
     async def _run_gemini_with_tools(
-        self, session, tenant_id, conversation, cfg, history, user_message, user_name
+        self, session, tenant_id, conversation, cfg, history, user_message, user_name, media=None
     ) -> Tuple[str, int, List[Dict[str, Any]]]:
         try:
             from google.genai import types
@@ -165,7 +202,16 @@ class AISalesAgent:
         for m in history:
             role = "user" if m.sender == "user" else "model"
             contents.append(types.Content(role=role, parts=[types.Part.from_text(text=m.text)]))
-        contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_message)]))
+
+        # The customer's photo / voice note goes in as raw bytes alongside any text
+        turn_parts = []
+        for m in (media or []):
+            turn_parts.append(types.Part.from_bytes(data=m["data"], mime_type=m["mime_type"]))
+        if user_message:
+            turn_parts.append(types.Part.from_text(text=user_message))
+        if not turn_parts:
+            turn_parts.append(types.Part.from_text(text="..."))
+        contents.append(types.Content(role="user", parts=turn_parts))
 
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
@@ -305,6 +351,19 @@ class AISalesAgent:
         )
 
     # ─── helpers ──────────────────────────────────────────────────────────────
+    @staticmethod
+    def _media_label(media) -> str:
+        if not media:
+            return ""
+        mime = media[0].get("mime_type", "")
+        if mime.startswith("image/"):
+            return "📷 [rasm]"
+        if mime.startswith("audio/"):
+            return "🎤 [ovozli xabar]"
+        if mime.startswith("video/"):
+            return "🎥 [video]"
+        return "[fayl]"
+
     def _intent_from_trace(self, trace) -> Optional[str]:
         names = [t["name"] for t in trace]
         if "create_order" in names:

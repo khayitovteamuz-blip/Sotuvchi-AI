@@ -15,6 +15,15 @@ from app.services.bot_service import bot_service
 router = APIRouter(prefix="/api/inbox", tags=["Inbox"])
 
 
+def _photos_from_meta(meta) -> list:
+    """Pull product images out of a message's recorded tool calls."""
+    out = []
+    for call in (meta or {}).get("tools", []):
+        if call.get("name") == "send_product_photo":
+            out.extend((call.get("result") or {}).get("photos") or [])
+    return out
+
+
 @router.get("/conversations")
 async def list_conversations(status: str = "all", user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     return await repo.list_conversations(session, user.tenant_id, status)
@@ -49,6 +58,8 @@ async def get_conversation(conv_id: str, user: User = Depends(require_auth), ses
         "messages": [
             {"sender": m.sender, "text": m.text, "model_name": m.model_name,
              "tokens": m.tokens, "intent": m.intent,
+             # images the AI sent, so the operator sees the whole exchange
+             "photos": _photos_from_meta(m.meta),
              "created_at": m.created_at.strftime("%Y-%m-%d %H:%M") if m.created_at else None}
             for m in msgs
         ],

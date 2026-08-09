@@ -17,6 +17,10 @@ from app.services.ai_agent import ai_agent
 logger = logging.getLogger("bot_service")
 TELEGRAM_API = "https://api.telegram.org/bot{token}"
 
+# Inline media must fit in the model request; Telegram voice/photos are far
+# smaller than this in practice, so the cap only guards against odd uploads.
+MAX_MEDIA_BYTES = 15 * 1024 * 1024
+
 
 class TelegramBotService:
     async def send_message(
@@ -35,6 +39,69 @@ class TelegramBotService:
         except Exception as e:
             logger.error(f"Telegram sendMessage error: {e}")
             return False
+
+    async def send_photo(
+        self, token: str, chat_id: str, photo_url: str, caption: Optional[str] = None
+    ) -> bool:
+        """Send a product image. Telegram fetches the URL itself — no download here."""
+        if not token or not photo_url:
+            return False
+        payload = {"chat_id": chat_id, "photo": photo_url}
+        if caption:
+            payload["caption"] = caption[:1024]   # Telegram caption limit
+            payload["parse_mode"] = "Markdown"
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(f"{TELEGRAM_API.format(token=token)}/sendPhoto", json=payload)
+                if resp.status_code != 200:
+                    logger.warning(f"sendPhoto failed: {resp.text[:160]}")
+                return resp.status_code == 200
+        except Exception as e:
+            logger.error(f"Telegram sendPhoto error: {e}")
+            return False
+
+    async def send_media_group(self, token: str, chat_id: str, items: list) -> bool:
+        """Send 2-10 product images as one album."""
+        if not token or len(items) < 2:
+            return False
+        media = []
+        for i, it in enumerate(items[:10]):
+            entry = {"type": "photo", "media": it["url"]}
+            if i == 0 and it.get("caption"):
+                entry["caption"] = it["caption"][:1024]
+                entry["parse_mode"] = "Markdown"
+            media.append(entry)
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{TELEGRAM_API.format(token=token)}/sendMediaGroup",
+                    json={"chat_id": chat_id, "media": media},
+                )
+                return resp.status_code == 200
+        except Exception as e:
+            logger.error(f"Telegram sendMediaGroup error: {e}")
+            return False
+
+    async def download_file(self, token: str, file_id: str) -> Optional[bytes]:
+        """Fetch a photo/voice the customer sent, so the model can look at it."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                info = await client.get(
+                    f"{TELEGRAM_API.format(token=token)}/getFile", params={"file_id": file_id}
+                )
+                data = info.json()
+                if not data.get("ok"):
+                    logger.warning(f"getFile failed: {data.get('description')}")
+                    return None
+                path = data["result"]["file_path"]
+                if data["result"].get("file_size", 0) > MAX_MEDIA_BYTES:
+                    logger.warning("Media too large, skipping")
+                    return None
+                dl = await client.get(f"https://api.telegram.org/file/bot{token}/{path}")
+                return dl.content if dl.status_code == 200 else None
+        except Exception as e:
+            logger.error(f"Telegram download error: {e}")
+            return None
 
     async def get_me(self, token: str) -> Optional[dict]:
         """Validate a bot token and return bot info (username)."""
@@ -78,7 +145,8 @@ class TelegramBotService:
     async def _handle_message(self, session, tenant, token, msg):
         chat_id = str(msg["chat"]["id"])
         user_name = msg.get("from", {}).get("first_name", "Mijoz")
-        text = msg.get("text", "")
+        # A photo's text arrives as "caption", not "text"
+        text = msg.get("text") or msg.get("caption") or ""
 
         # Operator pairing: "/operator ABC123" registers this chat for alerts.
         # Handled before any conversation is created — the owner is not a lead.
@@ -125,16 +193,64 @@ class TelegramBotService:
             await self.send_message(token, chat_id, greeting, reply_markup=keyboard)
             return
 
+        # Photo / voice: customers here often show a product or just talk.
+        # Gemini reads both, so hand the bytes straight to the agent.
+        media, label = await self._extract_media(token, msg)
+        if media and not text:
+            text = label   # what the Inbox and history will show
+
         # A human owns this conversation (or the bot is off): record the message
         # and ping the operator, otherwise the customer waits on a silent chat.
         if conv.status == "operator" or not cfg.bot_enabled:
-            await repo.add_message(session, tenant.id, conv, "user", text)
+            await repo.add_message(session, tenant.id, conv, "user", text or label)
             from app.services import notify_service
-            await notify_service.notify_customer_waiting(session, tenant, cfg, conv, text)
+            await notify_service.notify_customer_waiting(session, tenant, cfg, conv, text or label)
             return
 
-        resp = await ai_agent.generate_response(session, tenant, conv, text, user_name)
+        if not text and not media:
+            return  # sticker, location, etc. — nothing to act on
+
+        resp = await ai_agent.generate_response(
+            session, tenant, conv, text, user_name, media=media
+        )
         await self.send_message(token, chat_id, resp.reply_text)
+        await self._send_requested_photos(session, tenant, token, chat_id, resp)
+
+    async def _extract_media(self, token: str, msg: dict):
+        """Download a photo or voice note. Returns (parts, human label)."""
+        # Telegram sends several photo sizes; the last is the largest
+        if msg.get("photo"):
+            data = await self.download_file(token, msg["photo"][-1]["file_id"])
+            if data:
+                return [{"data": data, "mime_type": "image/jpeg"}], "📷 [rasm yubordi]"
+
+        voice = msg.get("voice") or msg.get("audio")
+        if voice:
+            data = await self.download_file(token, voice["file_id"])
+            if data:
+                mime = voice.get("mime_type") or "audio/ogg"
+                return [{"data": data, "mime_type": mime}], "🎤 [ovozli xabar]"
+
+        if msg.get("video_note"):
+            data = await self.download_file(token, msg["video_note"]["file_id"])
+            if data:
+                return [{"data": data, "mime_type": "video/mp4"}], "🎥 [video xabar]"
+
+        return [], ""
+
+    async def _send_requested_photos(self, session, tenant, token, chat_id, resp):
+        """Deliver any product images the agent asked for."""
+        photos = getattr(resp, "photos", None) or []
+        if not photos:
+            return
+        if len(photos) == 1:
+            p = photos[0]
+            await self.send_photo(token, chat_id, p["url"], p.get("caption"))
+        else:
+            ok = await self.send_media_group(token, chat_id, photos)
+            if not ok:                      # album can fail on a bad URL — fall back
+                for p in photos[:4]:
+                    await self.send_photo(token, chat_id, p["url"], p.get("caption"))
 
     async def _handle_callback(self, session, tenant, token, query):
         chat_id = str(query["message"]["chat"]["id"])

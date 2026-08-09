@@ -1552,3 +1552,11 @@ textarea.form-control {
 .top-header { gap: 16px; }
 .header-title { min-width: 0; }
 #header-action-group { min-width: 0; }
+
+/* Product images the AI sent, shown inline in the Inbox transcript */
+.msg-photos { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.msg-photo {
+    width: 72px; height: 72px; object-fit: cover;
+    border-radius: 9px; border: 1px solid var(--card-border); background: #f8fafc;
+}
+.msg-right .msg-photos { justify-content: flex-end; }
