@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sotuvchi AI - Boshqaruv Paneli</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=3.0">
+    <link rel="stylesheet" href="/static/css/style.css?v={{ asset_v }}">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
 </head>
 <body>
@@ -114,9 +114,11 @@
                     <h2 id="page-title">Inbox</h2>
                     <p id="page-subtitle">Jonli suhbatlar — AI va operator</p>
                 </div>
-                <div id="header-action-group" style="display: none; gap: 14px; align-items: center;">
+                <div id="header-action-group" style="display: none; gap: 10px; align-items: center;">
                     <span class="categories-badge-pill" id="categories-count-text">0 ta kategoriya</span>
-                    <button class="btn-primary" onclick="openAddCategoryModal()"><span>+</span> Yangi Kategoriya</button>
+                    <button class="btn-secondary" onclick="openAddCategoryModal()" title="Qo'lda kategoriya qo'shish">+ Kategoriya</button>
+                    <button class="btn-secondary" onclick="autoCategorize()" id="ai-cat-btn" title="AI mahsulotlarni kategoriyalarga ajratadi">✨ AI kategoriyalash</button>
+                    <button class="btn-primary" onclick="openImportModal()">📥 Excel katalog yuklash</button>
                 </div>
             </header>
 
@@ -375,6 +377,45 @@
         </div>
     </div>
 
+    <!-- Catalog Import Modal (Excel / CSV) -->
+    <div class="modal-overlay" id="import-modal">
+        <div class="modal-card" style="max-width:560px;">
+            <div class="modal-head">
+                <h3>📥 Katalogni Excel/CSV dan yuklash</h3>
+                <button onclick="closeImportModal()" class="modal-close">✕</button>
+            </div>
+
+            <div id="import-step-pick">
+                <p style="font-size:13px; color:var(--text-muted); line-height:1.6; margin-bottom:12px;">
+                    Prays-listingizni shundoq yuklang. Ustun nomlari o'zbekcha, ruscha yoki
+                    inglizcha bo'lishi mumkin — tizim o'zi tanib oladi.
+                </p>
+                <div class="import-cols">
+                    <span><b>Majburiy:</b> Nomi, Narxi</span>
+                    <span><b>Ixtiyoriy:</b> Kategoriya, Qoldiq, Tavsif, Rasm</span>
+                </div>
+
+                <div class="upload-dropzone" id="import-dropzone" onclick="document.getElementById('import-file').click()" style="height:130px; margin-top:14px;">
+                    <div class="upload-hint">
+                        <span style="font-size:26px;">📄</span>
+                        <p style="font-size:13px; font-weight:600; margin-top:6px;" id="import-file-label">Fayl tanlash uchun bosing</p>
+                        <span style="font-size:11px; color:var(--text-muted);">.xlsx yoki .csv (max 10 MB)</span>
+                    </div>
+                </div>
+                <input type="file" id="import-file" accept=".xlsx,.xlsm,.csv" style="display:none;" onchange="handleImportFile(event)">
+
+                <a href="/api/admin/products/import-template" class="template-link">⬇️ Namuna faylni yuklab olish</a>
+            </div>
+
+            <div id="import-step-result" style="display:none;"></div>
+
+            <div class="modal-actions">
+                <button onclick="closeImportModal()" class="btn-cancel">Yopish</button>
+                <button onclick="runImport(false)" class="btn-primary" id="import-confirm-btn" style="display:none;">Yuklash</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Product Modal -->
     <div class="modal-overlay" id="product-modal">
         <div class="modal-card wide-modal">
@@ -431,6 +472,6 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js?v=3.0"></script>
+    <script src="/static/js/app.js?v={{ asset_v }}"></script>
 </body>
 </html>

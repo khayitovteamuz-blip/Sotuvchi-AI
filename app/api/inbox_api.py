@@ -22,8 +22,13 @@ async def list_conversations(status: str = "all", user: User = Depends(require_a
 
 @router.get("/waiting-count")
 async def waiting_count(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
-    """Lightweight poll target so the panel can badge pending handoffs anywhere."""
-    return {"waiting": await repo.waiting_count(session, user.tenant_id)}
+    """Lightweight poll target so the panel can badge pending handoffs anywhere.
+
+    Returns the ids too: the panel alerts once per conversation, so replying
+    silences it until that customer writes again.
+    """
+    ids = await repo.waiting_conversations(session, user.tenant_id)
+    return {"waiting": len(ids), "ids": ids}
 
 
 @router.get("/conversations/{conv_id}")

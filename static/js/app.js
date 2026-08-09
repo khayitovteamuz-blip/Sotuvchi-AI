@@ -149,11 +149,22 @@ let currentTenant = null;
 /** Boot everything after auth: nav + the data the default screen (Inbox) needs. */
 function bootApp() {
     if (!navReady) { initNavigation(); navReady = true; }
-    loadInbox();          // Inbox is the default screen
     loadCategories();     // needed by the product modal's category select
     loadProducts();
     loadSettings();
     startInboxPolling();
+    restoreActiveTab();
+}
+
+/** Reopen the section the operator was last on; Inbox is the first-visit default. */
+function restoreActiveTab() {
+    const saved = localStorage.getItem('sotuvchi_active_tab');
+    const navItem = saved && document.querySelector(`.nav-item[data-tab="${saved}"]`);
+    if (navItem) {
+        navItem.click();   // click also loads that tab's data and sets the header
+    } else {
+        loadInbox();
+    }
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -215,6 +226,9 @@ function initNavigation() {
             if (targetTab === 'tab-products') {
                 showCategoriesView();
             }
+
+            // Remember the section so a reload returns here instead of Inbox
+            localStorage.setItem('sotuvchi_active_tab', targetTab);
         });
     });
 }
@@ -1149,14 +1163,16 @@ async function loadInbox() {
 function updateInboxBadge(list) {
     const badge = document.getElementById('inbox-nav-badge');
     if (!badge) return;
-    const waiting = (list || []).filter(c => c.waiting_for_operator).length;
+    const waitingIds = (list || []).filter(c => c.waiting_for_operator).map(c => c.id);
     const unread = (list || []).reduce((n, c) => n + (c.unread_count || 0), 0);
     // Waiting-for-operator wins: it is the number someone must act on
-    const count = waiting || unread;
+    const count = waitingIds.length || unread;
     badge.textContent = count;
     badge.style.display = count > 0 ? 'inline-flex' : 'none';
-    badge.classList.toggle('urgent', waiting > 0);
-    lastWaitingCount = waiting;
+    badge.classList.toggle('urgent', waitingIds.length > 0);
+    // Keep the alert set in sync with what the operator is already looking at,
+    // so switching tabs never re-announces the same conversation.
+    notifiedWaiting = new Set(waitingIds);
 }
 
 function renderInboxList(list) {
@@ -1302,27 +1318,33 @@ function startInboxPolling() {
             // invisible just because the operator is looking at the catalog.
             try {
                 const d = await (await fetch('/api/inbox/waiting-count')).json();
-                updateWaitingBadge(d.waiting);
+                updateWaitingBadge(d.ids || []);
             } catch (e) { /* offline; try again next tick */ }
         }
     }, 8000);
 }
 
-let lastWaitingCount = 0;
-function updateWaitingBadge(waiting) {
+// Conversations already announced. Alerting once per conversation is what stops
+// the toast reappearing every poll after the operator has replied.
+let notifiedWaiting = new Set();
+
+function updateWaitingBadge(waitingIds) {
     const badge = document.getElementById('inbox-nav-badge');
-    if (badge && waiting > 0) {
-        badge.textContent = waiting;
-        badge.style.display = 'inline-flex';
-        badge.classList.add('urgent');
-    } else if (badge) {
-        badge.classList.remove('urgent');
+    if (badge) {
+        badge.textContent = waitingIds.length;
+        badge.style.display = waitingIds.length > 0 ? 'inline-flex' : 'none';
+        badge.classList.toggle('urgent', waitingIds.length > 0);
     }
-    // Alert once per new escalation, not on every poll
-    if (waiting > lastWaitingCount) {
-        toast(`🔔 ${waiting} ta mijoz operator kutmoqda`);
+
+    const fresh = waitingIds.filter(id => !notifiedWaiting.has(id));
+    if (fresh.length) {
+        toast(fresh.length === 1
+            ? '🔔 Mijoz operator javobini kutmoqda'
+            : `🔔 ${fresh.length} ta mijoz operator kutmoqda`);
     }
-    lastWaitingCount = waiting;
+    // Replying removes the id server-side, so it can alert again only when
+    // that customer writes a new message.
+    notifiedWaiting = new Set(waitingIds);
 }
 
 /** Re-render the open chat without stealing scroll if nothing changed. */
@@ -1370,6 +1392,156 @@ async function sendTestMessage() {
         renderMessages('test-messages', testMessages);
     } catch (e) {
         toast('AI javob bermadi', true);
+    }
+}
+
+// ════════════════════════════════════════════════════════
+// KATALOG IMPORT (Excel / CSV)
+// ════════════════════════════════════════════════════════
+let importFile = null;
+
+function openImportModal() {
+    importFile = null;
+    document.getElementById('import-file').value = '';
+    document.getElementById('import-file-label').textContent = 'Fayl tanlash uchun bosing';
+    document.getElementById('import-step-pick').style.display = 'block';
+    document.getElementById('import-step-result').style.display = 'none';
+    document.getElementById('import-confirm-btn').style.display = 'none';
+    document.getElementById('import-modal').style.display = 'flex';
+}
+
+function closeImportModal() {
+    document.getElementById('import-modal').style.display = 'none';
+}
+
+function handleImportFile(e) {
+    const f = e.target.files[0];
+    if (!f) return;
+    importFile = f;
+    document.getElementById('import-file-label').textContent = f.name;
+    runImport(true);   // preview first — never write before the user sees the result
+}
+
+async function runImport(dryRun) {
+    if (!importFile) return;
+    const resultBox = document.getElementById('import-step-result');
+    const confirmBtn = document.getElementById('import-confirm-btn');
+
+    resultBox.style.display = 'block';
+    resultBox.innerHTML = '<p style="font-size:13px;color:var(--text-muted);">Fayl o\'qilmoqda...</p>';
+    confirmBtn.disabled = true;
+
+    const fd = new FormData();
+    fd.append('file', importFile);
+
+    try {
+        const resp = await fetch('/api/admin/products/import?dry_run=' + (dryRun ? 'true' : 'false'), {
+            method: 'POST', body: fd
+        });
+        const d = await resp.json();
+
+        if (!resp.ok) {
+            resultBox.innerHTML = `<div class="import-errors">${escapeHtml(d.detail || 'Xatolik')}</div>`;
+            confirmBtn.style.display = 'none';
+            return;
+        }
+        if (d.success === false) {
+            resultBox.innerHTML = `
+                <div class="import-errors">
+                    <b>${escapeHtml(d.error)}</b><br>
+                    Faylda topilgan ustunlar: ${(d.found_columns || []).map(escapeHtml).join(', ') || '—'}<br>
+                    Kutilgan: ${escapeHtml(d.expected || '')}
+                </div>`;
+            confirmBtn.style.display = 'none';
+            return;
+        }
+
+        renderImportResult(d, dryRun);
+
+        if (dryRun) {
+            confirmBtn.style.display = (d.added + d.updated) > 0 ? 'inline-flex' : 'none';
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = `Yuklash (${d.added + d.updated} ta)`;
+        } else {
+            confirmBtn.style.display = 'none';
+            toast(`✅ ${d.added} ta qo'shildi, ${d.updated} ta yangilandi`);
+            await loadProducts();
+            await loadCategories();
+
+            // A price list often has no category column — offer to fix that now,
+            // while the user is still looking at the result.
+            const uncategorized = (currentProducts || []).filter(p => !(p.category || '').trim()).length;
+            if (uncategorized > 0) {
+                document.getElementById('import-step-result').insertAdjacentHTML('beforeend', `
+                    <div class="import-suggest">
+                        <b>${uncategorized} ta mahsulotda kategoriya yo'q.</b>
+                        AI ularni avtomatik ajratib bersinmi?
+                        <button class="btn-mini" onclick="autoCategorize(); closeImportModal();">✨ Ha, ajrat</button>
+                    </div>`);
+            }
+        }
+    } catch (err) {
+        resultBox.innerHTML = '<div class="import-errors">Serverga ulanishda xatolik.</div>';
+        confirmBtn.style.display = 'none';
+    }
+}
+
+function renderImportResult(d, dryRun) {
+    const mapped = Object.values(d.matched_columns || {})
+        .map(h => `<code>${escapeHtml(h)}</code>`).join(' ');
+    const ignored = (d.ignored_columns || []).length
+        ? `<br>E'tiborga olinmadi: ${d.ignored_columns.map(h => `<code>${escapeHtml(h)}</code>`).join(' ')}`
+        : '';
+
+    const errs = (d.errors || []).length
+        ? `<div class="import-errors">
+             <b>${d.error_count} ta qator o'tkazib yuborildi:</b><br>
+             ${d.errors.map(e => `${e.row}-qator: ${escapeHtml(e.error)}${e.name ? ' (' + escapeHtml(e.name) + ')' : ''}`).join('<br>')}
+             ${d.error_count > d.errors.length ? '<br>…' : ''}
+           </div>`
+        : '';
+
+    document.getElementById('import-step-result').innerHTML = `
+        <div style="font-size:13px;font-weight:700;margin-bottom:10px;">
+            ${dryRun ? "👀 Oldindan ko'rish — hali saqlanmadi" : '✅ Yuklandi'}
+        </div>
+        <div class="import-summary">
+            <div class="import-stat ok"><b>${d.added}</b><span>yangi</span></div>
+            <div class="import-stat"><b>${d.updated}</b><span>yangilandi</span></div>
+            <div class="import-stat ${d.skipped ? 'warn' : ''}"><b>${d.skipped}</b><span>o'tkazildi</span></div>
+        </div>
+        <div class="import-mapped">Tanildi: ${mapped || '—'}${ignored}</div>
+        ${errs}`;
+}
+
+// ── AI auto-categorisation ──
+async function autoCategorize(onlyUncategorized = true) {
+    const btn = document.getElementById('ai-cat-btn');
+    const original = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '✨ Ajratilmoqda...'; }
+
+    try {
+        const resp = await fetch('/api/admin/products/auto-categorize?only_uncategorized=' + onlyUncategorized, {
+            method: 'POST'
+        });
+        const d = await resp.json();
+
+        if (!d.success) {
+            toast(d.error || 'Kategoriyalashda xatolik', true);
+            return;
+        }
+        if (d.updated === 0) {
+            toast(d.message || 'O\'zgarish yo\'q');
+            return;
+        }
+
+        toast(`✨ ${d.updated} ta mahsulot ${d.categories.length} ta kategoriyaga ajratildi`);
+        await loadProducts();
+        await loadCategories();
+    } catch (e) {
+        toast('Serverga ulanishda xatolik', true);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = original; }
     }
 }
 

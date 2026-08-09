@@ -518,14 +518,25 @@ async def list_conversations(session: AsyncSession, tenant_id: str, status: Opti
     return out
 
 
-async def waiting_count(session: AsyncSession, tenant_id: str) -> int:
-    """Conversations escalated to a human — the number that must not be ignored."""
-    res = await session.execute(
-        select(func.count()).select_from(Conversation).where(
-            Conversation.tenant_id == tenant_id, Conversation.status == "operator"
-        )
-    )
-    return res.scalar() or 0
+async def waiting_conversations(session: AsyncSession, tenant_id: str) -> List[str]:
+    """Ids of conversations still waiting on a human.
+
+    Must use the SAME rule as list_conversations(): escalated AND no operator
+    reply yet. A count that ignored the reply would keep re-alerting forever.
+    """
+    res = await session.execute(text("""
+        SELECT c.id
+        FROM conversations c
+        WHERE c.tenant_id = :tenant_id
+          AND c.status = 'operator'
+          AND coalesce((
+                SELECT m.sender FROM messages m
+                WHERE m.conversation_id = c.id
+                ORDER BY m.created_at DESC, m.id DESC
+                LIMIT 1
+          ), '') <> 'operator'
+    """), {"tenant_id": tenant_id})
+    return [r[0] for r in res.all()]
 
 
 async def get_conversation(session: AsyncSession, tenant_id: str, conv_id: str) -> Optional[Conversation]:

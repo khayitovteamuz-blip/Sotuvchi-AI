@@ -74,10 +74,27 @@ app.include_router(inbox_router)
 app.include_router(integrations_router)
 
 
+def _asset_version() -> str:
+    """Cache-buster derived from the assets themselves.
+
+    A hand-written ?v=3.0 goes stale the moment the file changes again, and the
+    browser then serves old JS against new HTML — which looks like broken
+    features, not a caching bug. Deriving it from mtimes makes that impossible.
+    """
+    stamp = 0.0
+    for rel in ("js/app.js", "css/style.css"):
+        f = static_dir / rel
+        if f.exists():
+            stamp = max(stamp, f.stat().st_mtime)
+    return str(int(stamp))
+
+
 @app.get("/")
 async def root_dashboard(request: Request):
     """Serve Web Admin Dashboard & Live AI Simulator"""
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(
+        "index.html", {"request": request, "asset_v": _asset_version()}
+    )
 
 
 @app.get("/api/health")

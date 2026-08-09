@@ -5,7 +5,7 @@ Data lives in Postgres (see app/db/repo.py).
 import uuid
 from typing import List
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import require_auth
@@ -14,7 +14,7 @@ from app.db import repo
 from app.db.base import get_session
 from app.db.models import User
 from app.models.schema import Category, DashboardStats, Order, Product, SystemSettings
-from app.services import tenant_service
+from app.services import categorize_service, import_service, tenant_service
 from app.services.sheets_service import sheets_service
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
@@ -132,6 +132,58 @@ async def upload_image(file: UploadFile = File(...), user: User = Depends(requir
         return {"status": "success", "image_url": f"/static/uploads/{filename}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Rasm yuklashda xatolik: {str(e)}")
+
+
+# ─── Catalog import (Excel / CSV) ─────────────────────────────────────────────
+MAX_IMPORT_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+@router.post("/products/import")
+async def import_products(
+    file: UploadFile = File(...),
+    dry_run: bool = False,
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+):
+    """Bulk-load a catalog from the price list the business already keeps."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Fayl bo'sh.")
+    if len(content) > MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=400, detail="Fayl 10 MB dan katta.")
+
+    try:
+        return await import_service.import_products(
+            session, user.tenant_id, file.filename or "", content, dry_run=dry_run
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(status_code=500, detail=f"Import xatosi: {e}")
+
+
+@router.post("/products/auto-categorize")
+async def auto_categorize(
+    only_uncategorized: bool = True,
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+):
+    """Let the AI group the catalog — an imported price list has no categories."""
+    return await categorize_service.auto_categorize(
+        session, user.tenant_id, only_uncategorized=only_uncategorized
+    )
+
+
+@router.get("/products/import-template")
+async def import_template(user: User = Depends(require_auth)):
+    """Download a correctly-shaped starter file."""
+    csv_text = import_service.build_template_csv()
+    return Response(
+        content=csv_text.encode("utf-8-sig"),  # BOM so Excel shows Cyrillic/Uzbek correctly
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="sotuvchi-katalog-namuna.csv"'},
+    )
 
 
 # ─── Analytics & Customers ────────────────────────────────────────────────────
