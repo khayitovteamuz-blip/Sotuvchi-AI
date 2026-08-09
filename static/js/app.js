@@ -220,8 +220,13 @@ function initNavigation() {
                 headerTitle.textContent = meta.title;
                 headerSubtitle.textContent = meta.sub;
                 headerActionGroup.style.display = meta.btn ? 'flex' : 'none';
+                const mobileTitle = document.getElementById('mobile-page-title');
+                if (mobileTitle) mobileTitle.textContent = meta.title;
                 if (typeof meta.load === 'function') meta.load();
             }
+
+            // On a phone the drawer covers the content — close it after choosing
+            toggleSidebar(false);
 
             if (targetTab === 'tab-products') {
                 showCategoriesView();
@@ -231,6 +236,17 @@ function initNavigation() {
             localStorage.setItem('sotuvchi_active_tab', targetTab);
         });
     });
+}
+
+/** Slide the sidebar drawer in/out on phones. `force` overrides the toggle. */
+function toggleSidebar(force) {
+    const sidebar = document.getElementById('sidebar');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    if (!sidebar) return;
+    const open = force === undefined ? !sidebar.classList.contains('open') : force;
+    sidebar.classList.toggle('open', open);
+    if (backdrop) backdrop.classList.toggle('open', open);
+    document.body.style.overflow = open ? 'hidden' : '';
 }
 
 function switchToTab(targetTab) {
@@ -1183,15 +1199,17 @@ async function loadInbox() {
 }
 
 function updateInboxBadge(list) {
-    const badge = document.getElementById('inbox-nav-badge');
-    if (!badge) return;
     const waitingIds = (list || []).filter(c => c.waiting_for_operator).map(c => c.id);
     const unread = (list || []).reduce((n, c) => n + (c.unread_count || 0), 0);
     // Waiting-for-operator wins: it is the number someone must act on
     const count = waitingIds.length || unread;
-    badge.textContent = count;
-    badge.style.display = count > 0 ? 'inline-flex' : 'none';
-    badge.classList.toggle('urgent', waitingIds.length > 0);
+    for (const id of ['inbox-nav-badge', 'mobile-inbox-badge']) {
+        const badge = document.getElementById(id);
+        if (!badge) continue;
+        badge.textContent = count;
+        badge.style.display = count > 0 ? 'inline-flex' : 'none';
+        badge.classList.toggle('urgent', waitingIds.length > 0);
+    }
     // Keep the alert set in sync with what the operator is already looking at,
     // so switching tabs never re-announces the same conversation.
     notifiedWaiting = new Set(waitingIds);
@@ -1357,8 +1375,9 @@ function startInboxPolling() {
 let notifiedWaiting = new Set();
 
 function updateWaitingBadge(waitingIds) {
-    const badge = document.getElementById('inbox-nav-badge');
-    if (badge) {
+    for (const id of ['inbox-nav-badge', 'mobile-inbox-badge']) {
+        const badge = document.getElementById(id);
+        if (!badge) continue;
         badge.textContent = waitingIds.length;
         badge.style.display = waitingIds.length > 0 ? 'inline-flex' : 'none';
         badge.classList.toggle('urgent', waitingIds.length > 0);

@@ -109,12 +109,28 @@ async def health_check():
 if __name__ == "__main__":
     import os
     os.system("lsof -ti:8080 | xargs kill -9 2>/dev/null || true")
+    host, port = settings.HOST, settings.PORT
+
+    # Print the LAN address so the panel can be opened from a phone on the same
+    # Wi-Fi — 127.0.0.1 is reachable only from this machine.
+    if host == "0.0.0.0":
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))          # no packets sent; just picks the route
+            lan_ip = s.getsockname()[0]
+            s.close()
+            print(f"\n  Shu kompyuterda:  http://127.0.0.1:{port}")
+            print(f"  Telefondan (bir xil Wi-Fi):  http://{lan_ip}:{port}\n")
+        except Exception:
+            pass
+
     uvicorn.run(
         app,
-        host="127.0.0.1",
-        port=8080,
+        host=host,
+        port=port,
         reload=False,
         loop="asyncio",
         http="h11",
-        ws="none"
+        ws="none",
     )
