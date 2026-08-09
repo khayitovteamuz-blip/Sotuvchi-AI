@@ -600,13 +600,28 @@ async function deleteCategory(catId, catName, event) {
 // ════════════════════════════════════════════════════════
 // DASHBOARD — AI KPI cards
 // ════════════════════════════════════════════════════════
-function kpiCard(icon, color, label, value, hint) {
-    return `<div class="kpi-card">
-        <div class="kpi-icon" style="background:${color}1a; color:${color};">${icon}</div>
-        <div class="kpi-body">
+/** Uzbek number format: 45 700 000 (spaces, not commas). */
+function fmtNum(n) {
+    return Math.round(Number(n) || 0).toLocaleString('ru-RU').replace(/ /g, ' ');
+}
+
+/**
+ * One KPI tile. Pass `tab` to make it drill down into that section —
+ * a number you can't act on is decoration, so every tile that has a
+ * matching screen links to it.
+ */
+function kpiCard(icon, color, label, value, hint, tab, action) {
+    const go = action || (tab ? `switchToTab('${tab}')` : '');
+    const clickable = go ? ` kpi-card--link" onclick="${go}" role="button" tabindex="0"` : '"';
+    return `<div class="kpi-card${clickable}>
+        <div class="kpi-top">
+            <span class="kpi-icon" style="background:${color}1a; color:${color};">${icon}</span>
             <span class="kpi-label">${label}</span>
-            <h3 class="kpi-value">${value}</h3>
-            ${hint ? `<span class="kpi-hint">${hint}</span>` : ''}
+        </div>
+        <div class="kpi-value">${value}</div>
+        <div class="kpi-foot">
+            <span class="kpi-hint">${hint || ''}</span>
+            ${go ? '<span class="kpi-arrow">→</span>' : ''}
         </div>
     </div>`;
 }
@@ -621,12 +636,18 @@ async function loadDashboardStats() {
         const an = await anResp.json();
 
         document.getElementById('dashboard-kpis').innerHTML =
-            kpiCard('💰', '#00b87c', 'Jami tushum', data.total_revenue.toLocaleString() + ' UZS', null) +
-            kpiCard('🧾', '#06b6d4', 'Buyurtmalar', data.total_orders, null) +
-            kpiCard('💬', '#f59e0b', 'Suhbatlar', an.total_conversations, an.total_messages + ' xabar') +
-            kpiCard('📈', '#a855f7', 'Konversiya', an.conversion_rate + '%', 'suhbat → buyurtma') +
-            kpiCard('⚡️', '#0ea5e9', "O'rtacha javob", an.avg_latency_ms + ' ms', null) +
-            kpiCard('🙋', '#e11d48', 'Eskalatsiya', an.escalation_rate + '%', 'operatorga uzatildi');
+            kpiCard('💰', '#00b87c', 'Jami tushum', fmtNum(data.total_revenue) + ' <small>UZS</small>',
+                    'barcha buyurtmalar', 'tab-orders') +
+            kpiCard('🧾', '#06b6d4', 'Buyurtmalar', fmtNum(data.total_orders),
+                    'batafsil ko\'rish', 'tab-orders') +
+            kpiCard('💬', '#f59e0b', 'Suhbatlar', fmtNum(an.total_conversations),
+                    fmtNum(an.total_messages) + ' xabar', 'tab-inbox') +
+            kpiCard('📈', '#a855f7', 'Konversiya', an.conversion_rate + '<small>%</small>',
+                    'suhbat → buyurtma', 'tab-analytics') +
+            kpiCard('⚡️', '#0ea5e9', "O'rtacha javob", fmtNum(an.avg_latency_ms) + ' <small>ms</small>',
+                    'AI javob tezligi', 'tab-analytics') +
+            kpiCard('🙋', '#e11d48', 'Eskalatsiya', an.escalation_rate + '<small>%</small>',
+                    'operatorga uzatildi', null, 'openInboxOperator()');
 
         renderRecentOrders(data.recent_orders);
     } catch (e) {
@@ -645,13 +666,14 @@ function renderRecentOrders(orders) {
 
     orders.forEach(o => {
         const tr = document.createElement('tr');
+        const [day, time] = (o.created_at || '').split(' ');
         tr.innerHTML = `
-            <td><code>${o.id}</code></td>
-            <td><strong>${o.customer_name}</strong></td>
-            <td>${o.customer_phone}</td>
-            <td>${o.total_amount.toLocaleString()} UZS</td>
+            <td class="cell-nowrap"><code>${o.id}</code></td>
+            <td><strong>${escapeHtml(o.customer_name)}</strong></td>
+            <td class="cell-nowrap">${escapeHtml(o.customer_phone)}</td>
+            <td class="cell-nowrap cell-num">${fmtNum(o.total_amount)} <small>UZS</small></td>
             <td><span class="badge badge-${o.status.toLowerCase().replace("'", "")}">${o.status}</span></td>
-            <td>${o.created_at}</td>
+            <td class="cell-nowrap cell-date">${day || ''}<span>${time || ''}</span></td>
         `;
         tbody.appendChild(tr);
     });
@@ -1220,6 +1242,12 @@ function filterInboxTo(status) {
     if (btn) filterInbox(status, btn);
 }
 
+/** Dashboard escalation tile: open the Inbox already filtered to handoffs. */
+function openInboxOperator() {
+    switchToTab('tab-inbox');
+    setTimeout(() => filterInboxTo('operator'), 250);
+}
+
 function filterInbox(status, btn) {
     inboxFilter = status;
     document.querySelectorAll('.inbox-filter').forEach(b => b.classList.remove('active'));
@@ -1707,12 +1735,18 @@ async function loadAnalytics() {
         const a = await resp.json();
 
         document.getElementById('analytics-metrics').innerHTML =
-            kpiCard('💬', '#00b87c', 'Suhbatlar', a.total_conversations, a.total_messages + ' xabar') +
-            kpiCard('⚡️', '#0ea5e9', "O'rtacha javob vaqti", a.avg_latency_ms + ' ms', null) +
-            kpiCard('🙋', '#e11d48', 'Eskalatsiya', a.escalation_rate + '%', 'operatorga uzatildi') +
-            kpiCard('📈', '#a855f7', 'Savdo konversiyasi', a.conversion_rate + '%', a.order_count + ' buyurtma') +
-            kpiCard('🎫', '#f59e0b', 'Token sarfi', a.total_tokens.toLocaleString(), 'tannarx hisobi uchun') +
-            kpiCard('💰', '#06b6d4', 'Tushum', a.revenue.toLocaleString() + ' UZS', null);
+            kpiCard('💬', '#00b87c', 'Suhbatlar', fmtNum(a.total_conversations),
+                    fmtNum(a.total_messages) + ' xabar', 'tab-inbox') +
+            kpiCard('⚡️', '#0ea5e9', "O'rtacha javob", fmtNum(a.avg_latency_ms) + ' <small>ms</small>',
+                    'AI javob tezligi') +
+            kpiCard('🙋', '#e11d48', 'Eskalatsiya', a.escalation_rate + '<small>%</small>',
+                    'operatorga uzatildi', null, 'openInboxOperator()') +
+            kpiCard('📈', '#a855f7', 'Savdo konversiyasi', a.conversion_rate + '<small>%</small>',
+                    fmtNum(a.order_count) + ' buyurtma', 'tab-orders') +
+            kpiCard('🎫', '#f59e0b', 'Token sarfi', fmtNum(a.total_tokens),
+                    'tannarx hisobi uchun') +
+            kpiCard('💰', '#06b6d4', 'Tushum', fmtNum(a.revenue) + ' <small>UZS</small>',
+                    'barcha buyurtmalar', 'tab-orders');
 
         const total = Math.max(a.total_conversations, 1);
         const bar = (label, val, color) => `
