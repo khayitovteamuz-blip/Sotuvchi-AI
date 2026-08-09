@@ -102,10 +102,12 @@ class SystemSettings(BaseModel):
 
 
 class DashboardStats(BaseModel):
+    # AI-attributed figures come first: they are what this product delivers.
+    # total_revenue is the shop's own number, kept only as context.
+    ai_revenue: float = 0.0
+    ai_order_count: int = 0
     total_revenue: float
     total_orders: int
     active_leads: int
     conversion_rate: float
     recent_orders: List[Order]
-    weekly_sales: List[float] = [2800000.0, 4200000.0, 3100000.0, 5800000.0, 4900000.0, 7200000.0, 15200000.0]
-    weekly_labels: List[str] = ["Dush", "Sesh", "Chor", "Pays", "Juma", "Shan", "Yak"]

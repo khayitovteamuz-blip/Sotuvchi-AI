@@ -94,9 +94,7 @@
                 <div class="nav-item" data-tab="tab-ai-agent"><span>🤖</span> AI Agent</div>
                 <div class="nav-item" data-tab="tab-products"><span>📦</span> Katalog</div>
                 <div class="nav-item" data-tab="tab-orders"><span>🧾</span> Buyurtmalar</div>
-                <div class="nav-item" data-tab="tab-customers"><span>👥</span> Mijozlar</div>
                 <div class="nav-item" data-tab="tab-integrations"><span>🔌</span> Integratsiyalar</div>
-                <div class="nav-item" data-tab="tab-analytics"><span>📊</span> Analitika</div>
                 <div class="nav-item" data-tab="tab-settings"><span>⚙️</span> Sozlamalar</div>
             </nav>
 
@@ -123,11 +121,11 @@
                     <h2 id="page-title">Inbox</h2>
                     <p id="page-subtitle">Jonli suhbatlar — AI va operator</p>
                 </div>
-                <div id="header-action-group" style="display: none; gap: 10px; align-items: center;">
-                    <span class="categories-badge-pill" id="categories-count-text">0 ta kategoriya</span>
+                <!-- Category counts live in the filter chips now, so no badge here -->
+                <div id="header-action-group" style="display: none; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
                     <button class="btn-secondary" onclick="openAddCategoryModal()" title="Qo'lda kategoriya qo'shish">+ Kategoriya</button>
                     <button class="btn-secondary" onclick="autoCategorize()" id="ai-cat-btn" title="AI mahsulotlarni kategoriyalarga ajratadi">✨ AI kategoriyalash</button>
-                    <button class="btn-primary" onclick="openImportModal()">📥 Excel katalog yuklash</button>
+                    <button class="btn-primary" onclick="openImportModal()">📥 Excel yuklash</button>
                 </div>
             </header>
 
@@ -170,7 +168,19 @@
             <!-- ═══ DASHBOARD ═══ -->
             <section id="tab-overview" class="tab-view">
                 <div class="kpi-grid" id="dashboard-kpis"></div>
-                <div class="table-container" style="margin-top:22px;">
+
+                <div class="dash-split">
+                    <div class="panel-card">
+                        <h3 class="panel-card-title">Suhbatlar holati</h3>
+                        <div id="dashboard-status-bars"></div>
+                    </div>
+                    <div class="panel-card">
+                        <h3 class="panel-card-title">AI xarajati</h3>
+                        <div id="dashboard-cost"></div>
+                    </div>
+                </div>
+
+                <div class="table-container" style="margin-top:20px;">
                     <div style="padding: 20px 24px; border-bottom: 1px solid var(--card-border); font-weight: 700; font-size: 15px; color: var(--text-main); display: flex; justify-content: space-between; align-items: center;">
                         <span>🔥 Oxirgi Buyurtmalar</span>
                         <button onclick="switchToTab('tab-orders')" style="background: transparent; border: none; color: var(--primary); font-size: 13px; font-weight: 700; cursor: pointer;">Barchasini ko'rish →</button>
@@ -234,25 +244,33 @@
             </section>
 
             <!-- ═══ KATALOG ═══ -->
+            <!-- Products are the screen; categories are a filter, not a landing page. -->
             <section id="tab-products" class="tab-view">
-                <div id="categories-view">
-                    <div id="categories-cards-grid" class="categories-cards-grid"></div>
+                <div class="catalog-toolbar">
+                    <input type="text" id="product-search" class="form-control catalog-search"
+                           placeholder="🔍 Mahsulot qidirish..." oninput="renderProductsTable()">
+                    <button class="btn-primary" onclick="openAddProductModal()"><span>+</span> Mahsulot</button>
                 </div>
-                <div id="category-products-view" style="display: none;">
-                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; border-bottom: 1px solid var(--card-border); padding-bottom: 18px;">
-                        <div style="display: flex; align-items: center; gap: 14px;">
-                            <button onclick="showCategoriesView()" style="background: #ffffff; border: 1px solid var(--card-border); color: var(--text-main); padding: 10px 18px; border-radius: var(--radius-md); cursor: pointer; font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);">⬅️ Kategoriyalar</button>
-                            <h3 id="current-category-title" style="font-size: 22px; font-weight: 800; color: var(--text-main); letter-spacing: -0.3px;">Smartfonlar</h3>
-                        </div>
-                        <button onclick="openAddProductModalForCurrentCategory()" class="btn-primary" id="btn-add-product-in-category"><span>+</span> Mahsulot Qo'shish</button>
-                    </div>
-                    <div class="table-container">
-                        <table>
-                            <thead><tr><th>Rasm</th><th>ID</th><th>Mahsulot Nomi</th><th>Narxi</th><th>Ombor Qoldig'i</th><th>Amallar</th></tr></thead>
-                            <tbody id="products-tbody"></tbody>
-                        </table>
-                    </div>
+
+                <div class="cat-filter-row" id="category-filter-row"></div>
+
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width:60px;">Rasm</th>
+                                <th>Mahsulot</th>
+                                <th>Kategoriya</th>
+                                <th style="text-align:right;">Narxi</th>
+                                <th style="text-align:center;">Qoldiq</th>
+                                <th style="text-align:center;">Holati</th>
+                                <th style="width:96px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="products-tbody"></tbody>
+                    </table>
                 </div>
+                <div class="catalog-foot" id="catalog-foot"></div>
             </section>
 
             <!-- ═══ BUYURTMALAR ═══ -->
@@ -279,14 +297,6 @@
             </section>
 
             <!-- ═══ MIJOZLAR ═══ -->
-            <section id="tab-customers" class="tab-view">
-                <div class="table-container">
-                    <table>
-                        <thead><tr><th>Mijoz</th><th>Telefon</th><th>Buyurtmalar</th><th>LTV (jami xarid)</th><th>Oxirgi buyurtma</th></tr></thead>
-                        <tbody id="customers-tbody"></tbody>
-                    </table>
-                </div>
-            </section>
 
             <!-- ═══ INTEGRATSIYALAR ═══ -->
             <section id="tab-integrations" class="tab-view">
@@ -333,13 +343,6 @@
             </section>
 
             <!-- ═══ ANALITIKA ═══ -->
-            <section id="tab-analytics" class="tab-view">
-                <div class="kpi-grid" id="analytics-metrics"></div>
-                <div class="panel-card" style="margin-top:22px;">
-                    <h3 style="margin-bottom:16px;">Suhbatlar holati bo'yicha</h3>
-                    <div id="analytics-status-bars"></div>
-                </div>
-            </section>
 
             <!-- ═══ SOZLAMALAR ═══ -->
             <section id="tab-settings" class="tab-view">

@@ -24,18 +24,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin"])
 @router.get("/stats", response_model=DashboardStats)
 async def get_dashboard_stats(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     s = await repo.dashboard_stats(session, user.tenant_id)
-    weekly_labels = ["Dush", "Sesh", "Chor", "Pays", "Juma", "Shan", "Yak"]
-    weekly_sales = [2500000.0, 4100000.0, 3200000.0, 5600000.0, 4800000.0, 7100000.0,
-                    max(s["total_revenue"], 0.0)]
-    return DashboardStats(
-        total_revenue=s["total_revenue"],
-        total_orders=s["total_orders"],
-        active_leads=s["active_leads"],
-        conversion_rate=s["conversion_rate"],
-        recent_orders=s["recent_orders"],
-        weekly_sales=weekly_sales,
-        weekly_labels=weekly_labels,
-    )
+    return DashboardStats(**s)
 
 
 # ─── Categories ───────────────────────────────────────────────────────────────

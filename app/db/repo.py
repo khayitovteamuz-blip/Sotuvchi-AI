@@ -649,17 +649,26 @@ async def list_customers(session: AsyncSession, tenant_id: str) -> List[dict]:
 # ─── Dashboard stats ──────────────────────────────────────────────────────────
 async def dashboard_stats(session: AsyncSession, tenant_id: str) -> dict:
     orders = await list_orders(session, tenant_id)
-    total_revenue = sum(o.total_amount for o in orders if o.status != "Bekor qilindi")
+    live = [o for o in orders if o.status != "Bekor qilindi"]
+    total_revenue = sum(o.total_amount for o in live)
     total_orders = len(orders)
+
+    # Orders carrying a conversation_id were created by the AI during a chat.
+    # This is the number that shows what the product is actually worth — the
+    # shop's overall revenue is their CRM's business, not ours.
+    ai_orders = [o for o in orders if o.conversation_id]
+    ai_revenue = sum(o.total_amount for o in ai_orders if o.status != "Bekor qilindi")
 
     conv_res = await session.execute(
         select(func.count()).select_from(Conversation).where(Conversation.tenant_id == tenant_id)
     )
     active_leads = conv_res.scalar() or 0
-    conversion_rate = (total_orders / active_leads * 100) if active_leads > 0 else 0.0
+    conversion_rate = (len(ai_orders) / active_leads * 100) if active_leads > 0 else 0.0
 
     return {
         "total_revenue": total_revenue,
+        "ai_revenue": ai_revenue,
+        "ai_order_count": len(ai_orders),
         "total_orders": total_orders,
         "active_leads": active_leads,
         "conversion_rate": round(conversion_rate, 1),

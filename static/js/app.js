@@ -189,11 +189,9 @@ const TAB_META = {
     'tab-inbox':        { title: 'Inbox', sub: 'Jonli suhbatlar — AI va operator', btn: false, load: loadInbox },
     'tab-overview':     { title: 'Dashboard', sub: 'AI KPI va sotuv ko\'rsatkichlari', btn: false, load: loadDashboardStats },
     'tab-ai-agent':     { title: 'AI Agent', sub: 'Xarakter, qoidalar va sinov', btn: false, load: loadSettings },
-    'tab-products':     { title: 'Katalog', sub: 'Kategoriyalar va ombordagi mahsulotlar', btn: true, load: loadCategories },
+    'tab-products':     { title: 'Katalog', sub: 'Mahsulotlar, narx va ombor qoldig\'i', btn: true, load: loadCatalog },
     'tab-orders':       { title: 'Buyurtmalar', sub: 'Barcha buyurtmalar va status workflow', btn: false, load: loadOrders },
-    'tab-customers':    { title: 'Mijozlar', sub: 'Mijoz profillari, LTV va xarid tarixi', btn: false, load: loadCustomers },
-    'tab-integrations': { title: 'Integratsiyalar', sub: 'Telegram, Instagram, to\'lov va CRM', btn: false, load: loadIntegrations },
-    'tab-analytics':    { title: 'Analitika', sub: 'Javob vaqti, eskalatsiya va konversiya', btn: false, load: loadAnalytics },
+    'tab-integrations': { title: 'Integratsiyalar', sub: 'Telegram bot va operator bildirishnomasi', btn: false, load: loadIntegrations },
     'tab-settings':     { title: 'Sozlamalar', sub: 'Biznes profili, xodimlar va tarif', btn: false, load: loadAccountSettings }
 };
 
@@ -228,10 +226,6 @@ function initNavigation() {
             // On a phone the drawer covers the content — close it after choosing
             toggleSidebar(false);
 
-            if (targetTab === 'tab-products') {
-                showCategoriesView();
-            }
-
             // Remember the section so a reload returns here instead of Inbox
             localStorage.setItem('sotuvchi_active_tab', targetTab);
         });
@@ -256,141 +250,29 @@ function switchToTab(targetTab) {
     }
 }
 
-// Load Categories
+// Categories now only feed the filter chips and the product form's dropdown
 async function loadCategories() {
     try {
         const resp = await fetch('/api/admin/categories');
         currentCategories = await resp.json();
 
-        renderCategoriesGrid();
+        const badge = document.getElementById('categories-count-text');
+        if (badge) badge.textContent = `${currentCategories.length} ta kategoriya`;
         populateCategoryDropdown();
     } catch (e) {
         console.error('Kategoriyalarni yuklashda xatolik:', e);
     }
 }
 
-function getCategorySvgIcon(iconEmoji, catName) {
-    const nameLower = (catName || '').toLowerCase();
-    if (nameLower.includes('smart') || nameLower.includes('telefon')) {
-        return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>`;
-    }
-    if (nameLower.includes('noutbuk') || nameLower.includes('kompyuter')) {
-        return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="2" y1="20" x2="22" y2="20"></line></svg>`;
-    }
-    if (nameLower.includes('akses') || nameLower.includes('quloq')) {
-        return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"></path><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path></svg>`;
-    }
-    if (nameLower.includes('soat') || nameLower.includes('watch')) {
-        return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"></circle><polyline points="12 9 12 12 13.5 13.5"></polyline><path d="M16.51 17.35l-.85 3.83a2 2 0 0 1-1.96 1.57h-3.4a2 2 0 0 1-1.96-1.57l-.85-3.83M16.51 6.65l-.85-3.83A2 2 0 0 0 12.8 1.25h-3.4a2 2 0 0 0-1.96 1.57l-.85 3.83"></path></svg>`;
-    }
-    if (nameLower.includes('televizor') || nameLower.includes('texnika')) {
-        return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect><polyline points="17 2 12 7 7 2"></polyline></svg>`;
-    }
-    return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
+/** Catalog screen = products + their category filter. */
+async function loadCatalog() {
+    await loadCategories();
+    await loadProducts();
 }
 
-function getCategoryColorTheme(catName, index) {
-    const themes = [
-        { bg: 'rgba(2, 132, 199, 0.1)', border: 'rgba(2, 132, 199, 0.25)', color: '#0284c7' },  // Blue
-        { bg: 'rgba(217, 119, 6, 0.1)', border: 'rgba(217, 119, 6, 0.25)', color: '#d97706' },   // Amber
-        { bg: 'rgba(126, 34, 206, 0.1)', border: 'rgba(126, 34, 206, 0.25)', color: '#7e22ce' }, // Purple
-        { bg: 'rgba(5, 150, 105, 0.1)', border: 'rgba(5, 150, 105, 0.25)', color: '#059669' },   // Emerald Green
-        { bg: 'rgba(225, 29, 72, 0.1)', border: 'rgba(225, 29, 72, 0.25)', color: '#e11d48' }    // Rose / Red
-    ];
-    
-    const nameLower = (catName || '').toLowerCase();
-    if (nameLower.includes('smart') || nameLower.includes('telefon')) return themes[0];
-    if (nameLower.includes('noutbuk') || nameLower.includes('kompyuter')) return themes[3];
-    if (nameLower.includes('akses') || nameLower.includes('quloq')) return themes[1];
-    if (nameLower.includes('soat') || nameLower.includes('watch')) return themes[2];
-    
-    return themes[index % themes.length];
-}
 
-function getCategoryRealImage(cat) {
-    if (cat && cat.image_url && cat.image_url.trim().length > 0) {
-        return cat.image_url;
-    }
-    
-    const nameLower = ((cat && cat.name) || '').toLowerCase();
-    if (nameLower.includes('smart') || nameLower.includes('telefon')) {
-        return 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=300&auto=format&fit=crop&q=80';
-    }
-    if (nameLower.includes('noutbuk') || nameLower.includes('kompyuter')) {
-        return 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=300&auto=format&fit=crop&q=80';
-    }
-    if (nameLower.includes('akses') || nameLower.includes('quloq')) {
-        return 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=300&auto=format&fit=crop&q=80';
-    }
-    if (nameLower.includes('soat') || nameLower.includes('watch')) {
-        return 'https://images.unsplash.com/photo-1508685096489-7aacd43bd3b1?w=300&auto=format&fit=crop&q=80';
-    }
-    if (nameLower.includes('televizor') || nameLower.includes('texnika')) {
-        return 'https://images.unsplash.com/photo-1593359677879-a4bb92f829d1?w=300&auto=format&fit=crop&q=80';
-    }
-    return 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=300&auto=format&fit=crop&q=80';
-}
 
-function renderCategoriesGrid() {
-    const grid = document.getElementById('categories-cards-grid');
-    if (!grid) return;
 
-    grid.innerHTML = '';
-    const badge = document.getElementById('categories-count-text');
-    if (badge) {
-        badge.textContent = `${currentCategories.length} ta kategoriya`;
-    }
-
-    currentCategories.forEach((cat, idx) => {
-        const pCount = cat.product_count || 0;
-        const card = document.createElement('div');
-        card.className = 'category-card';
-        
-        card.onclick = (e) => {
-            if (e.target.closest('.btn-delete-cat-icon') || e.target.closest('.btn-edit-cat-icon')) return;
-            openCategoryProducts(cat.name);
-        };
-
-        const theme = getCategoryColorTheme(cat.name, idx);
-        const realImgUrl = getCategoryRealImage(cat);
-        const avatarHtml = `<img src="${realImgUrl}" alt="${cat.name}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 10px;">`;
-
-        card.innerHTML = `
-            <div class="category-card-header">
-                <div class="category-icon-wrapper" style="background: ${theme.bg}; border: 1px solid ${theme.border}; color: ${theme.color}; overflow: hidden; padding: 0;">
-                    ${avatarHtml}
-                </div>
-                <div class="category-card-header-right">
-                    <span class="category-count-pill" style="background: ${theme.bg}; border: 1px solid ${theme.border}; color: ${theme.color};">
-                        ${pCount} ta mahsulot
-                    </span>
-                    <button class="btn-edit-cat-icon" onclick="openEditCategoryModal('${cat.id}', event)" title="Tahrirlash">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M12 20h9"></path>
-                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                        </svg>
-                    </button>
-                    <button class="btn-delete-cat-icon" onclick="deleteCategory('${cat.id}', '${cat.name}', event)" title="O'chirish">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                            <polyline points="3 6 5 6 21 6"></polyline>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                        </svg>
-                    </button>
-                </div>
-            </div>
-            
-            <div class="category-card-body">
-                <h4 class="category-card-title">${cat.name}</h4>
-            </div>
-
-            <div class="category-card-footer" style="color: ${theme.color};">
-                <span>Mahsulotlarni ko'rish</span>
-                <span class="arrow">→</span>
-            </div>
-        `;
-        grid.appendChild(card);
-    });
-}
 
 // Category Modal & Real Image Upload Handlers
 function openAddCategoryModal() {
@@ -525,43 +407,6 @@ function populateCategoryDropdown() {
     }
 }
 
-function showCategoriesView() {
-    selectedCategoryFilter = null;
-    document.querySelector('.top-header').style.display = 'flex';
-    document.getElementById('header-action-group').style.display = 'flex';
-    document.getElementById('categories-view').style.display = 'block';
-    document.getElementById('category-products-view').style.display = 'none';
-    loadCategories();
-}
-
-function openCategoryProducts(categoryName) {
-    selectedCategoryFilter = categoryName;
-    document.querySelector('.top-header').style.display = 'none';
-    document.getElementById('header-action-group').style.display = 'none';
-    document.getElementById('categories-view').style.display = 'none';
-    document.getElementById('category-products-view').style.display = 'block';
-    document.getElementById('current-category-title').textContent = categoryName;
-    
-    // Update button text to reflect current category
-    const addBtn = document.getElementById('btn-add-product-in-category');
-    if (addBtn) {
-        addBtn.innerHTML = `<span>+</span> Mahsulot Qo'shish`;
-    }
-
-    renderFilteredProducts();
-}
-
-// Add Product specifically inside current open category
-function openAddProductModalForCurrentCategory() {
-    openAddProductModal();
-    if (selectedCategoryFilter) {
-        const catSelect = document.getElementById('prod-category');
-        if (catSelect) {
-            catSelect.value = selectedCategoryFilter;
-        }
-    }
-}
-
 // Add / Delete Category Modal Handlers
 function openAddCategoryModal() {
     document.getElementById('cat-name').value = '';
@@ -651,24 +496,58 @@ async function loadDashboardStats() {
         const data = await statsResp.json();
         const an = await anResp.json();
 
+        // AI-attributed revenue leads: that is what this product produced.
+        // The shop's overall revenue is context, shown as a hint underneath.
         document.getElementById('dashboard-kpis').innerHTML =
-            kpiCard('💰', '#00b87c', 'Jami tushum', fmtNum(data.total_revenue) + ' <small>UZS</small>',
-                    'barcha buyurtmalar', 'tab-orders') +
-            kpiCard('🧾', '#06b6d4', 'Buyurtmalar', fmtNum(data.total_orders),
-                    'batafsil ko\'rish', 'tab-orders') +
+            kpiCard('🤖', '#00b87c', 'AI orqali tushum', fmtNum(data.ai_revenue) + ' <small>UZS</small>',
+                    `jami do'kon: ${fmtNum(data.total_revenue)}`, 'tab-orders') +
+            kpiCard('🧾', '#06b6d4', 'AI buyurtmalari', fmtNum(data.ai_order_count),
+                    `jami: ${fmtNum(data.total_orders)} ta`, 'tab-orders') +
             kpiCard('💬', '#f59e0b', 'Suhbatlar', fmtNum(an.total_conversations),
                     fmtNum(an.total_messages) + ' xabar', 'tab-inbox') +
             kpiCard('📈', '#a855f7', 'Konversiya', an.conversion_rate + '<small>%</small>',
-                    'suhbat → buyurtma', 'tab-analytics') +
+                    'suhbat → buyurtma') +
             kpiCard('⚡️', '#0ea5e9', "O'rtacha javob", fmtNum(an.avg_latency_ms) + ' <small>ms</small>',
-                    'AI javob tezligi', 'tab-analytics') +
+                    'AI javob tezligi') +
             kpiCard('🙋', '#e11d48', 'Eskalatsiya', an.escalation_rate + '<small>%</small>',
                     'operatorga uzatildi', null, 'openInboxOperator()');
 
+        renderStatusBars(an);
+        renderCostPanel(an, data);
         renderRecentOrders(data.recent_orders);
     } catch (e) {
         console.error('Stats yuklashda xatolik:', e);
     }
+}
+
+/** Where conversations stand: how many the AI still owns vs handed over. */
+function renderStatusBars(an) {
+    const box = document.getElementById('dashboard-status-bars');
+    if (!box) return;
+    const total = Math.max(an.total_conversations, 1);
+    const bar = (label, val, color) => `
+        <div class="stat-bar-row">
+            <span class="stat-bar-label">${label}</span>
+            <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${(val / total * 100).toFixed(1)}%; background:${color};"></div></div>
+            <span class="stat-bar-val">${val}</span>
+        </div>`;
+    box.innerHTML =
+        bar('🤖 AI', an.by_status.ai, '#00b87c') +
+        bar('👨‍💼 Operator', an.by_status.operator, '#f59e0b') +
+        bar('✅ Yopilgan', an.by_status.closed, '#64748b');
+}
+
+/** Token spend — the number that decides whether a tariff is profitable. */
+function renderCostPanel(an, data) {
+    const box = document.getElementById('dashboard-cost');
+    if (!box) return;
+    const convs = Math.max(an.total_conversations, 1);
+    const perConv = Math.round(an.total_tokens / convs);
+    box.innerHTML = `
+        <div class="cost-row"><span>Jami token</span><b>${fmtNum(an.total_tokens)}</b></div>
+        <div class="cost-row"><span>1 suhbatga o'rtacha</span><b>${fmtNum(perConv)}</b></div>
+        <div class="cost-row"><span>AI yopgan savdo</span><b>${fmtNum(data.ai_order_count)} ta</b></div>
+        <p class="cost-hint">Token — AI xarajati. Tarif narxini shu asosda hisoblang.</p>`;
 }
 
 function renderRecentOrders(orders) {
@@ -700,56 +579,104 @@ async function loadProducts() {
     try {
         const resp = await fetch('/api/admin/products');
         currentProducts = await resp.json();
-
-        if (selectedCategoryFilter) {
-            renderFilteredProducts();
-        }
+        renderCategoryFilter();
+        renderProductsTable();
     } catch (e) {
         console.error('Mahsulotlarni yuklashda xatolik:', e);
     }
 }
 
-function renderFilteredProducts() {
+/** Category chips above the table — a filter, not a separate screen. */
+function renderCategoryFilter() {
+    const row = document.getElementById('category-filter-row');
+    if (!row) return;
+
+    const counts = {};
+    currentProducts.forEach(p => {
+        const c = (p.category || '').trim() || '— kategoriyasiz';
+        counts[c] = (counts[c] || 0) + 1;
+    });
+    const names = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+
+    const chip = (label, value, n, active) =>
+        `<button class="cat-chip${active ? ' active' : ''}" onclick="filterByCategory(${value === null ? 'null' : `'${value.replace(/'/g, "\\'")}'`})">
+            ${escapeHtml(label)} <span>${n}</span>
+        </button>`;
+
+    row.innerHTML =
+        chip('Barchasi', null, currentProducts.length, !selectedCategoryFilter) +
+        names.map(n => chip(n, n, counts[n], selectedCategoryFilter === n)).join('');
+}
+
+function filterByCategory(name) {
+    selectedCategoryFilter = name;
+    renderCategoryFilter();
+    renderProductsTable();
+}
+
+function renderProductsTable() {
     const tbody = document.getElementById('products-tbody');
     if (!tbody) return;
-    tbody.innerHTML = '';
 
-    const filtered = selectedCategoryFilter 
-        ? currentProducts.filter(p => p.category.toLowerCase() === selectedCategoryFilter.toLowerCase())
-        : currentProducts;
+    const q = (document.getElementById('product-search')?.value || '').trim().toLowerCase();
+    let list = currentProducts;
 
-    if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 36px;">Ushbu kategoriyada hali mahsulotlar mavjud emas. Yuqoridagi <strong>"+ ${selectedCategoryFilter} ga Mahsulot Qo'shish"</strong> tugmasini bosing!</td></tr>`;
+    if (selectedCategoryFilter) {
+        const want = selectedCategoryFilter === '— kategoriyasiz';
+        list = list.filter(p => want
+            ? !(p.category || '').trim()
+            : (p.category || '').toLowerCase() === selectedCategoryFilter.toLowerCase());
+    }
+    if (q) {
+        list = list.filter(p =>
+            p.name.toLowerCase().includes(q) ||
+            (p.category || '').toLowerCase().includes(q) ||
+            (p.description || '').toLowerCase().includes(q));
+    }
+
+    const foot = document.getElementById('catalog-foot');
+    if (foot) {
+        foot.textContent = list.length === currentProducts.length
+            ? `${currentProducts.length} ta mahsulot`
+            : `${list.length} / ${currentProducts.length} ta mahsulot`;
+    }
+
+    if (list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="table-empty">
+            ${currentProducts.length === 0
+                ? 'Katalog bo\'sh. <b>Excel katalog yuklash</b> yoki <b>+ Mahsulot</b> bilan boshlang.'
+                : 'Bu shartlarga mos mahsulot topilmadi.'}
+        </td></tr>`;
         return;
     }
 
-    filtered.forEach(p => {
-        const imgSrc = (p.image_urls && p.image_urls.length > 0) ? p.image_urls[0] : (p.image_url || '/static/images/logo.svg');
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
+    tbody.innerHTML = list.map(p => {
+        const img = (p.image_urls && p.image_urls[0]) || p.image_url || '/static/images/logo.svg';
+        const qty = p.stock_quantity;
+        const state = !p.in_stock || qty <= 0
+            ? '<span class="stock-pill out">Tugagan</span>'
+            : qty <= 3
+                ? '<span class="stock-pill low">Kam qoldi</span>'
+                : '<span class="stock-pill ok">Mavjud</span>';
+        return `<tr>
+            <td><img src="${escapeHtml(img)}" alt="" class="prod-thumb" loading="lazy"
+                     onerror="this.src='/static/images/logo.svg'"></td>
             <td>
-                <img src="${imgSrc}" alt="${p.name}" style="width: 44px; height: 44px; border-radius: 10px; object-fit: cover; border: 1px solid var(--card-border);">
+                <strong>${escapeHtml(p.name)}</strong>
+                <div class="prod-desc">${escapeHtml(p.description || '')}</div>
             </td>
-            <td><code>${p.id}</code></td>
+            <td class="cell-muted">${escapeHtml(p.category || '—')}</td>
+            <td class="cell-nowrap cell-num">${fmtNum(p.price)} <small>${escapeHtml(p.currency)}</small></td>
+            <td style="text-align:center;">${fmtNum(qty)}</td>
+            <td style="text-align:center;">${state}</td>
             <td>
-                <strong>${p.name}</strong>
-                <p style="font-size: 11px; color: var(--text-muted); max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${p.description || ''}</p>
-            </td>
-            <td><strong>${p.price.toLocaleString()} ${p.currency}</strong></td>
-            <td>${p.stock_quantity} ta</td>
-            <td>
-                <div style="display: flex; gap: 8px;">
-                    <button onclick="openEditProductModal('${p.id}')" style="background: rgba(0, 245, 160, 0.15); border: 1px solid rgba(0, 245, 160, 0.3); color: #00F5A0; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;">
-                        ✏️ Tahrirlash
-                    </button>
-                    <button onclick="deleteProduct('${p.id}')" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;">
-                        🗑 O'chirish
-                    </button>
+                <div class="row-actions">
+                    <button onclick="openEditProductModal('${p.id}')" title="Tahrirlash">✏️</button>
+                    <button onclick="deleteProduct('${p.id}')" title="O'chirish" class="danger">🗑</button>
                 </div>
             </td>
-        `;
-        tbody.appendChild(tr);
-    });
+        </tr>`;
+    }).join('');
 }
 
 // Multi-Image Gallery Handlers & Clean Vector Trash Icon Logic
@@ -952,10 +879,6 @@ async function saveProductForm() {
         closeProductModal();
         await loadProducts();
         await loadCategories();
-
-        if (selectedCategoryFilter) {
-            renderFilteredProducts();
-        }
     } catch (e) {
         console.error('Mahsulotni saqlashda xatolik:', e);
     }
@@ -966,11 +889,7 @@ async function deleteProduct(productId) {
     try {
         await fetch(`/api/admin/products/${productId}`, { method: 'DELETE' });
         await loadProducts();
-        await loadCategories();
-        if (selectedCategoryFilter) {
-            renderFilteredProducts();
-        }
-    } catch (e) {
+        await loadCategories();    } catch (e) {
         console.error('O\'chirishda xatolik:', e);
     }
 }
@@ -1295,6 +1214,7 @@ async function openConversation(convId) {
                 ${c.status !== 'operator' ? `<button class="btn-mini" onclick="setConvStatus('${c.id}','operator')">👨‍💼 Men javob beraman</button>` : ''}
                 ${c.status !== 'ai' ? `<button class="btn-mini" onclick="setConvStatus('${c.id}','ai')">🤖 AI'ga qaytar</button>` : ''}
                 ${c.status !== 'closed' ? `<button class="btn-mini" onclick="setConvStatus('${c.id}','closed')">✅ Yopish</button>` : ''}
+                <button class="btn-mini danger" onclick="deleteConversation('${c.id}')" title="Suhbatni o'chirish">🗑</button>
             </div>`;
 
         renderMessages('inbox-messages', data.messages);
@@ -1349,6 +1269,22 @@ async function setConvStatus(convId, status) {
         toast(status === 'operator' ? 'Siz javob berasiz' : status === 'ai' ? "AI'ga qaytarildi" : 'Suhbat yopildi');
     } catch (e) {
         toast('Xatolik', true);
+    }
+}
+
+async function deleteConversation(convId) {
+    if (!confirm("Bu suhbat va uning barcha xabarlari o'chiriladi. Davom etamizmi?")) return;
+    try {
+        const resp = await fetch(`/api/inbox/conversations/${convId}`, { method: 'DELETE' });
+        if (!resp.ok) throw new Error('delete failed');
+        activeConvId = null;
+        document.getElementById('inbox-chat-header').innerHTML = '';
+        document.getElementById('inbox-messages').innerHTML =
+            '<div class="inbox-empty">Suhbatni tanlang</div>';
+        await loadInbox();
+        toast("Suhbat o'chirildi");
+    } catch (e) {
+        toast("O'chirishda xatolik", true);
     }
 }
 
@@ -1595,27 +1531,6 @@ async function autoCategorize(onlyUncategorized = true) {
 // ════════════════════════════════════════════════════════
 // MIJOZLAR
 // ════════════════════════════════════════════════════════
-async function loadCustomers() {
-    try {
-        const resp = await fetch('/api/admin/customers');
-        const list = await resp.json();
-        const tbody = document.getElementById('customers-tbody');
-        if (!list || list.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">Hali mijozlar yo'q — birinchi buyurtmadan keyin paydo bo'ladi.</td></tr>`;
-            return;
-        }
-        tbody.innerHTML = list.map(c => `
-            <tr>
-                <td><strong>${escapeHtml(c.customer_name)}</strong></td>
-                <td>${escapeHtml(c.customer_phone)}</td>
-                <td>${c.order_count}</td>
-                <td><strong>${c.ltv.toLocaleString()} UZS</strong></td>
-                <td>${c.last_order_at || '—'}</td>
-            </tr>`).join('');
-    } catch (e) {
-        console.error('Mijozlarni yuklashda xatolik:', e);
-    }
-}
 
 // ════════════════════════════════════════════════════════
 // INTEGRATSIYALAR — Telegram
@@ -1748,40 +1663,6 @@ async function disconnectTelegram() {
 // ════════════════════════════════════════════════════════
 // ANALITIKA
 // ════════════════════════════════════════════════════════
-async function loadAnalytics() {
-    try {
-        const resp = await fetch('/api/admin/analytics');
-        const a = await resp.json();
-
-        document.getElementById('analytics-metrics').innerHTML =
-            kpiCard('💬', '#00b87c', 'Suhbatlar', fmtNum(a.total_conversations),
-                    fmtNum(a.total_messages) + ' xabar', 'tab-inbox') +
-            kpiCard('⚡️', '#0ea5e9', "O'rtacha javob", fmtNum(a.avg_latency_ms) + ' <small>ms</small>',
-                    'AI javob tezligi') +
-            kpiCard('🙋', '#e11d48', 'Eskalatsiya', a.escalation_rate + '<small>%</small>',
-                    'operatorga uzatildi', null, 'openInboxOperator()') +
-            kpiCard('📈', '#a855f7', 'Savdo konversiyasi', a.conversion_rate + '<small>%</small>',
-                    fmtNum(a.order_count) + ' buyurtma', 'tab-orders') +
-            kpiCard('🎫', '#f59e0b', 'Token sarfi', fmtNum(a.total_tokens),
-                    'tannarx hisobi uchun') +
-            kpiCard('💰', '#06b6d4', 'Tushum', fmtNum(a.revenue) + ' <small>UZS</small>',
-                    'barcha buyurtmalar', 'tab-orders');
-
-        const total = Math.max(a.total_conversations, 1);
-        const bar = (label, val, color) => `
-            <div class="stat-bar-row">
-                <span class="stat-bar-label">${label}</span>
-                <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${(val / total * 100).toFixed(1)}%; background:${color};"></div></div>
-                <span class="stat-bar-val">${val}</span>
-            </div>`;
-        document.getElementById('analytics-status-bars').innerHTML =
-            bar('🤖 AI', a.by_status.ai, '#00b87c') +
-            bar('👨‍💼 Operator', a.by_status.operator, '#f59e0b') +
-            bar('✅ Yopilgan', a.by_status.closed, '#64748b');
-    } catch (e) {
-        console.error('Analitikani yuklashda xatolik:', e);
-    }
-}
 
 // ════════════════════════════════════════════════════════
 // SOZLAMALAR (biznes profili)

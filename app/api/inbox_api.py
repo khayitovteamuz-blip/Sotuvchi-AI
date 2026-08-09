@@ -79,6 +79,17 @@ async def operator_reply(conv_id: str, text: str = Body(..., embed=True), user: 
     return {"status": "success", "conversation_status": conv.status}
 
 
+@router.delete("/conversations/{conv_id}")
+async def delete_conversation(conv_id: str, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    """Remove a conversation and its messages (test chatter shouldn't sit next to real ones)."""
+    conv = await repo.get_conversation(session, user.tenant_id, conv_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Suhbat topilmadi.")
+    await session.delete(conv)   # messages cascade
+    await session.commit()
+    return {"status": "success"}
+
+
 @router.post("/conversations/{conv_id}/status")
 async def set_status(conv_id: str, status: str = Body(..., embed=True), user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     if status not in ("ai", "operator", "closed"):
