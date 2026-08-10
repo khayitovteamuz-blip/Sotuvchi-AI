@@ -1,13 +1,6 @@
-import sys
-from pathlib import Path
-
-# Ensure virtual environment site-packages is in sys.path
-venv_site_packages = Path(__file__).parent / ".venv" / "lib" / "python3.9" / "site-packages"
-if venv_site_packages.exists() and str(venv_site_packages) not in sys.path:
-    sys.path.insert(0, str(venv_site_packages))
-
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
