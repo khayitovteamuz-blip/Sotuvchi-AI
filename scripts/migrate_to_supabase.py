@@ -7,6 +7,7 @@ Safe to re-run: rows that already exist on the target are skipped.
 Run:  .venv/bin/python -m scripts.migrate_to_supabase
 """
 import asyncio
+import json
 import sys
 
 from sqlalchemy import text
@@ -30,6 +31,13 @@ async def fetch_all(engine, table):
         return [dict(r) for r in res.mappings().all()]
 
 
+def _encode(value):
+    """JSONB round-trip: the driver hands back list/dict but wants JSON text."""
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False)
+    return value
+
+
 async def copy_table(src_engine, dst_engine, table) -> tuple:
     rows = await fetch_all(src_engine, table)
     if not rows:
@@ -44,7 +52,7 @@ async def copy_table(src_engine, dst_engine, table) -> tuple:
     inserted = skipped = 0
     async with dst_engine.begin() as conn:
         for row in rows:
-            payload = {c: row[c] for c in cols}
+            payload = {c: _encode(row[c]) for c in cols}
             try:
                 await conn.execute(
                     text(f'INSERT INTO {table} ({col_list}) VALUES ({placeholders}) '
@@ -54,7 +62,8 @@ async def copy_table(src_engine, dst_engine, table) -> tuple:
                 inserted += 1
             except Exception as e:
                 skipped += 1
-                print(f"      ⚠️  {table}: bitta qator o'tkazildi — {str(e)[:90]}")
+                if skipped == 1:      # one sample is enough to diagnose
+                    print(f"      ⚠️  {table}: {str(e)[:150]}")
     return inserted, skipped
 
 
