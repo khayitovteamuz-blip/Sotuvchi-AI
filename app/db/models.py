@@ -88,6 +88,21 @@ class TenantSettings(Base):
     # Guardrail: escalate to a human after N consecutive "I don't know" turns
     auto_handoff_after: Mapped[int] = mapped_column(Integer, default=3)
 
+    # ── Knowledge Base: the business rules the AI answers from ──
+    # Structured fields, not free text, because delivery cost must be a number
+    # the calc_delivery tool can use — not a sentence the model interprets.
+    delivery_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    delivery_fee_city: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    delivery_fee_regions: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    free_delivery_from: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    delivery_days_city: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    delivery_days_regions: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    payment_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    warranty_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    return_policy: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    working_hours: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    faq: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Where operator alerts are delivered. The owner pairs their own Telegram by
     # sending "/operator <pairing_code>" to the bot — without this, a handoff
     # only shows in the panel and nobody is actually notified.

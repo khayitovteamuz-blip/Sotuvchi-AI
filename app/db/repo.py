@@ -385,11 +385,22 @@ async def get_settings(session: AsyncSession, tenant_id: str) -> TenantSettings:
 
 async def save_settings(session: AsyncSession, tenant_id: str, data: dict) -> TenantSettings:
     s = await get_settings(session, tenant_id)
-    for field in ("system_prompt", "ai_provider", "model_name", "temperature",
-                  "bot_enabled", "sheets_sync_enabled", "ai_name", "ai_tone",
-                  "ai_language", "greeting_message", "auto_handoff_after"):
+    plain = ("system_prompt", "ai_provider", "model_name", "temperature",
+             "bot_enabled", "sheets_sync_enabled", "ai_name", "ai_tone",
+             "ai_language", "greeting_message", "auto_handoff_after")
+    for field in plain:
         if field in data and data[field] is not None:
             setattr(s, field, data[field])
+
+    # Knowledge Base fields accept None/"" — clearing a policy must be possible,
+    # otherwise a business could never remove a rule it no longer offers.
+    kb = ("delivery_info", "delivery_fee_city", "delivery_fee_regions",
+          "free_delivery_from", "delivery_days_city", "delivery_days_regions",
+          "payment_info", "warranty_info", "return_policy", "working_hours", "faq")
+    for field in kb:
+        if field in data:
+            val = data[field]
+            setattr(s, field, val if val not in ("",) else None)
     await session.commit()
     return s
 

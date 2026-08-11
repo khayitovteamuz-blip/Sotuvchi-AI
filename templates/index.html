@@ -229,7 +229,69 @@
                         </div>
 
                         <button class="btn-primary" onclick="saveSettings()">Saqlash</button>
-                        <span class="agent-note">Qo'shimcha sozlamalar (model tanlash, eskalatsiya chegarasi, Knowledge Base) keyingi bosqichda qo'shiladi.</span>
+                    </div>
+
+                    <!-- Knowledge Base: what the AI is allowed to say about your rules -->
+                    <div class="panel-card">
+                        <h3 class="panel-card-title">📚 Bilimlar bazasi</h3>
+                        <p class="field-hint" style="margin-bottom:16px;">
+                            AI shu ma'lumotlarga tayanib javob beradi. To'ldirilmagan bo'lsa —
+                            o'ylab topmaydi, operatorga uzatadi.
+                        </p>
+
+                        <div class="kb-group">
+                            <div class="kb-group-title">🚚 Yetkazib berish</div>
+                            <div class="agent-row">
+                                <div class="form-group" style="flex:1 1 150px;"><label>Shahar ichida (UZS)</label>
+                                    <input type="number" id="kb-fee-city" class="form-control" placeholder="25000"></div>
+                                <div class="form-group" style="flex:1 1 150px;"><label>Viloyatlarga (UZS)</label>
+                                    <input type="number" id="kb-fee-regions" class="form-control" placeholder="45000"></div>
+                                <div class="form-group" style="flex:1 1 150px;"><label>Shu summadan bepul</label>
+                                    <input type="number" id="kb-free-from" class="form-control" placeholder="1000000"></div>
+                            </div>
+                            <div class="agent-row">
+                                <div class="form-group" style="flex:1 1 150px;"><label>Shaharda muddat</label>
+                                    <input type="text" id="kb-days-city" class="form-control" placeholder="1-2 kun"></div>
+                                <div class="form-group" style="flex:1 1 150px;"><label>Viloyatda muddat</label>
+                                    <input type="text" id="kb-days-regions" class="form-control" placeholder="2-4 kun"></div>
+                            </div>
+                            <div class="form-group"><label>Qo'shimcha shartlar</label>
+                                <textarea id="kb-delivery" class="form-control" style="min-height:60px;"
+                                          placeholder="Masalan: BTS orqali yuboramiz, yetkazib berish kuni oldindan qo'ng'iroq qilamiz"></textarea></div>
+                        </div>
+
+                        <div class="kb-group">
+                            <div class="kb-group-title">💳 To'lov turlari</div>
+                            <textarea id="kb-payment" class="form-control" style="min-height:70px;"
+                                      placeholder="Naqd, Payme, Click, plastik karta, bo'lib to'lash (3/6/12 oy)..."></textarea>
+                        </div>
+
+                        <div class="kb-group">
+                            <div class="kb-group-title">🛡 Kafolat</div>
+                            <textarea id="kb-warranty" class="form-control" style="min-height:70px;"
+                                      placeholder="Masalan: barcha texnikaga 1 yil rasmiy kafolat, servis markaz manzili..."></textarea>
+                        </div>
+
+                        <div class="kb-group">
+                            <div class="kb-group-title">↩️ Qaytarish siyosati</div>
+                            <textarea id="kb-return" class="form-control" style="min-height:70px;"
+                                      placeholder="Masalan: 14 kun ichida qaytarish mumkin, mahsulot ishlatilmagan bo'lsa..."></textarea>
+                        </div>
+
+                        <div class="kb-group">
+                            <div class="kb-group-title">🕐 Ish vaqti</div>
+                            <input type="text" id="kb-hours" class="form-control"
+                                   placeholder="Dush-Shan 9:00-19:00, Yakshanba dam olish">
+                        </div>
+
+                        <div class="kb-group">
+                            <div class="kb-group-title">❓ Boshqa savol-javoblar</div>
+                            <textarea id="kb-faq" class="form-control" style="min-height:110px;"
+                                      placeholder="S: Filialingiz qayerda?&#10;J: Chilonzor 9-kvartal, 45-uy&#10;&#10;S: Ulgurji narx bormi?&#10;J: 10 donadan yuqori xaridga chegirma bor"></textarea>
+                        </div>
+
+                        <button class="btn-primary" onclick="saveSettings()">Bilimlar bazasini saqlash</button>
+                        <span class="agent-note" id="kb-status"></span>
                     </div>
 
                     <div class="panel-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column;">

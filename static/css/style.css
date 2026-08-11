@@ -1560,3 +1560,15 @@ textarea.form-control {
     border-radius: 9px; border: 1px solid var(--card-border); background: #f8fafc;
 }
 .msg-right .msg-photos { justify-content: flex-end; }
+
+/* Knowledge Base sections */
+.kb-group {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--card-border);
+}
+.kb-group:last-of-type { border-bottom: none; }
+.kb-group-title {
+    font-size: 13px; font-weight: 800; color: var(--text-main); margin-bottom: 10px;
+}
+.kb-group .form-control { margin-bottom: 0; }
+.kb-group .agent-row { margin-bottom: 4px; }

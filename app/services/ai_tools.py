@@ -24,10 +24,11 @@ from app.db.models import Conversation
 
 logger = logging.getLogger("ai_tools")
 
-# Free delivery above this amount (kept here so the model can't invent its own rule)
-FREE_DELIVERY_THRESHOLD = 1_000_000.0
-DELIVERY_FEE_TASHKENT = 25_000.0
-DELIVERY_FEE_REGIONS = 45_000.0
+# Fallbacks only — the real numbers come from the tenant's Knowledge Base.
+# A business that hasn't filled it in gets no invented prices: calc_delivery
+# says "operator will confirm" instead of quoting a figure we made up.
+DEFAULT_DELIVERY_DAYS_CITY = "1-2 kun"
+DEFAULT_DELIVERY_DAYS_REGIONS = "2-4 kun"
 
 
 # ─── Declarations sent to Gemini ──────────────────────────────────────────────
@@ -123,6 +124,22 @@ def tool_declarations() -> List[types.Tool]:
             ),
         ),
         types.FunctionDeclaration(
+            name="search_knowledge",
+            description=(
+                "Do'kon qoidalarini bilish: to'lov turlari, kafolat, qaytarish siyosati, "
+                "ish vaqti, yetkazib berish shartlari va boshqa FAQ. "
+                "Mahsulotdan TASHQARI har qanday savolda MAJBURIY chaqiring — "
+                "javobni o'zingizdan o'ylab topmang."
+            ),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "question": types.Schema(type=types.Type.STRING, description="Mijozning savoli"),
+                },
+                required=["question"],
+            ),
+        ),
+        types.FunctionDeclaration(
             name="handoff_to_human",
             description=(
                 "Suhbatni jonli operatorga uzatish. Mijoz operator so'raganda, shikoyat qilganda, "
@@ -158,7 +175,9 @@ async def execute_tool(
         if name == "check_stock":
             return await _check_stock(session, tenant_id, args.get("product_id", ""))
         if name == "calc_delivery":
-            return _calc_delivery(args.get("region", ""), args.get("order_amount"))
+            return await _calc_delivery(session, tenant_id, args.get("region", ""), args.get("order_amount"))
+        if name == "search_knowledge":
+            return await _search_knowledge(session, tenant_id, args.get("question", ""))
         if name == "create_order":
             return await _create_order(session, tenant_id, conversation, args)
         if name == "handoff_to_human":
@@ -330,21 +349,67 @@ async def _check_stock(session, tenant_id: str, product_id: str) -> Dict[str, An
     }
 
 
-def _calc_delivery(region: str, order_amount: Optional[float]) -> Dict[str, Any]:
+async def _calc_delivery(session, tenant_id: str, region: str, order_amount: Optional[float]) -> Dict[str, Any]:
+    """Delivery terms come from the business's Knowledge Base, never from us."""
+    cfg = await repo.get_settings(session, tenant_id)
+
     r = (region or "").lower()
-    is_tashkent = "toshkent" in r or "tashkent" in r
-    fee = DELIVERY_FEE_TASHKENT if is_tashkent else DELIVERY_FEE_REGIONS
-    days = "1-2 kun" if is_tashkent else "2-4 kun"
-    free = bool(order_amount and order_amount >= FREE_DELIVERY_THRESHOLD)
+    is_city = any(w in r for w in ("toshkent", "tashkent", "shahar"))
+    fee = cfg.delivery_fee_city if is_city else cfg.delivery_fee_regions
+    days = ((cfg.delivery_days_city or DEFAULT_DELIVERY_DAYS_CITY) if is_city
+            else (cfg.delivery_days_regions or DEFAULT_DELIVERY_DAYS_REGIONS))
+
+    # Not configured: say so plainly rather than quoting an invented price
+    if fee is None:
+        return {
+            "region": region,
+            "known": False,
+            "message": ("Yetkazib berish narxi tizimda ko'rsatilmagan. Mijozga aniq narx "
+                        "aytmang — 'operatorimiz aniq narxni aytadi' deng."),
+            "estimated_days": days,
+            "extra": cfg.delivery_info or None,
+        }
+
+    threshold = cfg.free_delivery_from
+    free = bool(threshold and order_amount and order_amount >= threshold)
     return {
         "region": region,
-        "delivery_fee": 0 if free else fee,
+        "known": True,
+        "delivery_fee": 0 if free else float(fee),
         "currency": "UZS",
         "estimated_days": days,
         "free_delivery": free,
-        "note": (f"{FREE_DELIVERY_THRESHOLD:,.0f} UZS dan yuqori buyurtmalarga yetkazib berish bepul."
-                 if free else None),
+        "note": (f"{threshold:,.0f} UZS dan yuqori buyurtmalarga bepul." if free else None),
+        "extra": cfg.delivery_info or None,
     }
+
+
+async def _search_knowledge(session, tenant_id: str, question: str) -> Dict[str, Any]:
+    """Answer policy questions from the tenant's own Knowledge Base."""
+    cfg = await repo.get_settings(session, tenant_id)
+
+    sections = {
+        "to'lov": cfg.payment_info,
+        "kafolat": cfg.warranty_info,
+        "qaytarish": cfg.return_policy,
+        "ish vaqti": cfg.working_hours,
+        "yetkazib berish": cfg.delivery_info,
+        "savol-javob": cfg.faq,
+    }
+    filled = {k: v for k, v in sections.items() if (v or "").strip()}
+
+    if not filled:
+        return {
+            "found": False,
+            "message": ("Bilimlar bazasi bo'sh. Javobni o'ylab topmang — "
+                        "handoff_to_human bilan operatorga uzating."),
+        }
+
+    q = (question or "").lower()
+    # Return the whole KB when nothing matches: it is short, and a policy answer
+    # is worse than useless if it's the wrong section.
+    hits = {k: v for k, v in filled.items() if k in q or any(w in (v or "").lower() for w in q.split() if len(w) > 3)}
+    return {"found": True, "knowledge": hits or filled}
 
 
 async def _create_order(session, tenant_id: str, conversation, args: Dict[str, Any]) -> Dict[str, Any]:

@@ -102,6 +102,19 @@ class SystemSettings(BaseModel):
     greeting_message: Optional[str] = None
     auto_handoff_after: Optional[int] = None
 
+    # Knowledge Base — the business rules the AI answers from
+    delivery_info: Optional[str] = None
+    delivery_fee_city: Optional[float] = None
+    delivery_fee_regions: Optional[float] = None
+    free_delivery_from: Optional[float] = None
+    delivery_days_city: Optional[str] = None
+    delivery_days_regions: Optional[str] = None
+    payment_info: Optional[str] = None
+    warranty_info: Optional[str] = None
+    return_policy: Optional[str] = None
+    working_hours: Optional[str] = None
+    faq: Optional[str] = None
+
 
 class DashboardStats(BaseModel):
     # AI-attributed figures come first: they are what this product delivers.

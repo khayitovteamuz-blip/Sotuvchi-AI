@@ -1043,6 +1043,20 @@ async function loadSettings() {
         setVal('ai-language', data.ai_language || 'uz');
         setVal('ai-greeting', data.greeting_message);
 
+        // Knowledge Base
+        setVal('kb-fee-city', data.delivery_fee_city);
+        setVal('kb-fee-regions', data.delivery_fee_regions);
+        setVal('kb-free-from', data.free_delivery_from);
+        setVal('kb-days-city', data.delivery_days_city);
+        setVal('kb-days-regions', data.delivery_days_regions);
+        setVal('kb-delivery', data.delivery_info);
+        setVal('kb-payment', data.payment_info);
+        setVal('kb-warranty', data.warranty_info);
+        setVal('kb-return', data.return_policy);
+        setVal('kb-hours', data.working_hours);
+        setVal('kb-faq', data.faq);
+        renderKbStatus(data);
+
         const badge = document.getElementById('ai-provider-badge');
         if (badge) badge.textContent = 'Model: ' + hiddenSettings.model_name;
     } catch (e) {
@@ -1050,8 +1064,25 @@ async function loadSettings() {
     }
 }
 
+/** How complete the Knowledge Base is — an empty one means constant handoffs. */
+function renderKbStatus(d) {
+    const el = document.getElementById('kb-status');
+    if (!el) return;
+    const fields = [d.delivery_fee_city, d.payment_info, d.warranty_info,
+                    d.return_policy, d.working_hours, d.faq];
+    const filled = fields.filter(v => v !== null && v !== undefined && v !== '').length;
+    if (filled === fields.length) {
+        el.textContent = '✅ Bilimlar bazasi to\'liq — AI bu savollarga o\'zi javob beradi.';
+    } else if (filled === 0) {
+        el.textContent = '⚠️ Bo\'sh. AI to\'lov/kafolat/yetkazib berish savollarida operatorga uzatadi.';
+    } else {
+        el.textContent = `${filled}/${fields.length} to'ldirilgan. To'ldirmagan bo'limlarda AI operatorga uzatadi.`;
+    }
+}
+
 async function saveSettings() {
     const gv = (id) => { const el = document.getElementById(id); return el ? el.value : null; };
+    const num = (v) => (v === null || v === '' ? null : parseFloat(v));
     try {
         const resp = await fetch('/api/admin/settings', {
             method: 'POST',
@@ -1062,7 +1093,20 @@ async function saveSettings() {
                 ai_name: gv('ai-name'),
                 ai_tone: gv('ai-tone'),
                 ai_language: gv('ai-language'),
-                greeting_message: gv('ai-greeting')
+                greeting_message: gv('ai-greeting'),
+                // Knowledge Base — empty means "not set", so the AI stays silent
+                // on that topic rather than inventing an answer
+                delivery_fee_city: num(gv('kb-fee-city')),
+                delivery_fee_regions: num(gv('kb-fee-regions')),
+                free_delivery_from: num(gv('kb-free-from')),
+                delivery_days_city: gv('kb-days-city') || null,
+                delivery_days_regions: gv('kb-days-regions') || null,
+                delivery_info: gv('kb-delivery') || null,
+                payment_info: gv('kb-payment') || null,
+                warranty_info: gv('kb-warranty') || null,
+                return_policy: gv('kb-return') || null,
+                working_hours: gv('kb-hours') || null,
+                faq: gv('kb-faq') || null
             })
         });
         if (!resp.ok) throw new Error('save failed');
