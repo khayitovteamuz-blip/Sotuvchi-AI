@@ -1,0 +1,248 @@
+/* Platform operator's panel.
+   Layers on top of style.css for the shared tokens and buttons; everything here
+   is specific to the operator view. Deliberately a colder palette than the
+   business panel — a glance at the screen should say which one you are in, so
+   nobody edits a customer's data thinking it is their own. */
+
+:root {
+    --plat-bg: #0f172a;
+    --plat-surface: #1e293b;
+    --plat-surface-2: #273449;
+    --plat-border: #334155;
+    --plat-text: #e2e8f0;
+    --plat-text-dim: #94a3b8;
+    --plat-accent: #38bdf8;
+}
+
+body:has(.plat-app), body:has(.plat-login) {
+    background: var(--plat-bg);
+    background-image: none;
+}
+
+/* ─── Login ─── */
+.plat-login {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px; background: var(--plat-bg);
+}
+.plat-login-card {
+    width: 100%; max-width: 400px; background: var(--plat-surface);
+    border: 1px solid var(--plat-border); border-radius: 18px; padding: 32px;
+    display: flex; flex-direction: column; gap: 16px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+}
+.plat-login-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+.plat-login-head h1 { font-size: 19px; font-weight: 800; color: var(--plat-text); }
+.plat-login-head p { font-size: 12.5px; color: var(--plat-text-dim); margin-top: 2px; }
+.plat-logo {
+    width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
+    background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3);
+}
+.plat-field { display: flex; flex-direction: column; gap: 6px; }
+.plat-field span { font-size: 12.5px; font-weight: 600; color: var(--plat-text-dim); }
+.plat-field input, .plat-field textarea, .plat-field select {
+    background: var(--plat-bg); border: 1px solid var(--plat-border);
+    border-radius: 10px; padding: 11px 13px; color: var(--plat-text);
+    font-size: 14px; font-family: inherit; width: 100%;
+}
+.plat-field input:focus, .plat-field textarea:focus, .plat-field select:focus {
+    outline: none; border-color: var(--plat-accent);
+}
+.plat-error { font-size: 13px; color: #fda4af; min-height: 18px; font-weight: 600; }
+.plat-hint { font-size: 11.5px; color: var(--plat-text-dim); line-height: 1.6; }
+.plat-hint code {
+    background: var(--plat-bg); padding: 2px 6px; border-radius: 5px;
+    font-size: 11px; color: var(--plat-accent);
+}
+
+/* ─── Shell ─── */
+.plat-app { min-height: 100vh; color: var(--plat-text); }
+.plat-header {
+    display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+    padding: 16px 28px; background: var(--plat-surface);
+    border-bottom: 1px solid var(--plat-border);
+    position: sticky; top: 0; z-index: 50;
+}
+.plat-brand { display: flex; align-items: center; gap: 12px; }
+.plat-brand h1 { font-size: 16px; font-weight: 800; }
+.plat-brand p { font-size: 12px; color: var(--plat-text-dim); }
+.plat-nav { display: flex; gap: 6px; margin-left: auto; }
+.plat-tab {
+    font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+    padding: 9px 16px; border-radius: 9px; color: var(--plat-text-dim);
+    background: transparent; border: 1px solid transparent; transition: var(--transition);
+}
+.plat-tab:hover { color: var(--plat-text); background: var(--plat-surface-2); }
+.plat-tab.is-active { color: #06263a; background: var(--plat-accent); border-color: var(--plat-accent); }
+.plat-main { padding: 24px 28px 60px; max-width: 1500px; margin: 0 auto; }
+
+/* ─── KPIs ─── */
+.plat-kpis {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+    gap: 14px; margin-bottom: 24px;
+}
+.plat-kpi {
+    background: var(--plat-surface); border: 1px solid var(--plat-border);
+    border-radius: 14px; padding: 16px 18px;
+}
+.plat-kpi-label {
+    font-size: 11px; font-weight: 700; color: var(--plat-text-dim);
+    text-transform: uppercase; letter-spacing: 0.5px;
+}
+.plat-kpi-value {
+    font-size: 24px; font-weight: 800; margin-top: 8px;
+    font-variant-numeric: tabular-nums; letter-spacing: -0.5px;
+}
+.plat-kpi-value small { font-size: 13px; color: var(--plat-text-dim); font-weight: 700; }
+.plat-kpi-sub { font-size: 11.5px; color: var(--plat-text-dim); margin-top: 5px; }
+
+/* ─── Toolbar ─── */
+.plat-toolbar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.plat-toolbar input, .plat-toolbar select {
+    background: var(--plat-surface); border: 1px solid var(--plat-border);
+    border-radius: 10px; padding: 10px 14px; color: var(--plat-text);
+    font-size: 13.5px; font-family: inherit;
+}
+.plat-toolbar input { flex: 1; min-width: 220px; }
+.plat-toolbar input:focus, .plat-toolbar select:focus {
+    outline: none; border-color: var(--plat-accent);
+}
+
+/* ─── Table ─── */
+.plat-table-wrap {
+    background: var(--plat-surface); border: 1px solid var(--plat-border);
+    border-radius: 14px; overflow-x: auto;
+}
+.plat-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.plat-table th {
+    text-align: left; padding: 13px 16px; font-size: 11px; font-weight: 700;
+    color: var(--plat-text-dim); text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--plat-border); white-space: nowrap;
+}
+.plat-table td {
+    padding: 13px 16px; border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+    vertical-align: middle;
+}
+.plat-table tbody tr { cursor: pointer; transition: background 0.15s; }
+.plat-table tbody tr:hover { background: var(--plat-surface-2); }
+.plat-table tbody tr:last-child td { border-bottom: none; }
+.plat-biz-name { font-weight: 700; color: var(--plat-text); }
+.plat-biz-email { font-size: 11.5px; color: var(--plat-text-dim); margin-top: 2px; }
+.plat-empty { padding: 40px; text-align: center; color: var(--plat-text-dim); }
+
+/* ─── Badges & meters ─── */
+.plat-badge {
+    display: inline-block; padding: 3px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 700; white-space: nowrap;
+}
+.plat-badge.plan-start    { background: rgba(148,163,184,.18); color: #cbd5e1; }
+.plat-badge.plan-business { background: rgba(56,189,248,.18);  color: #7dd3fc; }
+.plat-badge.plan-pro      { background: rgba(167,139,250,.18); color: #c4b5fd; }
+.plat-badge.ok            { background: rgba(52,211,153,.16);  color: #6ee7b7; }
+.plat-badge.off           { background: rgba(248,113,113,.16); color: #fca5a5; }
+.plat-badge.warn          { background: rgba(251,191,36,.16);  color: #fcd34d; }
+
+.plat-meter { min-width: 92px; }
+.plat-meter-top {
+    display: flex; justify-content: space-between; gap: 8px;
+    font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.plat-meter-track {
+    height: 4px; background: rgba(148,163,184,.2); border-radius: 3px;
+    margin-top: 5px; overflow: hidden;
+}
+.plat-meter-fill { height: 100%; border-radius: 3px; background: var(--plat-accent); }
+.plat-meter-fill.near { background: #fbbf24; }
+.plat-meter-fill.over { background: #f87171; }
+
+/* ─── Drawer ─── */
+.plat-drawer-backdrop {
+    position: fixed; inset: 0; background: rgba(2, 6, 23, 0.6);
+    z-index: 90; backdrop-filter: blur(2px);
+}
+.plat-drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100%);
+    background: var(--plat-surface); border-left: 1px solid var(--plat-border);
+    z-index: 100; display: flex; flex-direction: column;
+    box-shadow: -20px 0 60px rgba(0,0,0,.45);
+}
+.plat-drawer-head {
+    display: flex; align-items: flex-start; gap: 16px; padding: 22px 24px;
+    border-bottom: 1px solid var(--plat-border);
+}
+.plat-drawer-head h2 { font-size: 18px; font-weight: 800; }
+.plat-drawer-head p { font-size: 12.5px; color: var(--plat-text-dim); margin-top: 3px; }
+.plat-close {
+    margin-left: auto; background: transparent; border: none; cursor: pointer;
+    color: var(--plat-text-dim); font-size: 18px; padding: 4px 8px; border-radius: 6px;
+}
+.plat-close:hover { color: var(--plat-text); background: var(--plat-surface-2); }
+.plat-drawer-body { padding: 22px 24px 40px; overflow-y: auto; flex: 1; }
+
+.plat-section { margin-bottom: 26px; }
+.plat-section h3 {
+    font-size: 12px; font-weight: 700; color: var(--plat-text-dim);
+    text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px;
+}
+.plat-rows { display: flex; flex-direction: column; gap: 9px; }
+.plat-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 14px;
+    font-size: 13px; color: var(--plat-text-dim);
+}
+.plat-row b { color: var(--plat-text); font-variant-numeric: tabular-nums; text-align: right; }
+.plat-actions { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 14px; }
+.plat-btn {
+    font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+    padding: 9px 15px; border-radius: 9px; transition: var(--transition);
+    background: var(--plat-surface-2); border: 1px solid var(--plat-border);
+    color: var(--plat-text);
+}
+.plat-btn:hover { border-color: var(--plat-accent); color: var(--plat-accent); }
+.plat-btn.primary { background: var(--plat-accent); border-color: var(--plat-accent); color: #06263a; }
+.plat-btn.primary:hover { opacity: .9; color: #06263a; }
+.plat-btn.danger { color: #fca5a5; border-color: rgba(248,113,113,.35); }
+.plat-btn.danger:hover { background: rgba(248,113,113,.12); color: #fca5a5; border-color: #f87171; }
+.plat-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.plat-drawer textarea {
+    min-height: 150px; resize: vertical; line-height: 1.6; font-size: 13px;
+}
+
+/* ─── Plans ─── */
+.plat-plans {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;
+}
+.plat-plan-card {
+    background: var(--plat-surface); border: 1px solid var(--plat-border);
+    border-radius: 14px; padding: 20px 22px;
+}
+.plat-plan-card h3 { font-size: 17px; font-weight: 800; margin-bottom: 3px; }
+.plat-plan-price { font-size: 13px; color: var(--plat-accent); font-weight: 700; margin-bottom: 4px; }
+.plat-plan-count { font-size: 11.5px; color: var(--plat-text-dim); margin-bottom: 16px; }
+.plat-plan-fields { display: flex; flex-direction: column; gap: 11px; }
+.plat-plan-field { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.plat-plan-field span { color: var(--plat-text-dim); flex: 1; }
+.plat-plan-field input {
+    width: 96px; background: var(--plat-bg); border: 1px solid var(--plat-border);
+    border-radius: 8px; padding: 7px 9px; color: var(--plat-text);
+    font-size: 12.5px; font-family: inherit; text-align: right;
+}
+.plat-plan-field input:focus { outline: none; border-color: var(--plat-accent); }
+.plat-plan-field input::placeholder { color: #64748b; }
+
+/* ─── Toast ─── */
+.plat-toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--plat-surface); border: 1px solid var(--plat-border);
+    color: var(--plat-text); padding: 12px 20px; border-radius: 11px;
+    font-size: 13.5px; font-weight: 600; z-index: 200;
+    box-shadow: 0 12px 40px rgba(0,0,0,.4);
+}
+.plat-toast.err { border-color: #f87171; color: #fca5a5; }
+.plat-toast.ok { border-color: #34d399; color: #6ee7b7; }
+
+@media (max-width: 720px) {
+    .plat-header { padding: 14px 16px; gap: 12px; }
+    .plat-nav { margin-left: 0; width: 100%; }
+    .plat-main { padding: 18px 14px 50px; }
+}

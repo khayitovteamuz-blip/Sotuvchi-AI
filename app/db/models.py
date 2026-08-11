@@ -32,6 +32,78 @@ def _now() -> datetime:
     return datetime.utcnow()
 
 
+# ─── Platform side (the operator of the service, not a customer) ──────────────
+# These four tables sit deliberately outside the tenant model. A platform admin
+# reads across every business, so the privilege must never be reachable from the
+# `users` table a customer's own account lives in — otherwise one mass-assignment
+# bug in tenant code would hand someone the whole platform.
+class PlatformAdmin(Base):
+    __tablename__ = "platform_admins"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PlatformSession(Base):
+    """Separate from user_sessions on purpose: a stolen business-panel cookie
+    must not open the platform panel, and vice versa."""
+    __tablename__ = "platform_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    admin_id: Mapped[str] = mapped_column(
+        ForeignKey("platform_admins.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+
+
+class Plan(Base):
+    """A tariff and the limits it actually buys.
+
+    Limits live in a table rather than the code so raising a customer's cap is a
+    click during a support call, not a deploy. NULL means unlimited.
+    """
+    __tablename__ = "plans"
+
+    name: Mapped[str] = mapped_column(String(32), primary_key=True)  # start | business | pro
+    title: Mapped[str] = mapped_column(String(64))
+    price_uzs: Mapped[float] = mapped_column(Float, default=0.0)
+    max_products: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    max_ai_messages_monthly: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    max_operators: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class PlatformAuditLog(Base):
+    """Who changed what, on whose account.
+
+    A platform admin can alter any business's data, so "who raised this tenant's
+    limit?" has to have an answer — including when the answer is uncomfortable.
+    """
+    __tablename__ = "platform_audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    admin_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Denormalised: the log must stay readable after an admin account is deleted
+    admin_email: Mapped[str] = mapped_column(String(255))
+    action: Mapped[str] = mapped_column(String(64), index=True)
+    tenant_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    details: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 # ─── Tenant (the business / workspace) ────────────────────────────────────────
 class Tenant(Base):
     __tablename__ = "tenants"

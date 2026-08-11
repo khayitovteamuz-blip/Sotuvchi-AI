@@ -15,7 +15,7 @@ from app.db import repo
 from app.db.base import get_session
 from app.db.models import User
 from app.models.schema import Category, DashboardStats, Order, Product, SystemSettings
-from app.services import categorize_service, import_service, tenant_service
+from app.services import categorize_service, import_service, quota_service, tenant_service
 from app.services.sheets_service import sheets_service
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
@@ -66,7 +66,20 @@ async def list_products(user: User = Depends(require_auth), session: AsyncSessio
 
 @router.post("/products", response_model=Product)
 async def create_product(product: Product, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    tenant = await tenant_service.get_tenant(session, user.tenant_id)
+    try:
+        await quota_service.check_products(session, tenant, adding=1)
+    except quota_service.QuotaExceeded as e:
+        # 402: the fix is a tariff change, not a corrected request
+        raise HTTPException(status_code=402, detail=e.message)
     return await repo.create_product(session, user.tenant_id, product.model_dump())
+
+
+@router.get("/usage")
+async def get_usage(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    """What the business has consumed against its tariff."""
+    tenant = await tenant_service.get_tenant(session, user.tenant_id)
+    return await quota_service.usage(session, tenant)
 
 
 @router.put("/products/{product_id}", response_model=Product)
@@ -146,10 +159,27 @@ async def import_products(
     if len(content) > MAX_IMPORT_BYTES:
         raise HTTPException(status_code=400, detail="Fayl 10 MB dan katta.")
 
+    tenant = await tenant_service.get_tenant(session, user.tenant_id)
     try:
-        return await import_service.import_products(
-            session, user.tenant_id, file.filename or "", content, dry_run=dry_run
+        # Parse once as a dry run to learn how many rows are new, check the
+        # tariff against that, and only then write. Checking after the import
+        # would leave the rows in place and turn the limit into a suggestion.
+        preview = await import_service.import_products(
+            session, user.tenant_id, file.filename or "", content, dry_run=True
         )
+        if preview.get("success") and preview.get("added"):
+            try:
+                await quota_service.check_products(session, tenant, adding=preview["added"])
+            except quota_service.QuotaExceeded as e:
+                raise HTTPException(status_code=402, detail=e.message)
+
+        if dry_run:
+            return preview
+        return await import_service.import_products(
+            session, user.tenant_id, file.filename or "", content, dry_run=False
+        )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

@@ -23,6 +23,8 @@ from app.api.bot_webhook import router as bot_router
 from app.api.chat_api import router as chat_router
 from app.api.inbox_api import router as inbox_router
 from app.api.integrations_api import router as integrations_router
+from app.api.platform_api import auth_router as platform_auth_router
+from app.api.platform_api import router as platform_router
 from app.core.config import settings
 from app.db.base import AsyncSessionLocal, engine
 from app.services.telegram_poller import telegram_poller
@@ -104,6 +106,8 @@ app.include_router(admin_router)
 app.include_router(bot_router)
 app.include_router(inbox_router)
 app.include_router(integrations_router)
+app.include_router(platform_auth_router)
+app.include_router(platform_router)
 
 
 def _asset_version() -> str:
@@ -114,7 +118,7 @@ def _asset_version() -> str:
     features, not a caching bug. Deriving it from mtimes makes that impossible.
     """
     stamp = 0.0
-    for rel in ("js/app.js", "css/style.css"):
+    for rel in ("js/app.js", "css/style.css", "js/platform.js", "css/platform.css"):
         f = STATIC_DIR / rel
         if f.exists():
             stamp = max(stamp, f.stat().st_mtime)
@@ -126,6 +130,16 @@ async def root_dashboard(request: Request):
     """Web admin dashboard."""
     return templates.TemplateResponse(
         request, "index.html", {"asset_v": _asset_version()}
+    )
+
+
+@app.get("/boshqaruv", include_in_schema=False)
+async def platform_panel(request: Request):
+    """Platform operator's panel. Same origin as the business panel by design —
+    one deploy, one database, one migration chain — but a separate page behind a
+    separate session cookie."""
+    return templates.TemplateResponse(
+        request, "platform.html", {"asset_v": _asset_version()}
     )
 
 

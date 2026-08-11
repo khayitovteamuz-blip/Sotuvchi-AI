@@ -20,7 +20,7 @@ from app.core.config import settings
 from app.db import repo
 from app.db.models import Conversation, Product, Tenant, TenantSettings
 from app.models.schema import ChatResponse
-from app.services import ai_tools
+from app.services import ai_tools, quota_service
 
 logger = logging.getLogger("ai_agent")
 
@@ -116,6 +116,33 @@ QAT'IY QOIDALAR (buzilishi mumkin emas):
 
 
 class AISalesAgent:
+    async def _quota_exhausted(self, session, tenant_id: str, conversation) -> ChatResponse:
+        """The month's AI allowance is spent.
+
+        The customer must not be left staring at silence, and the shop must not
+        lose the sale, so the chat is escalated to a human and the handoff is
+        stamped with a reason the owner can act on.
+        """
+        reply = ("Rahmat xabaringiz uchun 🙏 Hozir operatorimiz siz bilan "
+                 "bog'lanadi va barcha savollaringizga javob beradi.")
+        if conversation.status == "ai":
+            conversation.status = "operator"
+        if not conversation.handoff_reason:
+            conversation.handoff_reason = "Oylik AI limiti tugadi — tarifni yangilash kerak"
+        await repo.add_message(
+            session, tenant_id, conversation, "assistant", reply,
+            intent="quota_exhausted", model_name="quota-limit",
+        )
+        logger.warning(f"Tenant {tenant_id} is out of monthly AI messages — handed off")
+        return ChatResponse(
+            session_id=conversation.id,
+            reply_text=reply,
+            intent="quota_exhausted",
+            recommended_products=[],
+            order_draft=None,
+            photos=[],
+        )
+
     async def generate_response(
         self,
         session: AsyncSession,
@@ -138,6 +165,12 @@ class AISalesAgent:
             session, tenant_id, conversation, "user", stored_text,
             meta={"media": [m["mime_type"] for m in media]} if media else None,
         )
+
+        # Out of monthly allowance: hand the customer to a human rather than
+        # answer with a smaller model or ignore the tariff. The shop still gets
+        # the lead — it just costs a person instead of the AI.
+        if not await quota_service.ai_allowed(session, tenant):
+            return await self._quota_exhausted(session, tenant_id, conversation)
 
         t0 = time.monotonic()
         reply_text, model_used = "", None
