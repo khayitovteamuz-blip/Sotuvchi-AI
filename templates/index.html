@@ -397,6 +397,36 @@
                             <button class="btn-primary" id="op-get-code-btn" onclick="getPairingCode()">Kod olish</button>
                         </div>
                     </div>
+                    <div class="integration-card" style="grid-column: 1 / -1;">
+                        <div class="integration-head"><span class="integration-icon">👥</span><div><h3>Jamoa guruhlari</h3><p>Buyurtma cheklari, tasdiqlash va yetkazish</p></div></div>
+
+                        <div class="group-flow">
+                            <span>🧾 Buyurtmalar</span> <b>→</b>
+                            <span>✅ Tasdiqlash</span> <b>→</b>
+                            <span>📦 Ishchi guruh</span>
+                        </div>
+
+                        <div id="groups-list"></div>
+
+                        <div id="group-pair-box" style="display:none;">
+                            <div class="pair-code" id="group-code">——————</div>
+                            <ol class="group-steps">
+                                <li>Botni guruhga qo'shing: <b id="group-bot-name">@bot</b></li>
+                                <li>Guruhda shu xabarni yuboring:
+                                    <code class="pair-cmd" id="group-cmd">/guruh buyurtmalar ——————</code>
+                                </li>
+                                <li>Turini almashtiring: <code>buyurtmalar</code> · <code>ishchi</code> · <code>operatorlar</code></li>
+                            </ol>
+                            <button class="btn-mini" onclick="loadGroups()">🔄 Yangilash</button>
+                        </div>
+
+                        <button class="btn-primary" id="group-code-btn" onclick="getGroupCode()" style="margin-top:12px;">Guruh ulash uchun kod olish</button>
+                        <p class="field-hint" style="margin-top:10px;">
+                            ⚠️ Taklif havolasi (t.me/+...) orqali ulab bo'lmaydi — Telegram botga
+                            guruh raqamini faqat guruh ichidan beradi.
+                        </p>
+                    </div>
+
                     <div class="integration-card disabled"><div class="integration-head"><span class="integration-icon">📸</span><div><h3>Instagram</h3><p>Meta Business (tez orada)</p></div></div></div>
                     <div class="integration-card disabled"><div class="integration-head"><span class="integration-icon">🌐</span><div><h3>Web widget</h3><p>Saytga o'rnatish (tez orada)</p></div></div></div>
                     <div class="integration-card disabled"><div class="integration-head"><span class="integration-icon">💳</span><div><h3>To'lov (Payme/Click)</h3><p>tez orada</p></div></div></div>

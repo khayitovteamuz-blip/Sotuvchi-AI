@@ -23,6 +23,23 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+# Objects created by raw SQL that the models can't express (expression indexes
+# over sotuvchi_norm(), GIN trgm ops). Without this, autogenerate reads them as
+# stray and writes DROPs into the next migration — which is exactly how catalog
+# search was silently deleted once already.
+RAW_SQL_INDEXES = {
+    "ix_products_search_trgm",
+    "ix_products_name_trgm",
+    "ix_products_tenant_cat_price",
+}
+
+
+def include_object(obj, name, type_, reflected, compare_to):
+    if type_ == "index" and name in RAW_SQL_INDEXES:
+        return False
+    return True
+
+
 def render_item(type_, obj, autogen_context):
     """Teach autogenerate how to render the pgvector Vector type."""
     if type_ == "type" and obj.__class__.__module__.startswith("pgvector"):
@@ -40,6 +57,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
         render_item=render_item,
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -51,6 +69,7 @@ def do_run_migrations(connection: Connection) -> None:
         target_metadata=target_metadata,
         compare_type=True,
         render_item=render_item,
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()

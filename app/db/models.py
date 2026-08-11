@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from sqlalchemy import (
     Boolean,
+    Computed,
     DateTime,
     Float,
     ForeignKey,
@@ -45,6 +46,17 @@ class Tenant(Base):
     telegram_bot_token: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     telegram_bot_username: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     telegram_webhook_secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    # ── Team groups ──
+    # Chat ids, not invite links: an invite link (t.me/+hash) carries no chat_id,
+    # so the bot must be added to the group and paired from inside it.
+    orders_group_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    orders_group_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    work_group_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    work_group_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    operators_group_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    operators_group_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    group_pairing_code: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
 
     users: Mapped[List["User"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
 
@@ -146,6 +158,18 @@ class Product(Base):
     sku: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # Postgres maintains this (see migration 214e5f10a29f) and the trigram search
+    # runs against it. Declared here so autogenerate knows it belongs — left out,
+    # Alembic reads it as a stray column and writes a DROP into the next migration.
+    search_text: Mapped[Optional[str]] = mapped_column(
+        Text,
+        Computed(
+            "sotuvchi_norm(coalesce(name,'') || ' ' || coalesce(category,'') || ' ' || coalesce(description,''))",
+            persisted=True,
+        ),
+        nullable=True,
+    )
+
 
 # ─── Orders ───────────────────────────────────────────────────────────────────
 class Order(Base):
@@ -162,6 +186,15 @@ class Order(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     delivery_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Customer's pinned location, when they share one in the chat
+    latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Team confirmation from the orders group — first tap wins, and we keep who
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    receipt_message_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     items: Mapped[List["OrderItem"]] = relationship(
         back_populates="order", cascade="all, delete-orphan", lazy="selectin"
@@ -194,6 +227,9 @@ class Conversation(Base):
     external_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
     customer_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     customer_phone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Last map pin the customer shared — copied onto the order when one is placed
+    last_latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    last_longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="ai")  # ai | operator | closed
     assigned_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     assigned_user_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)

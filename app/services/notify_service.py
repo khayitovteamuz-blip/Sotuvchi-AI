@@ -36,7 +36,10 @@ async def notify_handoff(
     last_customer_message: str = "",
 ) -> bool:
     """Ping the operator that a customer is waiting for a human."""
-    if not cfg.notify_on_handoff or not cfg.operator_chat_id or not tenant.telegram_bot_token:
+    # A paired operator chat OR a team group is enough — either can be on duty
+    if not cfg.notify_on_handoff or not tenant.telegram_bot_token:
+        return False
+    if not cfg.operator_chat_id and not tenant.operators_group_id:
         return False
 
     customer = conversation.customer_name or "Mijoz"
@@ -51,7 +54,13 @@ async def notify_handoff(
         text += f"\n💬 Oxirgi xabar:\n_{last_customer_message[:200]}_\n"
     text += "\n➡️ Panelda *Inbox* bo'limini oching va javob yozing."
 
-    ok = await bot_service.send_message(tenant.telegram_bot_token, cfg.operator_chat_id, text)
+    # Reaches whoever is on duty: the paired operator chat and/or the team group
+    targets = [t for t in (cfg.operator_chat_id, tenant.operators_group_id) if t]
+    if not targets:
+        return False
+    ok = False
+    for target in targets:
+        ok = await bot_service.send_message(tenant.telegram_bot_token, target, text) or ok
     if not ok:
         logger.warning(f"Handoff alert failed for tenant {tenant.id}")
     return ok

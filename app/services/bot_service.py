@@ -40,6 +40,72 @@ class TelegramBotService:
             logger.error(f"Telegram sendMessage error: {e}")
             return False
 
+    async def send_message_full(
+        self, token: str, chat_id: str, text: str,
+        reply_markup: Optional[Dict[str, Any]] = None, parse_mode: str = "Markdown",
+    ) -> Optional[dict]:
+        """Like send_message but returns the sent message — we need its id to
+        edit the receipt once someone confirms."""
+        if not token:
+            return None
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(f"{TELEGRAM_API.format(token=token)}/sendMessage", json=payload)
+                data = resp.json()
+                if not data.get("ok"):
+                    logger.warning(f"sendMessage failed: {str(data)[:180]}")
+                    return None
+                return data["result"]
+        except Exception as e:
+            logger.error(f"Telegram sendMessage error: {e}")
+            return None
+
+    async def edit_message(
+        self, token: str, chat_id: str, message_id: str, text: str,
+        reply_markup: Optional[Dict[str, Any]] = None, parse_mode: str = "Markdown",
+    ) -> bool:
+        payload = {"chat_id": chat_id, "message_id": int(message_id),
+                   "text": text, "parse_mode": parse_mode}
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(f"{TELEGRAM_API.format(token=token)}/editMessageText", json=payload)
+                return resp.json().get("ok", False)
+        except Exception as e:
+            logger.error(f"Telegram editMessageText error: {e}")
+            return False
+
+    async def answer_callback(
+        self, token: str, callback_id: str, text: str = "", alert: bool = False
+    ) -> bool:
+        """Acknowledge a button tap — without this the client spinner hangs."""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{TELEGRAM_API.format(token=token)}/answerCallbackQuery",
+                    json={"callback_query_id": callback_id, "text": text[:200], "show_alert": alert},
+                )
+                return resp.json().get("ok", False)
+        except Exception as e:
+            logger.error(f"Telegram answerCallbackQuery error: {e}")
+            return False
+
+    async def send_location(self, token: str, chat_id: str, lat: float, lon: float) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{TELEGRAM_API.format(token=token)}/sendLocation",
+                    json={"chat_id": chat_id, "latitude": lat, "longitude": lon},
+                )
+                return resp.json().get("ok", False)
+        except Exception as e:
+            logger.error(f"Telegram sendLocation error: {e}")
+            return False
+
     async def send_photo(
         self, token: str, chat_id: str, photo_url: str, caption: Optional[str] = None
     ) -> bool:
@@ -148,6 +214,11 @@ class TelegramBotService:
         # A photo's text arrives as "caption", not "text"
         text = msg.get("text") or msg.get("caption") or ""
 
+        # Group chats are team channels, never customer conversations
+        if msg["chat"].get("type") in ("group", "supergroup"):
+            await self._handle_group_message(session, tenant, token, msg, chat_id, text)
+            return
+
         # Operator pairing: "/operator ABC123" registers this chat for alerts.
         # Handled before any conversation is created — the owner is not a lead.
         if text.startswith("/operator"):
@@ -193,6 +264,15 @@ class TelegramBotService:
             await self.send_message(token, chat_id, greeting, reply_markup=keyboard)
             return
 
+        # A pinned location is the delivery address — keep it on the conversation
+        # so create_order can attach it whenever the customer gets that far.
+        if msg.get("location"):
+            loc = msg["location"]
+            conv.last_latitude = loc.get("latitude")
+            conv.last_longitude = loc.get("longitude")
+            await session.commit()
+            text = text or "📍 [lokatsiya yubordi]"
+
         # Photo / voice: customers here often show a product or just talk.
         # Gemini reads both, so hand the bytes straight to the agent.
         media, label = await self._extract_media(token, msg)
@@ -215,6 +295,29 @@ class TelegramBotService:
         )
         await self.send_message(token, chat_id, resp.reply_text)
         await self._send_requested_photos(session, tenant, token, chat_id, resp)
+
+    async def _handle_group_message(self, session, tenant, token, msg, chat_id, text):
+        """Only the pairing command matters in a group; the AI stays out."""
+        from app.services import group_service
+
+        if not text.startswith("/guruh"):
+            return
+
+        parts = text.split()
+        if len(parts) < 3:
+            await self.send_message(
+                token, chat_id,
+                "Foydalanish: `/guruh <tur> <kod>`\n"
+                "Turlari: `buyurtmalar`, `ishchi`, `operatorlar`\n"
+                "Kodni paneldagi *Integratsiyalar* bo'limidan oling."
+            )
+            return
+
+        reply = await group_service.try_pair_group(
+            session, tenant, parts[1], parts[2], chat_id, msg["chat"].get("title", ""),
+        )
+        if reply:
+            await self.send_message(token, chat_id, reply)
 
     async def _extract_media(self, token: str, msg: dict):
         """Download a photo or voice note. Returns (parts, human label)."""
@@ -255,10 +358,28 @@ class TelegramBotService:
     async def _handle_callback(self, session, tenant, token, query):
         chat_id = str(query["message"]["chat"]["id"])
         data = query.get("data", "")
-        user_name = query.get("from", {}).get("first_name", "Mijoz")
+        frm = query.get("from", {})
+        user_name = frm.get("first_name", "Mijoz")
+        callback_id = query.get("id")
+
+        # Team confirming an order from the orders group
+        if data.startswith("confirm:"):
+            from app.services import group_service
+            who = " ".join(filter(None, [frm.get("first_name"), frm.get("last_name")]))
+            if frm.get("username"):
+                who = f"{who} (@{frm['username']})".strip()
+            ok, message = await group_service.confirm_order(
+                session, tenant, data.split(":", 1)[1], who or "Xodim"
+            )
+            # show_alert on refusal so the second tapper actually notices
+            await self.answer_callback(token, callback_id, message, alert=not ok)
+            return
+
         conv = await repo.get_or_create_conversation(
             session, tenant.id, "telegram", chat_id, customer_name=user_name
         )
+        if callback_id:
+            await self.answer_callback(token, callback_id)
 
         if data == "btn_catalog":
             products = await repo.list_products(session, tenant.id)

@@ -352,6 +352,13 @@ async def create_order(
         delivery_address=delivery_address,
         notes=notes,
     )
+
+    # Carry over a map pin the customer already shared in this chat
+    if conversation_id:
+        conv = await session.get(Conversation, conversation_id)
+        if conv and conv.last_latitude:
+            order.latitude = conv.last_latitude
+            order.longitude = conv.last_longitude
     for i in items:
         order.items.append(OrderItem(
             product_id=i.get("product_id", ""),

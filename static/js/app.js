@@ -1586,6 +1586,7 @@ async function autoCategorize(onlyUncategorized = true) {
 // ════════════════════════════════════════════════════════
 async function loadIntegrations() {
     loadOperatorPairing();
+    loadGroups();
     try {
         const resp = await fetch('/api/integrations/telegram');
         const d = await resp.json();
@@ -1608,6 +1609,77 @@ async function loadIntegrations() {
     } catch (e) {
         console.error('Integratsiyalarni yuklashda xatolik:', e);
     }
+}
+
+// ── Team groups ──
+const GROUP_META = {
+    buyurtmalar: { icon: '🧾', label: 'Buyurtmalar guruhi', hint: 'Yangi buyurtma cheki + tasdiqlash tugmasi' },
+    ishchi:      { icon: '📦', label: 'Ishchi guruh',       hint: 'Tasdiqlangan buyurtma yetkazish uchun' },
+    operatorlar: { icon: '🙋', label: 'Operatorlar guruhi', hint: 'Mijoz operator so\'raganda xabar' },
+};
+
+async function loadGroups() {
+    try {
+        const d = await (await fetch('/api/integrations/groups')).json();
+        const box = document.getElementById('groups-list');
+        if (!box) return;
+
+        box.innerHTML = Object.entries(GROUP_META).map(([key, m]) => {
+            const g = (d.groups || {})[key] || {};
+            return `<div class="group-row ${g.id ? 'connected' : ''}">
+                <span class="group-icon">${m.icon}</span>
+                <div class="group-body">
+                    <div class="group-name">${m.label}</div>
+                    <div class="group-sub">${g.id ? escapeHtml(g.title || 'Guruh') : m.hint}</div>
+                </div>
+                ${g.id
+                    ? `<button class="btn-mini danger" onclick="disconnectGroup('${key}')">Uzish</button>`
+                    : '<span class="group-pending">ulanmagan</span>'}
+            </div>`;
+        }).join('');
+
+        const btn = document.getElementById('group-code-btn');
+        const pair = document.getElementById('group-pair-box');
+        if (!d.bot_connected) {
+            btn.style.display = 'none';
+            pair.style.display = 'none';
+            box.insertAdjacentHTML('beforeend',
+                '<p class="field-hint">Avval Telegram botni ulang — guruhlar shu bot orqali ishlaydi.</p>');
+        } else if (d.pairing_code) {
+            showGroupCode(d.pairing_code, d.bot_username);
+        } else {
+            pair.style.display = 'none';
+            btn.style.display = 'inline-flex';
+        }
+    } catch (e) {
+        console.error('Guruhlarni yuklashda xatolik:', e);
+    }
+}
+
+function showGroupCode(code, botUsername) {
+    document.getElementById('group-code').textContent = code;
+    document.getElementById('group-cmd').textContent = `/guruh buyurtmalar ${code}`;
+    document.getElementById('group-bot-name').textContent = botUsername ? '@' + botUsername : 'botingiz';
+    document.getElementById('group-pair-box').style.display = 'block';
+    document.getElementById('group-code-btn').style.display = 'none';
+}
+
+async function getGroupCode() {
+    try {
+        const r = await fetch('/api/integrations/groups/pair-code', { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) { toast(d.detail || 'Xatolik', true); return; }
+        showGroupCode(d.pairing_code, d.bot_username);
+    } catch (e) {
+        toast('Kod olishda xatolik', true);
+    }
+}
+
+async function disconnectGroup(kind) {
+    if (!confirm('Bu guruhni uzmoqchimisiz?')) return;
+    await fetch(`/api/integrations/groups/${kind}/disconnect`, { method: 'POST' });
+    toast('Uzildi');
+    loadGroups();
 }
 
 // ── Operator alert pairing ──

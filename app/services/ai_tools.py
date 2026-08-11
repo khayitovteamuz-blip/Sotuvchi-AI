@@ -449,6 +449,7 @@ async def _create_order(session, tenant_id: str, conversation, args: Dict[str, A
     await session.commit()
 
     await _alert_operator_order(session, tenant_id, order)
+    await _post_order_receipt(session, tenant_id, order)
 
     return {
         "success": True,
@@ -479,6 +480,19 @@ async def _handoff(session, tenant_id: str, conversation, reason: str) -> Dict[s
         "operator_notified": notified,
         "reason": reason,
     }
+
+
+async def _post_order_receipt(session, tenant_id: str, order) -> bool:
+    """Put the receipt in the orders group. Never break the sale over it."""
+    try:
+        from app.db.models import Tenant
+        from app.services import group_service
+
+        tenant = await session.get(Tenant, tenant_id)
+        return await group_service.send_order_receipt(session, tenant, order)
+    except Exception as e:
+        logger.error(f"Order receipt failed: {e}")
+        return False
 
 
 async def _alert_operator_order(session, tenant_id: str, order) -> bool:
