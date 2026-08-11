@@ -77,6 +77,11 @@ async def operator_reply(conv_id: str, text: str = Body(..., embed=True), user: 
     # Sending as a human => take over the conversation and claim it
     if conv.status == "ai":
         conv.status = "operator"
+        # Stamp the reason too: status is current state and is overwritten when
+        # the chat is later closed, so it alone cannot tell the escalation-rate
+        # metric that this conversation ever left the AI.
+        if not conv.handoff_reason:
+            conv.handoff_reason = "Operator suhbatni qo'lda oldi"
     conv.assigned_user_id = user.id
     conv.assigned_user_name = user.full_name or user.email
     await repo.add_message(session, user.tenant_id, conv, "operator", text)

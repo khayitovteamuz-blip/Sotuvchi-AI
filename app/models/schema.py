@@ -124,5 +124,12 @@ class DashboardStats(BaseModel):
     total_revenue: float
     total_orders: int
     active_leads: int
-    conversion_rate: float
     recent_orders: List[Order]
+    # Reporting window these figures cover, plus the previous one to compare to
+    period: str = "month"
+    period_label: str = ""
+    growth: dict = {}
+    previous: Optional[dict] = None
+    # All-time totals, kept as context beside the period figures
+    all_time_revenue: float = 0.0
+    all_time_orders: int = 0

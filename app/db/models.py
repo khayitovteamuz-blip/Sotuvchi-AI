@@ -78,6 +78,50 @@ class User(Base):
     tenant: Mapped["Tenant"] = relationship(back_populates="users")
 
 
+# ─── Login session (one browser, one row) ─────────────────────────────────────
+class UserSession(Base):
+    """A logged-in browser session.
+
+    Kept in Postgres rather than process memory: an in-memory dict drops every
+    session on restart, and under two workers a request served by one process
+    cannot see a token the other issued — so users get logged out at random.
+
+    Only the SHA-256 of the cookie token is stored. The raw token lives solely
+    in the user's cookie, so a leaked database yields no usable sessions.
+
+    Named `user_sessions`, not `sessions`: Supabase's own auth stack owns
+    `auth.sessions`, and two tables with one name is a trap for whoever next
+    opens the dashboard.
+    """
+    __tablename__ = "user_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Indexed because the expired-row sweep filters on it
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+
+
+# ─── Login throttling ─────────────────────────────────────────────────────────
+class LoginAttempt(Base):
+    """Failed-login counter, keyed by "ip|email".
+
+    Shared state, not per-process counters: with N workers an in-memory tally
+    lets an attacker make N times the intended attempts, and a restart wipes a
+    lockout entirely.
+    """
+    __tablename__ = "login_attempts"
+
+    key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    fail_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Start of the rolling window the failures are counted in
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 # ─── Per-tenant AI / system settings ──────────────────────────────────────────
 class TenantSettings(Base):
     __tablename__ = "tenant_settings"
@@ -266,6 +310,10 @@ class Message(Base):
     intent: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     model_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     tokens: Mapped[int] = mapped_column(Integer, default=0)  # token cost tracking (billing/metrics)
+    # Split out because input and output are billed at different rates — the
+    # blended total cannot be turned into money.
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)  # response-time metric
     meta: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)  # tool_calls, retrieved docs, etc.
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

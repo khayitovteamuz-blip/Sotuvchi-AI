@@ -1,7 +1,7 @@
 """
 Integrations API — connect a tenant's own Telegram bot (validate + webhook).
 """
-import uuid
+import secrets
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,8 +43,9 @@ async def telegram_connect(token: str = Body(..., embed=True), user: User = Depe
     tenant = await session.get(Tenant, user.tenant_id)
     tenant.telegram_bot_token = token
     tenant.telegram_bot_username = info.get("username")
-    if not tenant.telegram_webhook_secret:
-        tenant.telegram_webhook_secret = uuid.uuid4().hex[:16]
+    # Rotate on every connect: the secret and the registered webhook are set
+    # together, so a stale secret can never outlive the webhook that used it.
+    tenant.telegram_webhook_secret = secrets.token_urlsafe(32)
     await session.commit()
 
     webhook_set = False
@@ -55,7 +56,7 @@ async def telegram_connect(token: str = Body(..., embed=True), user: User = Depe
         note = "Bot ulandi ✅ Localhost rejimi (polling) — telefoningizdan hoziroq yozib ko'ring."
     elif settings.PUBLIC_BASE_URL:
         url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}/api/bot/webhook/{tenant.id}"
-        webhook_set = await bot_service.set_webhook(token, url)
+        webhook_set = await bot_service.set_webhook(token, url, tenant.telegram_webhook_secret)
         note = None if webhook_set else "Webhook o'rnatilmadi — PUBLIC_BASE_URL ni tekshiring."
     else:
         note = ("Bot ulandi, lekin na polling na PUBLIC_BASE_URL yoqilgan — "
@@ -165,5 +166,6 @@ async def telegram_disconnect(user: User = Depends(require_auth), session: Async
         await bot_service.delete_webhook(tenant.telegram_bot_token)
     tenant.telegram_bot_token = None
     tenant.telegram_bot_username = None
+    tenant.telegram_webhook_secret = None
     await session.commit()
     return {"status": "success"}

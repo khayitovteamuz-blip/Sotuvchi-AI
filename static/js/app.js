@@ -471,7 +471,7 @@ function fmtNum(n) {
  * a number you can't act on is decoration, so every tile that has a
  * matching screen links to it.
  */
-function kpiCard(icon, color, label, value, hint, tab, action) {
+function kpiCard(icon, color, label, value, hint, tab, action, growth) {
     const go = action || (tab ? `switchToTab('${tab}')` : '');
     const clickable = go ? ` kpi-card--link" onclick="${go}" role="button" tabindex="0"` : '"';
     return `<div class="kpi-card${clickable}>
@@ -479,7 +479,7 @@ function kpiCard(icon, color, label, value, hint, tab, action) {
             <span class="kpi-icon" style="background:${color}1a; color:${color};">${icon}</span>
             <span class="kpi-label">${label}</span>
         </div>
-        <div class="kpi-value">${value}</div>
+        <div class="kpi-value">${value}${growthBadge(growth)}</div>
         <div class="kpi-foot">
             <span class="kpi-hint">${hint || ''}</span>
             ${go ? '<span class="kpi-arrow">→</span>' : ''}
@@ -487,24 +487,55 @@ function kpiCard(icon, color, label, value, hint, tab, action) {
     </div>`;
 }
 
+/** Change against the previous period. null means there was no baseline —
+ *  rendering "+100%" against zero would read as growth that never happened. */
+function growthBadge(pct) {
+    if (pct === null || pct === undefined) return '';
+    const up = pct >= 0;
+    return `<span class="kpi-growth ${up ? 'is-up' : 'is-down'}">${up ? '▲' : '▼'} ${Math.abs(pct)}%</span>`;
+}
+
+// Which window the dashboard is showing. Persisted so a reload does not
+// silently drop the owner back to a different period than they left on.
+let dashPeriod = localStorage.getItem('dashPeriod') || 'month';
+
+function initPeriodPicker() {
+    const box = document.getElementById('dashboard-period');
+    if (!box || box.dataset.bound) return;
+    box.dataset.bound = '1';
+    box.querySelectorAll('button').forEach(btn => {
+        btn.classList.toggle('is-active', btn.dataset.period === dashPeriod);
+        btn.addEventListener('click', () => {
+            dashPeriod = btn.dataset.period;
+            localStorage.setItem('dashPeriod', dashPeriod);
+            box.querySelectorAll('button').forEach(b => b.classList.toggle('is-active', b === btn));
+            loadDashboardStats();
+        });
+    });
+}
+
 async function loadDashboardStats() {
+    initPeriodPicker();
     try {
+        const q = `?period=${encodeURIComponent(dashPeriod)}`;
         const [statsResp, anResp] = await Promise.all([
-            fetch('/api/admin/stats'),
-            fetch('/api/admin/analytics')
+            fetch('/api/admin/stats' + q),
+            fetch('/api/admin/analytics' + q)
         ]);
         const data = await statsResp.json();
         const an = await anResp.json();
+        const g = data.growth || {};
 
         // AI-attributed revenue leads: that is what this product produced.
         // The shop's overall revenue is context, shown as a hint underneath.
         document.getElementById('dashboard-kpis').innerHTML =
             kpiCard('🤖', '#00b87c', 'AI orqali tushum', fmtNum(data.ai_revenue) + ' <small>UZS</small>',
-                    `jami do'kon: ${fmtNum(data.total_revenue)}`, 'tab-orders') +
+                    `butun davr: ${fmtNum(data.all_time_revenue)}`, 'tab-orders', null, g.ai_revenue) +
             kpiCard('🧾', '#06b6d4', 'AI buyurtmalari', fmtNum(data.ai_order_count),
-                    `jami: ${fmtNum(data.total_orders)} ta`, 'tab-orders') +
+                    `jami: ${fmtNum(data.total_orders)} ta`, 'tab-orders', null, g.ai_order_count) +
             kpiCard('💬', '#f59e0b', 'Suhbatlar', fmtNum(an.total_conversations),
-                    fmtNum(an.total_messages) + ' xabar', 'tab-inbox') +
+                    fmtNum(an.total_messages) + ' xabar', 'tab-inbox', null,
+                    (an.growth || {}).total_conversations) +
             kpiCard('📈', '#a855f7', 'Konversiya', an.conversion_rate + '<small>%</small>',
                     'suhbat → buyurtma') +
             kpiCard('⚡️', '#0ea5e9', "O'rtacha javob", fmtNum(an.avg_latency_ms) + ' <small>ms</small>',
@@ -537,17 +568,52 @@ function renderStatusBars(an) {
         bar('✅ Yopilgan', an.by_status.closed, '#64748b');
 }
 
-/** Token spend — the number that decides whether a tariff is profitable. */
+/** Google Sheets state. The card used to read "tez orada" while the integration
+ *  was in fact built — so a silent misconfiguration looked like a missing
+ *  feature, and the owner had no way to tell which of the two it was. */
+async function loadSheetsStatus() {
+    const label = document.getElementById('sheets-status');
+    const reason = document.getElementById('sheets-reason');
+    const card = document.getElementById('sheets-card');
+    if (!label) return;
+    try {
+        const d = await (await fetch('/api/admin/integrations/status')).json();
+        label.textContent = d.google_sheets ? '🟢 Ulangan' : '⚪️ Ulanmagan';
+        reason.textContent = d.google_sheets ? '' : (d.google_sheets_reason || '');
+        card.classList.toggle('disabled', !d.google_sheets);
+    } catch (e) {
+        label.textContent = 'Holatni aniqlab bo\'lmadi';
+    }
+}
+
+/** AI spend — the number that decides whether a tariff is profitable. Shown in
+ *  money when prices are configured, because tokens alone price nothing. */
 function renderCostPanel(an, data) {
     const box = document.getElementById('dashboard-cost');
     if (!box) return;
     const convs = Math.max(an.total_conversations, 1);
     const perConv = Math.round(an.total_tokens / convs);
-    box.innerHTML = `
+    const cost = an.cost || {};
+
+    let money = '';
+    if (cost.configured && cost.rate_configured) {
+        money = `
+        <div class="cost-row cost-row--lead"><span>AI xarajati</span><b>${fmtNum(cost.uzs)} <small>UZS</small></b></div>
+        <div class="cost-row"><span>1 buyurtmaga</span><b>${fmtNum(an.cost_per_order_uzs)} <small>UZS</small></b></div>`;
+    } else if (cost.configured) {
+        money = `<div class="cost-row cost-row--lead"><span>AI xarajati</span><b>$${cost.usd}</b></div>`;
+    }
+
+    const hint = cost.configured
+        ? "Tarif narxi shu xarajatdan yuqori bo'lishi kerak."
+        : "Pulda ko'rish uchun .env da AI_PRICE_INPUT_PER_1M, AI_PRICE_OUTPUT_PER_1M va USD_TO_UZS ni to'ldiring.";
+
+    box.innerHTML = money + `
         <div class="cost-row"><span>Jami token</span><b>${fmtNum(an.total_tokens)}</b></div>
+        <div class="cost-row"><span>Kirish / chiqish</span><b>${fmtNum(an.prompt_tokens)} / ${fmtNum(an.output_tokens)}</b></div>
         <div class="cost-row"><span>1 suhbatga o'rtacha</span><b>${fmtNum(perConv)}</b></div>
         <div class="cost-row"><span>AI yopgan savdo</span><b>${fmtNum(data.ai_order_count)} ta</b></div>
-        <p class="cost-hint">Token — AI xarajati. Tarif narxini shu asosda hisoblang.</p>`;
+        <p class="cost-hint">${hint}</p>`;
 }
 
 function renderRecentOrders(orders) {
@@ -1587,6 +1653,7 @@ async function autoCategorize(onlyUncategorized = true) {
 async function loadIntegrations() {
     loadOperatorPairing();
     loadGroups();
+    loadSheetsStatus();
     try {
         const resp = await fetch('/api/integrations/telegram');
         const d = await resp.json();

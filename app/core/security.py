@@ -11,12 +11,16 @@ with argon2, so no one is forced to reset anything.
 import hashlib
 import hmac
 import logging
-import time
-from collections import defaultdict
-from typing import Dict, List, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Tuple
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
+from sqlalchemy import case, delete, or_, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import LoginAttempt
 
 logger = logging.getLogger("security")
 
@@ -55,40 +59,70 @@ def verify_password(password: str, stored: str) -> Tuple[bool, bool]:
 
 
 # ─── Login throttling ─────────────────────────────────────────────────────────
-# In-process counters. Fine for a single worker; move to Redis when the app
-# runs on more than one process.
-_MAX_ATTEMPTS = 8
-_WINDOW_SECONDS = 15 * 60
-_LOCKOUT_SECONDS = 15 * 60
-
-_attempts: Dict[str, List[float]] = defaultdict(list)
-_locked_until: Dict[str, float] = {}
+# Counters live in Postgres, not in the process. Per-worker tallies would let an
+# attacker get MAX_ATTEMPTS *per worker*, and a deploy would clear every lockout.
+MAX_ATTEMPTS = 8
+WINDOW = timedelta(minutes=15)
+LOCKOUT = timedelta(minutes=15)
 
 
-def _prune(key: str, now: float) -> None:
-    _attempts[key] = [t for t in _attempts[key] if now - t < _WINDOW_SECONDS]
-
-
-def check_login_allowed(key: str) -> Tuple[bool, int]:
+async def check_login_allowed(db: AsyncSession, key: str) -> Tuple[bool, int]:
     """Returns (allowed, seconds_to_wait). Key is IP + email."""
-    now = time.time()
-    until = _locked_until.get(key, 0)
-    if until > now:
-        return False, int(until - now)
-    _prune(key, now)
+    row = await db.get(LoginAttempt, key)
+    if not row or not row.locked_until:
+        return True, 0
+    now = datetime.now(timezone.utc)
+    if row.locked_until > now:
+        return False, int((row.locked_until - now).total_seconds())
     return True, 0
 
 
-def record_login_failure(key: str) -> None:
-    now = time.time()
-    _prune(key, now)
-    _attempts[key].append(now)
-    if len(_attempts[key]) >= _MAX_ATTEMPTS:
-        _locked_until[key] = now + _LOCKOUT_SECONDS
-        _attempts[key].clear()
-        logger.warning(f"Login locked for {_LOCKOUT_SECONDS // 60} min: {key}")
+async def record_login_failure(db: AsyncSession, key: str) -> None:
+    now = datetime.now(timezone.utc)
+    cutoff = now - WINDOW
+
+    # Rows that are neither locked nor inside a live window are dead weight
+    await db.execute(
+        delete(LoginAttempt).where(
+            LoginAttempt.window_start < cutoff,
+            or_(LoginAttempt.locked_until.is_(None), LoginAttempt.locked_until < now),
+        )
+    )
+
+    # One statement, so two workers racing on the same key cannot both read 7
+    # and each write 8. Inside ON CONFLICT, the bare column is the stored row's
+    # value — the window resets once it has gone stale.
+    stmt = (
+        pg_insert(LoginAttempt)
+        .values(key=key, fail_count=1, window_start=now)
+        .on_conflict_do_update(
+            index_elements=[LoginAttempt.key],
+            set_={
+                "fail_count": case(
+                    (LoginAttempt.window_start < cutoff, 1),
+                    else_=LoginAttempt.fail_count + 1,
+                ),
+                "window_start": case(
+                    (LoginAttempt.window_start < cutoff, now),
+                    else_=LoginAttempt.window_start,
+                ),
+            },
+        )
+        .returning(LoginAttempt.fail_count)
+    )
+    fails = (await db.execute(stmt)).scalar_one()
+
+    if fails >= MAX_ATTEMPTS:
+        await db.execute(
+            update(LoginAttempt)
+            .where(LoginAttempt.key == key)
+            .values(locked_until=now + LOCKOUT, fail_count=0)
+        )
+        logger.warning(f"Login locked for {int(LOCKOUT.total_seconds()) // 60} min: {key}")
+
+    await db.commit()
 
 
-def record_login_success(key: str) -> None:
-    _attempts.pop(key, None)
-    _locked_until.pop(key, None)
+async def record_login_success(db: AsyncSession, key: str) -> None:
+    await db.execute(delete(LoginAttempt).where(LoginAttempt.key == key))
+    await db.commit()

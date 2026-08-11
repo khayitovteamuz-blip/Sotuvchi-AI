@@ -40,13 +40,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware
+# CORS. The dashboard is served by this app, so it is same-origin and this list
+# is normally empty — cross-origin callers are simply refused. It was "*" with
+# allow_credentials, which asks the browser to let any site on the internet call
+# the API using the signed-in user's cookie.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
 
 # Mount static files & templates

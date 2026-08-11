@@ -1,5 +1,7 @@
 import os
 from pathlib import Path
+from typing import List
+
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -49,6 +51,24 @@ class Settings:
         "TELEGRAM_POLLING", "true" if not os.getenv("PUBLIC_BASE_URL") else "false"
     ).lower() in ("true", "1", "yes")
 
+    # ─── AI cost ──────────────────────────────────────────────────────────────
+    # Token prices in USD per 1M tokens, taken from your provider's pricing page.
+    # Left at 0 the dashboard shows raw token counts and says the price is
+    # unset — better than printing a confident number from a rate we guessed.
+    AI_PRICE_INPUT_PER_1M: float = float(os.getenv("AI_PRICE_INPUT_PER_1M", 0) or 0)
+    AI_PRICE_OUTPUT_PER_1M: float = float(os.getenv("AI_PRICE_OUTPUT_PER_1M", 0) or 0)
+    USD_TO_UZS: float = float(os.getenv("USD_TO_UZS", 0) or 0)
+
+    # Dashboard period boundaries are computed at this offset. Uzbekistan is
+    # UTC+5 all year, so a fixed number beats a tz database we would have to
+    # ship into the container.
+    TIMEZONE_OFFSET_HOURS: int = int(os.getenv("TIMEZONE_OFFSET_HOURS", 5))
+
+    # Extra browser origins allowed to call the API. Normally empty: the panel is
+    # served by this app, so it is same-origin and needs no CORS grant at all.
+    # Fill this only for a separate front-end or an embedded chat widget.
+    EXTRA_CORS_ORIGINS: str = os.getenv("EXTRA_CORS_ORIGINS", "")
+
     # Google Sheets
     GOOGLE_SHEETS_SPREADSHEET_ID: str = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
     GOOGLE_SHEETS_CREDENTIALS_FILE: str = os.getenv("GOOGLE_SHEETS_CREDENTIALS_FILE", "service_account.json")
@@ -63,6 +83,21 @@ QOIDALAR:
 4. Mijoz xarid qilishga qiziqsa, uning ismi, telefon raqami va yetkazib berish manzilini so'rab oling.
 5. Har doim muloqot oxirida mijozga qiziqarli savol yoki taklif bering (masalan: "Ushbu model sizga ma'qul keldimi? Buyurtma beramizmi?").
 """
+
+    def cors_origins(self) -> List[str]:
+        """Browser origins permitted to send credentialed requests.
+
+        Every API route requires a session cookie, so allow_origins="*" together
+        with allow_credentials would have let any website on the internet drive
+        the panel using a logged-in user's cookie.
+        """
+        origins = [o.strip() for o in self.EXTRA_CORS_ORIGINS.split(",") if o.strip()]
+        if self.PUBLIC_BASE_URL:
+            origins.append(self.PUBLIC_BASE_URL.rstrip("/"))
+        if self.DEBUG:
+            # Dev only: the panel is also opened from a phone over the LAN
+            origins += [f"http://localhost:{self.PORT}", f"http://127.0.0.1:{self.PORT}"]
+        return sorted(set(origins))
 
 
 settings = Settings()

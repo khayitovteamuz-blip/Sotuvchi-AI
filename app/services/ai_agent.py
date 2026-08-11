@@ -27,6 +27,25 @@ logger = logging.getLogger("ai_agent")
 
 MAX_TOOL_ROUNDS = 5   # guard against a model looping on tools forever
 MAX_RETRIES = 2       # retries on transient 429/503 from the API
+
+
+def _new_usage() -> Dict[str, int]:
+    return {"total": 0, "prompt": 0, "output": 0}
+
+
+def _add_usage(usage: Dict[str, int], resp) -> None:
+    """Accumulate one response's token counts.
+
+    Input and output are kept apart because they are billed at different rates —
+    a single blended total cannot be priced correctly.
+    """
+    try:
+        um = resp.usage_metadata
+        usage["total"] += um.total_token_count or 0
+        usage["prompt"] += um.prompt_token_count or 0
+        usage["output"] += um.candidates_token_count or 0
+    except Exception:
+        pass
 MAX_RETRY_WAIT = 25.0 # seconds; longer than this we give up and use the fallback
 
 STYLE = """
@@ -122,13 +141,14 @@ class AISalesAgent:
         )
 
         t0 = time.monotonic()
-        reply_text, tokens, model_used = "", 0, None
+        reply_text, model_used = "", None
+        usage = _new_usage()
         tool_trace: List[Dict[str, Any]] = []
         created_order = None
 
         use_gemini = cfg.ai_provider == "gemini" and settings.GEMINI_API_KEY
         if use_gemini:
-            reply_text, tokens, tool_trace = await self._run_gemini_with_tools(
+            reply_text, usage, tool_trace = await self._run_gemini_with_tools(
                 session, tenant_id, conversation, cfg, history, user_message, user_name, media
             )
             model_used = cfg.model_name
@@ -170,7 +190,9 @@ class AISalesAgent:
 
         await repo.add_message(
             session, tenant_id, conversation, "assistant", reply_text,
-            intent=intent, model_name=model_used, tokens=tokens, latency_ms=latency_ms,
+            intent=intent, model_name=model_used, tokens=usage["total"],
+            prompt_tokens=usage["prompt"], output_tokens=usage["output"],
+            latency_ms=latency_ms,
             meta={"tools": tool_trace} if tool_trace else None,
         )
 
@@ -195,16 +217,16 @@ class AISalesAgent:
     # ─── Gemini tool-calling loop ─────────────────────────────────────────────
     async def _run_gemini_with_tools(
         self, session, tenant_id, conversation, cfg, history, user_message, user_name, media=None
-    ) -> Tuple[str, int, List[Dict[str, Any]]]:
+    ) -> Tuple[str, Dict[str, int], List[Dict[str, Any]]]:
         try:
             from google.genai import types
         except Exception as e:
             logger.error(f"genai import failed: {e}")
-            return ("", 0, [])
+            return ("", _new_usage(), [])
 
         client = self._client()
         if client is None:
-            return ("", 0, [])
+            return ("", _new_usage(), [])
 
         system_instruction = self._system_instruction(cfg, conversation, user_name)
 
@@ -230,22 +252,19 @@ class AISalesAgent:
             temperature=cfg.temperature,
         )
 
-        total_tokens = 0
+        usage = _new_usage()
         trace: List[Dict[str, Any]] = []
 
         for _round in range(MAX_TOOL_ROUNDS):
             resp = await self._generate(client, cfg.model_name, contents, config)
             if resp is None:
-                return ("", total_tokens, trace)
+                return ("", usage, trace)
 
-            try:
-                total_tokens += resp.usage_metadata.total_token_count or 0
-            except Exception:
-                pass
+            _add_usage(usage, resp)
 
             calls = list(getattr(resp, "function_calls", None) or [])
             if not calls:
-                return ((resp.text or "").strip(), total_tokens, trace)
+                return ((resp.text or "").strip(), usage, trace)
 
             # Echo back the model's OWN content, not a reconstruction: thinking
             # models attach a thought_signature to functionCall parts and reject
@@ -271,8 +290,11 @@ class AISalesAgent:
             types.GenerateContentConfig(system_instruction=system_instruction, temperature=cfg.temperature),
         )
         if final is None:
-            return ("", total_tokens, trace)
-        return ((final.text or "").strip(), total_tokens, trace)
+            return ("", usage, trace)
+        # This closing call used to go uncounted, so the cost panel understated
+        # every conversation that exhausted its tool rounds.
+        _add_usage(usage, final)
+        return ((final.text or "").strip(), usage, trace)
 
     async def _generate(self, client, model: str, contents, config):
         """One generate_content call, retrying transient rate limits (429/503).

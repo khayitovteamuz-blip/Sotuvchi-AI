@@ -8,9 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import security
 from app.core.auth import (
     SESSION_COOKIE,
+    client_ip,
     create_session,
     destroy_session,
     require_auth,
+    set_session_cookie,
 )
 from app.db.base import get_session
 from app.db.models import User
@@ -18,14 +20,6 @@ from app.models.tenant import TenantLogin, TenantRegister
 from app.services import tenant_service
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
-
-
-def _client_ip(request: Request) -> str:
-    """Real client IP when running behind a reverse proxy."""
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
 
 
 @router.post("/register")
@@ -42,8 +36,8 @@ async def register(data: TenantRegister, session: AsyncSession = Depends(get_ses
 @router.post("/login")
 async def login(data: TenantLogin, request: Request, session: AsyncSession = Depends(get_session)):
     # Throttle per IP+account: without this a script can try passwords forever
-    throttle_key = f"{_client_ip(request)}|{data.email.strip().lower()}"
-    allowed, wait = security.check_login_allowed(throttle_key)
+    throttle_key = f"{client_ip(request)}|{data.email.strip().lower()}"
+    allowed, wait = await security.check_login_allowed(session, throttle_key)
     if not allowed:
         raise HTTPException(
             status_code=429,
@@ -52,26 +46,23 @@ async def login(data: TenantLogin, request: Request, session: AsyncSession = Dep
 
     user = await tenant_service.authenticate(session, data.email, data.password)
     if not user:
-        security.record_login_failure(throttle_key)
+        await security.record_login_failure(session, throttle_key)
         raise HTTPException(status_code=401, detail="Email yoki parol noto'g'ri.")
-    security.record_login_success(throttle_key)
+    await security.record_login_success(session, throttle_key)
 
     tenant = await tenant_service.get_tenant(session, user.tenant_id)
-    token = create_session(user.id)
+    token = await create_session(session, user.id, request)
     response = JSONResponse(content={
         "status": "success",
         "tenant": tenant_service.safe_user_dict(user, tenant),
     })
-    response.set_cookie(
-        key=SESSION_COOKIE, value=token,
-        httponly=True, samesite="lax", max_age=60 * 60 * 24 * 7,
-    )
+    set_session_cookie(response, token)
     return response
 
 
 @router.post("/logout")
-async def logout(request: Request):
-    destroy_session(request)
+async def logout(request: Request, session: AsyncSession = Depends(get_session)):
+    await destroy_session(session, request)
     response = JSONResponse(content={"status": "success"})
     response.delete_cookie(SESSION_COOKIE)
     return response

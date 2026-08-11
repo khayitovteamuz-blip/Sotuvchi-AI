@@ -11,23 +11,41 @@ class GoogleSheetsService:
     def __init__(self):
         self.client = None
         self.spreadsheet = None
+        self.reason: Optional[str] = None   # why it is not connected, if it isn't
         self._initialize()
 
     def _initialize(self):
-        if not settings.GOOGLE_SHEETS_SPREADSHEET_ID or not os.path.exists(settings.GOOGLE_SHEETS_CREDENTIALS_FILE):
-            logger.info("Google Sheets API key / credentials file topilmadi. Mahalliy bazadan foydalaniladi.")
+        # Why it is off matters as much as that it is off: a missing spreadsheet
+        # id and a missing key file need different fixes, and "not connected"
+        # alone sends the owner hunting through config for the wrong one.
+        if not settings.GOOGLE_SHEETS_SPREADSHEET_ID:
+            self.reason = "GOOGLE_SHEETS_SPREADSHEET_ID .env faylida ko'rsatilmagan."
+            logger.info("Google Sheets: spreadsheet id yo'q. Mahalliy bazadan foydalaniladi.")
+            return
+        if not os.path.exists(settings.GOOGLE_SHEETS_CREDENTIALS_FILE):
+            self.reason = (
+                f"Kalit fayli topilmadi: {settings.GOOGLE_SHEETS_CREDENTIALS_FILE}. "
+                "Google Cloud'dan service account JSON yuklab, shu nom bilan qo'ying."
+            )
+            logger.info("Google Sheets: credentials fayli yo'q. Mahalliy bazadan foydalaniladi.")
             return
 
         try:
             import gspread
             self.client = gspread.service_account(filename=settings.GOOGLE_SHEETS_CREDENTIALS_FILE)
             self.spreadsheet = self.client.open_by_key(settings.GOOGLE_SHEETS_SPREADSHEET_ID)
+            self.reason = None
             logger.info("Google Sheets bilan muvaffaqiyatli ulandi.")
         except Exception as e:
+            # Usually the sheet is not shared with the service account's email
+            self.reason = f"Ulanishda xatolik: {e}"
             logger.warning(f"Google Sheets ga ulanishda xatolik: {e}")
 
     def is_connected(self) -> bool:
         return self.spreadsheet is not None
+
+    def status(self) -> dict:
+        return {"connected": self.is_connected(), "reason": self.reason}
 
     def fetch_products(self) -> List[Product]:
         """Fetch catalog from Google Sheets 'Products' tab"""

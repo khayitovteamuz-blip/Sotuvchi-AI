@@ -222,12 +222,21 @@ class TelegramBotService:
             logger.error(f"Telegram getMe error: {e}")
             return None
 
-    async def set_webhook(self, token: str, url: str) -> bool:
+    async def set_webhook(self, token: str, url: str, secret: Optional[str] = None) -> bool:
         try:
+            payload = {
+                "url": url,
+                "allowed_updates": ["message", "callback_query", "my_chat_member"],
+            }
+            if secret:
+                # Telegram sends this back on every update as the
+                # X-Telegram-Bot-Api-Secret-Token header. The tenant id in the
+                # webhook URL is public and proves nothing, so this shared secret
+                # is what separates a real update from a forged one.
+                payload["secret_token"] = secret
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(
-                    f"{TELEGRAM_API.format(token=token)}/setWebhook",
-                    json={"url": url, "allowed_updates": ["message", "callback_query", "my_chat_member"]},
+                    f"{TELEGRAM_API.format(token=token)}/setWebhook", json=payload
                 )
                 return resp.json().get("ok", False)
         except Exception as e:

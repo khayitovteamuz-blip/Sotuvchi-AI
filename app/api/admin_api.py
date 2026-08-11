@@ -5,9 +5,10 @@ Data lives in Postgres (see app/db/repo.py).
 import uuid
 from typing import List
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import periods
 from app.core.auth import require_auth
 from app.core.config import BASE_DIR
 from app.db import repo
@@ -22,8 +23,12 @@ router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
 # ─── Dashboard ────────────────────────────────────────────────────────────────
 @router.get("/stats", response_model=DashboardStats)
-async def get_dashboard_stats(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
-    s = await repo.dashboard_stats(session, user.tenant_id)
+async def get_dashboard_stats(
+    period: str = Query(periods.DEFAULT_PERIOD, description="today | week | month | all"),
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+):
+    s = await repo.dashboard_stats(session, user.tenant_id, period)
     return DashboardStats(**s)
 
 
@@ -177,8 +182,12 @@ async def import_template(user: User = Depends(require_auth)):
 
 # ─── Analytics & Customers ────────────────────────────────────────────────────
 @router.get("/analytics")
-async def get_analytics(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
-    return await repo.analytics(session, user.tenant_id)
+async def get_analytics(
+    period: str = Query(periods.DEFAULT_PERIOD, description="today | week | month | all"),
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+):
+    return await repo.analytics(session, user.tenant_id, period)
 
 
 @router.get("/customers")
@@ -191,8 +200,10 @@ async def get_customers(user: User = Depends(require_auth), session: AsyncSessio
 async def get_integrations_status(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     tenant = await tenant_service.get_tenant(session, user.tenant_id)
     s = await repo.get_settings(session, user.tenant_id)
+    sheets = sheets_service.status()
     return {
-        "google_sheets": sheets_service.is_connected(),
+        "google_sheets": sheets["connected"],
+        "google_sheets_reason": sheets["reason"],
         "telegram_bot": bool(tenant and tenant.telegram_bot_token),
         "telegram_bot_username": tenant.telegram_bot_username if tenant else None,
         "ai_provider": s.ai_provider,

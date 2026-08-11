@@ -1,23 +1,37 @@
 """
-Auth — server-side session tokens + FastAPI dependency returning the current User.
+Auth — Postgres-backed session tokens + FastAPI dependency returning the current User.
 
-Sessions map a cookie token to a user_id (in-memory; swap for Redis in prod).
-Passwords are argon2id-hashed; see app.core.security.
+Sessions used to be a module-level dict. That logged everyone out on every
+restart and broke outright beyond one worker, since a request served by worker B
+cannot see a token worker A handed out. They now live in the `sessions` table.
+
+The cookie carries a random token; the table stores only its SHA-256, so a
+leaked database hands an attacker no usable sessions.
+
+Latency note: looking the session up costs nothing extra. `require_auth` already
+had to fetch the User on every request, and the session row is joined into that
+same query — still one round trip to the database.
 """
-import uuid
-from typing import Dict, Optional
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, Response, status
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import security
+from app.core.config import settings
 from app.db.base import get_session
-from app.db.models import User
-
-# In-memory session store: { session_token: user_id }
-_sessions: Dict[str, str] = {}
+from app.db.models import User, UserSession
 
 SESSION_COOKIE = "sotuvchi_session"
+SESSION_TTL = timedelta(days=7)
+
+# How stale last_seen_at may get before we refresh it. Writing on every request
+# would add a round trip to a database ~100ms away just to update a timestamp.
+TOUCH_INTERVAL = timedelta(hours=1)
 
 
 # Hashing lives in app.core.security (argon2id + legacy sha256 upgrade path).
@@ -25,34 +39,127 @@ SESSION_COOKIE = "sotuvchi_session"
 hash_password = security.hash_password
 
 
-def create_session(user_id: str) -> str:
-    token = uuid.uuid4().hex
-    _sessions[token] = user_id
+def _hash_token(token: str) -> str:
+    """Tokens are 256-bit random, so a plain SHA-256 is enough — there is
+    nothing to brute-force and no need for a slow KDF here."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def client_ip(request: Request) -> str:
+    """Real client IP when running behind a reverse proxy."""
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def set_session_cookie(response: Response, token: str) -> None:
+    """Attach the session cookie.
+
+    `secure` follows the deployment: over HTTPS the cookie must never travel on
+    plain HTTP, but forcing the flag on localhost would stop the panel working
+    over http://127.0.0.1.
+    """
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=settings.PUBLIC_BASE_URL.startswith("https://"),
+        max_age=int(SESSION_TTL.total_seconds()),
+    )
+
+
+async def create_session(
+    db: AsyncSession, user_id: str, request: Optional[Request] = None
+) -> str:
+    """Issue a new session and return the raw token for the cookie."""
+    now = datetime.now(timezone.utc)
+
+    # Sweep expired rows here rather than on a timer: logins are rare, and the
+    # index on expires_at keeps this cheap.
+    await db.execute(delete(UserSession).where(UserSession.expires_at < now))
+
+    token = secrets.token_urlsafe(32)
+    db.add(
+        UserSession(
+            token_hash=_hash_token(token),
+            user_id=user_id,
+            expires_at=now + SESSION_TTL,
+            last_seen_at=now,
+            ip=client_ip(request) if request else None,
+            user_agent=(request.headers.get("user-agent", "")[:256] or None) if request else None,
+        )
+    )
+    await db.commit()
     return token
 
 
-def get_user_id_from_request(request: Request) -> Optional[str]:
+async def destroy_session(db: AsyncSession, request: Request) -> None:
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
-        return None
-    return _sessions.get(token)
+        return
+    await db.execute(
+        delete(UserSession).where(UserSession.token_hash == _hash_token(token))
+    )
+    await db.commit()
 
 
-def destroy_session(request: Request):
-    token = request.cookies.get(SESSION_COOKIE)
-    if token:
-        _sessions.pop(token, None)
+async def destroy_all_sessions(db: AsyncSession, user_id: str) -> None:
+    """Log a user out everywhere — for use after a password change or lockout."""
+    await db.execute(delete(UserSession).where(UserSession.user_id == user_id))
+    await db.commit()
 
 
 async def require_auth(
     request: Request,
-    session: AsyncSession = Depends(get_session),
+    db: AsyncSession = Depends(get_session),
 ) -> User:
     """FastAPI dependency — returns the current User or raises 401."""
-    user_id = get_user_id_from_request(request)
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Tizimga kirish talab qilinadi.")
-    user = await session.get(User, user_id)
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Foydalanuvchi topilmadi yoki faol emas.")
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Tizimga kirish talab qilinadi.",
+        )
+
+    row = (
+        await db.execute(
+            select(UserSession, User)
+            .join(User, User.id == UserSession.user_id)
+            .where(UserSession.token_hash == _hash_token(token))
+        )
+    ).first()
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sessiya topilmadi. Qaytadan kiring.",
+        )
+
+    sess, user = row
+    now = datetime.now(timezone.utc)
+
+    if sess.expires_at <= now:
+        await db.execute(
+            delete(UserSession).where(UserSession.token_hash == sess.token_hash)
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sessiya muddati tugadi. Qaytadan kiring.",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Foydalanuvchi topilmadi yoki faol emas.",
+        )
+
+    # Sliding expiry: someone working all week should not be logged out mid-task.
+    if now - sess.last_seen_at > TOUCH_INTERVAL:
+        sess.last_seen_at = now
+        sess.expires_at = now + SESSION_TTL
+        await db.commit()
+
     return user

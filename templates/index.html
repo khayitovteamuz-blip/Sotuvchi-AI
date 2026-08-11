@@ -167,6 +167,14 @@
 
             <!-- ═══ DASHBOARD ═══ -->
             <section id="tab-overview" class="tab-view">
+                <!-- Every figure below is scoped to the period picked here -->
+                <div class="period-picker" id="dashboard-period">
+                    <button type="button" data-period="today">Bugun</button>
+                    <button type="button" data-period="week">Shu hafta</button>
+                    <button type="button" data-period="month" class="is-active">Shu oy</button>
+                    <button type="button" data-period="all">Butun davr</button>
+                </div>
+
                 <div class="kpi-grid" id="dashboard-kpis"></div>
 
                 <div class="dash-split">
@@ -430,7 +438,14 @@
                     <div class="integration-card disabled"><div class="integration-head"><span class="integration-icon">📸</span><div><h3>Instagram</h3><p>Meta Business (tez orada)</p></div></div></div>
                     <div class="integration-card disabled"><div class="integration-head"><span class="integration-icon">🌐</span><div><h3>Web widget</h3><p>Saytga o'rnatish (tez orada)</p></div></div></div>
                     <div class="integration-card disabled"><div class="integration-head"><span class="integration-icon">💳</span><div><h3>To'lov (Payme/Click)</h3><p>tez orada</p></div></div></div>
-                    <div class="integration-card disabled"><div class="integration-head"><span class="integration-icon">📊</span><div><h3>Google Sheets / CRM</h3><p>tez orada</p></div></div></div>
+                    <!-- Sheets is implemented; this card reports its real state -->
+                    <div class="integration-card" id="sheets-card">
+                        <div class="integration-head">
+                            <span class="integration-icon">📊</span>
+                            <div><h3>Google Sheets / CRM</h3><p id="sheets-status">tekshirilmoqda…</p></div>
+                        </div>
+                        <p class="field-hint" id="sheets-reason"></p>
+                    </div>
                 </div>
             </section>
 
