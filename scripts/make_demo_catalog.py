@@ -7,7 +7,6 @@ Every image URL here was checked to return HTTP 200 before being committed.
 Run:  .venv/bin/python -m scripts.make_demo_catalog
 Out:  data/namuna-katalog-100.xlsx  va  data/namuna-katalog-100.csv
 """
-from pathlib import Path
 
 from app.core.config import BASE_DIR
 

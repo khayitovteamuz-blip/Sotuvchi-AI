@@ -16,6 +16,10 @@ class Settings:
     HOST: str = os.getenv("HOST", "0.0.0.0")
     DEBUG: bool = os.getenv("DEBUG", "True").lower() in ("true", "1", "yes")
 
+    # Worker processes. Read here as well as by the server so the app can tell
+    # when it is one of several — long-polling only works in a single process.
+    WEB_CONCURRENCY: int = int(os.getenv("WEB_CONCURRENCY", 1))
+
     # Database (Postgres). Dev-default points at the local Homebrew instance.
     # Prod: override with DATABASE_URL env (e.g. postgresql+asyncpg://user:pass@host:5432/db)
     DATABASE_URL: str = os.getenv(

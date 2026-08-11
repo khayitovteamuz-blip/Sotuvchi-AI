@@ -1,49 +1,91 @@
+"""
+Sotuvchi AI — application entry point.
+
+`app` is built at module level so a process manager can import it as `main:app`
+and fork several workers. Running uvicorn from inside this file is a development
+convenience only; the container CMD drives the server directly, which is what
+makes multiple workers possible.
+"""
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
-from app.core.config import settings
-from app.api.chat_api import router as chat_router
 from app.api.admin_api import router as admin_router
-from app.api.bot_webhook import router as bot_router
 from app.api.auth_api import router as auth_router
+from app.api.bot_webhook import router as bot_router
+from app.api.chat_api import router as chat_router
 from app.api.inbox_api import router as inbox_router
 from app.api.integrations_api import router as integrations_router
+from app.core.config import settings
+from app.db.base import AsyncSessionLocal, engine
 from app.services.telegram_poller import telegram_poller
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG if settings.DEBUG else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+logger = logging.getLogger("main")
+
+BASE_DIR = Path(__file__).parent
+STATIC_DIR = BASE_DIR / "static"
+TEMPLATES_DIR = BASE_DIR / "templates"
+
+
+def _polling_allowed() -> bool:
+    """Long-polling may run in exactly one process.
+
+    Each worker would open its own getUpdates loop and Telegram would hand the
+    same update to every one of them, so the customer receives N identical
+    replies. Webhooks have no such limit, which is what production uses.
+    """
+    if not settings.TELEGRAM_POLLING:
+        return False
+    if settings.WEB_CONCURRENCY > 1:
+        logger.error(
+            "TELEGRAM_POLLING yoqilgan, lekin WEB_CONCURRENCY=%d. Polling ishga "
+            "tushirilmadi: har bir worker bir xil xabarni qayta ishlab, mijozga "
+            "takroriy javob yuborardi. Ishlab chiqarishda PUBLIC_BASE_URL ni "
+            "qo'ying va webhook rejimiga o'ting.",
+            settings.WEB_CONCURRENCY,
+        )
+        return False
+    return True
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Long-polling lets the Telegram bot work on localhost (no public URL).
-    if settings.TELEGRAM_POLLING:
+    polling = _polling_allowed()
+    if polling:
         await telegram_poller.start()
     yield
-    if settings.TELEGRAM_POLLING:
+    if polling:
         await telegram_poller.stop()
+    # Return pooled connections before the process exits, so a redeploy does
+    # not leave sockets open against Postgres until they time out.
+    await engine.dispose()
 
 
 app = FastAPI(
-    title="Sotuvchi AI - Enterprise Sales Agent",
-    description="O'zbek tilidagi avtonom AI Sotuvchi agenti, Telegram bot integratsiyasi va Google Sheets CRM boshqaruv paneli.",
-    version="2.0.0",
+    title="Sotuvchi AI",
+    description="O'zbek tilidagi AI sotuvchi agenti — Telegram bot va boshqaruv paneli.",
+    version="2.1.0",
     lifespan=lifespan,
+    # The schema names every endpoint and its payloads; there is no reason to
+    # publish that from a production host.
+    docs_url="/docs" if settings.DEBUG else None,
+    redoc_url="/redoc" if settings.DEBUG else None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 
 # CORS. The dashboard is served by this app, so it is same-origin and this list
-# is normally empty — cross-origin callers are simply refused. It was "*" with
-# allow_credentials, which asks the browser to let any site on the internet call
-# the API using the signed-in user's cookie.
+# is normally empty — cross-origin callers are simply refused.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins(),
@@ -52,16 +94,10 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
-# Mount static files & templates
-static_dir = Path(__file__).parent / "static"
-static_dir.mkdir(exist_ok=True)
-app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+STATIC_DIR.mkdir(exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
-templates_dir = Path(__file__).parent / "templates"
-templates_dir.mkdir(exist_ok=True)
-templates = Jinja2Templates(directory=str(templates_dir))
-
-# Include API Routers
 app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(admin_router)
@@ -79,54 +115,60 @@ def _asset_version() -> str:
     """
     stamp = 0.0
     for rel in ("js/app.js", "css/style.css"):
-        f = static_dir / rel
+        f = STATIC_DIR / rel
         if f.exists():
             stamp = max(stamp, f.stat().st_mtime)
     return str(int(stamp))
 
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 async def root_dashboard(request: Request):
-    """Serve Web Admin Dashboard & Live AI Simulator"""
+    """Web admin dashboard."""
     return templates.TemplateResponse(
-        "index.html", {"request": request, "asset_v": _asset_version()}
+        request, "index.html", {"asset_v": _asset_version()}
     )
 
 
 @app.get("/api/health")
 async def health_check():
-    return {
-        "status": "healthy",
-        "service": "Sotuvchi AI",
-        "version": "1.0.0"
-    }
+    """Liveness: is the process up? Deliberately does not touch the database —
+    a container probe must not fail (and restart the app) over a slow query."""
+    return {"status": "healthy", "service": "Sotuvchi AI", "version": app.version}
+
+
+@app.get("/api/ready")
+async def readiness_check():
+    """Readiness: can we actually serve? A process that cannot reach Postgres
+    answers no request usefully, so the load balancer should not send it any."""
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+        return {"status": "ready", "database": "ok"}
+    except Exception as e:
+        logger.error(f"Readiness check failed: {e}")
+        return JSONResponse(
+            status_code=503, content={"status": "not_ready", "database": "unreachable"}
+        )
 
 
 if __name__ == "__main__":
-    import os
-    os.system("lsof -ti:8080 | xargs kill -9 2>/dev/null || true")
-    host, port = settings.HOST, settings.PORT
+    # Development only. In a container the CMD runs uvicorn itself, so workers,
+    # proxy headers and graceful shutdown are the server's job, not ours.
+    import uvicorn
 
-    # Print the LAN address so the panel can be opened from a phone on the same
-    # Wi-Fi — 127.0.0.1 is reachable only from this machine.
-    if host == "0.0.0.0":
+    if settings.HOST == "0.0.0.0":
+        # Print the LAN address so the panel can be opened from a phone on the
+        # same Wi-Fi — 127.0.0.1 is reachable only from this machine.
         import socket
+
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))          # no packets sent; just picks the route
+            s.connect(("8.8.8.8", 80))  # no packets sent; just picks the route
             lan_ip = s.getsockname()[0]
             s.close()
-            print(f"\n  Shu kompyuterda:  http://127.0.0.1:{port}")
-            print(f"  Telefondan (bir xil Wi-Fi):  http://{lan_ip}:{port}\n")
+            print(f"\n  Shu kompyuterda:  http://127.0.0.1:{settings.PORT}")
+            print(f"  Telefondan (bir xil Wi-Fi):  http://{lan_ip}:{settings.PORT}\n")
         except Exception:
             pass
 
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-        reload=False,
-        loop="asyncio",
-        http="h11",
-        ws="none",
-    )
+    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=False)

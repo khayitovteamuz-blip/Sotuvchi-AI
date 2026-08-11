@@ -1,5 +1,8 @@
 #!/bin/bash
-# Sotuvchi AI — start script
+# Sotuvchi AI — local development server.
+#
+# Production runs the container's CMD (uvicorn with workers); this script is
+# only for a developer machine.
 set -e
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -9,7 +12,8 @@ VENV_PY="$DIR/.venv/bin/python"
 
 if [ ! -x "$VENV_PY" ]; then
     echo "❌ .venv topilmadi. Avval yarating:"
-    echo "   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+    echo "   uv venv --python 3.12 .venv"
+    echo "   uv pip install --python .venv/bin/python -r requirements.txt"
     exit 1
 fi
 
@@ -17,8 +21,9 @@ echo "========================================"
 echo "🚀 Sotuvchi AI ishga tushmoqda..."
 echo "========================================"
 
-# Free the port if a previous run is still holding it
-lsof -ti:8080 | xargs kill -9 2>/dev/null || true
+# Free the port if a previous run is still holding it. Local convenience only —
+# it used to live in main.py, where it would have run inside the container too.
+lsof -ti:${PORT:-8080} | xargs kill -9 2>/dev/null || true
 sleep 1
 
 # Run the venv's own interpreter. Never mix the system python3 with the venv's

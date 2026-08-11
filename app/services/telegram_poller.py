@@ -16,7 +16,6 @@ from typing import Dict, Optional
 import httpx
 from sqlalchemy import select
 
-from app.core.config import settings
 from app.db.base import AsyncSessionLocal
 from app.db.models import Tenant
 from app.services.bot_service import TELEGRAM_API, bot_service

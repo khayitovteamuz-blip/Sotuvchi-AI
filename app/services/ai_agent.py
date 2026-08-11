@@ -9,7 +9,6 @@ hallucinated — that is the difference between this and a plain chatbot.
 Falls back to a keyword sales engine when no API key is configured.
 """
 import asyncio
-import json
 import logging
 import re
 import time
@@ -27,6 +26,7 @@ logger = logging.getLogger("ai_agent")
 
 MAX_TOOL_ROUNDS = 5   # guard against a model looping on tools forever
 MAX_RETRIES = 2       # retries on transient 429/503 from the API
+MAX_RETRY_WAIT = 25.0 # seconds; longer than this we give up and use the fallback
 
 
 def _new_usage() -> Dict[str, int]:
@@ -46,7 +46,6 @@ def _add_usage(usage: Dict[str, int], resp) -> None:
         usage["output"] += um.candidates_token_count or 0
     except Exception:
         pass
-MAX_RETRY_WAIT = 25.0 # seconds; longer than this we give up and use the fallback
 
 STYLE = """
 GAPIRISH USLUBI (juda muhim):
@@ -144,7 +143,6 @@ class AISalesAgent:
         reply_text, model_used = "", None
         usage = _new_usage()
         tool_trace: List[Dict[str, Any]] = []
-        created_order = None
 
         use_gemini = cfg.ai_provider == "gemini" and settings.GEMINI_API_KEY
         if use_gemini:
@@ -172,11 +170,6 @@ class AISalesAgent:
                 matched = self._match_products(user_message, products)
                 reply_text = self._fallback(user_message, intent, matched, products, user_name, cfg)
                 model_used = model_used or "fallback"
-
-        # If a tool created an order, surface it in the API response
-        for t in tool_trace:
-            if t["name"] == "create_order" and t["result"].get("success"):
-                created_order = t["result"]
 
         # Safety net: models sometimes *say* they are escalating without calling
         # the tool. A promise nobody acts on is worse than no promise, so if the

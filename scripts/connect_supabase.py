@@ -11,7 +11,6 @@ import asyncio
 import getpass
 import re
 import sys
-from pathlib import Path
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from app.core.config import BASE_DIR
@@ -146,7 +145,7 @@ def main() -> None:
         sys.exit(1)
 
     write_env(url)
-    print(f"""
+    print("""
   ✅ .env ga yozildi.
 
   Keyingi qadam — jadvallarni yaratish va ma'lumotni ko'chirish:

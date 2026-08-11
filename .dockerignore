@@ -1,0 +1,35 @@
+# Keep the build context small and secrets out of the image.
+
+# Secrets — these must come from the host's environment, never a layer
+.env
+.env.local
+service_account.json
+
+.git
+.gitignore
+.github
+
+# Local interpreter; the image builds its own
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS / editor noise
+.DS_Store
+.claude/
+.vscode/
+.idea/
+
+*.log
+server.log
+
+# User uploads live in a volume, not in the image
+static/uploads/*
+!static/uploads/.gitkeep
+
+# Local Postgres bootstrap — irrelevant inside a container
+setup_postgres.sh
+Dockerfile
+.dockerignore
