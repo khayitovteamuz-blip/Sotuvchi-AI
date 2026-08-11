@@ -293,6 +293,12 @@ class TelegramBotService:
         conv = await repo.get_or_create_conversation(
             session, tenant.id, "telegram", chat_id, customer_name=user_name
         )
+        # Keep the Telegram handle: the team needs a way back to the customer
+        # when a phone number is wrong or unreachable.
+        uname = msg.get("from", {}).get("username")
+        if uname and conv.customer_username != uname:
+            conv.customer_username = uname
+            await session.commit()
 
         if text == "/start":
             greeting = cfg.greeting_message or (

@@ -68,7 +68,8 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(128))
+    # argon2id hashes run ~97 chars; leave room for stronger future parameters
+    password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(32), default="owner")  # owner | operator
     full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -192,6 +193,8 @@ class Order(Base):
     longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     # Payment slip the customer photographed — the team confirms against this
     payment_photo_file_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    # Telegram handle/id, so the team can reach the customer from the receipt
+    customer_username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     # Team confirmation from the orders group — first tap wins, and we keep who
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -235,6 +238,7 @@ class Conversation(Base):
     # Last photo the customer sent (payment slip). Telegram file_id, so the bot
     # can forward it to the team without re-uploading the image.
     last_photo_file_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    customer_username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="ai")  # ai | operator | closed
     assigned_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     assigned_user_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)

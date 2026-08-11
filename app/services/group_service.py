@@ -34,6 +34,15 @@ def generate_pairing_code() -> str:
     return secrets.token_hex(3).upper()
 
 
+def _contact_line(order: Order) -> str:
+    """Telegram handle or chat id — a way back to the customer when the phone fails."""
+    if order.customer_username:
+        return f"💬 @{order.customer_username}\n"
+    if order.telegram_id:
+        return f"💬 Telegram ID: `{order.telegram_id}`\n"
+    return ""
+
+
 def _fmt_items(order: Order) -> str:
     return "\n".join(
         f"• {i.product_name} × {i.quantity} — {i.unit_price * i.quantity:,.0f}"
@@ -51,8 +60,9 @@ async def send_order_receipt(session: AsyncSession, tenant: Tenant, order: Order
         "🧾 *YANGI BUYURTMA — to'lov tekshirilsin*\n"
         f"`{order.id}`\n\n"
         f"👤 {order.customer_name}\n"
-        f"📞 {order.customer_phone}\n\n"
-        f"{_fmt_items(order)}\n\n"
+        f"📞 {order.customer_phone}\n"
+        f"{_contact_line(order)}"
+        f"\n{_fmt_items(order)}\n\n"
         f"💰 *Jami: {order.total_amount:,.0f} UZS*\n"
     )
     if order.delivery_address:
@@ -164,8 +174,9 @@ async def _mark_receipt_confirmed(tenant: Tenant, order: Order) -> None:
         "🧾 *BUYURTMA*\n"
         f"`{order.id}`\n\n"
         f"👤 {order.customer_name}\n"
-        f"📞 {order.customer_phone}\n\n"
-        f"{_fmt_items(order)}\n\n"
+        f"📞 {order.customer_phone}\n"
+        f"{_contact_line(order)}"
+        f"\n{_fmt_items(order)}\n\n"
         f"💰 *Jami: {order.total_amount:,.0f} UZS*\n"
     )
     if order.delivery_address:
@@ -199,6 +210,7 @@ async def send_to_work_group(session: AsyncSession, tenant: Tenant, order: Order
         f"`{order.id}`\n\n"
         f"👤 *Ism:* {order.customer_name}\n"
         f"📞 *Telefon:* `{order.customer_phone}`\n"
+        f"{_contact_line(order)}"
         f"📍 *Manzil:* {order.delivery_address or '—'}\n\n"
         f"{_fmt_items(order)}\n\n"
         f"💰 *Jami: {order.total_amount:,.0f} UZS*\n"

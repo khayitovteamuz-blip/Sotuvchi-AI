@@ -361,6 +361,8 @@ async def create_order(
             order.longitude = conv.last_longitude
         if conv and conv.last_photo_file_id:
             order.payment_photo_file_id = conv.last_photo_file_id
+        if conv and conv.customer_username:
+            order.customer_username = conv.customer_username
     for i in items:
         order.items.append(OrderItem(
             product_id=i.get("product_id", ""),

@@ -8,7 +8,8 @@ from typing import Optional, Tuple
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import hash_password, verify_password
+from app.core import security
+from app.core.auth import hash_password
 from app.core.config import settings
 from app.db.models import Tenant, TenantSettings, User
 
@@ -46,10 +47,26 @@ async def register(
 
 
 async def authenticate(session: AsyncSession, email: str, password: str) -> Optional[User]:
+    """Verify credentials and quietly upgrade legacy hashes.
+
+    Users created before argon2 still have sha256 hashes. Rather than force a
+    reset, a correct login re-hashes the password with argon2 in place.
+    """
     user = await get_user_by_email(session, email.strip().lower())
-    if user and user.is_active and verify_password(password, user.password_hash):
-        return user
-    return None
+    if not user or not user.is_active:
+        # Spend the same work on a miss so timing doesn't reveal valid emails
+        security.verify_password(password, security.hash_password("dummy"))
+        return None
+
+    ok, needs_rehash = security.verify_password(password, user.password_hash)
+    if not ok:
+        return None
+
+    if needs_rehash:
+        user.password_hash = security.hash_password(password)
+        await session.commit()
+
+    return user
 
 
 async def get_tenant(session: AsyncSession, tenant_id: str) -> Optional[Tenant]:
