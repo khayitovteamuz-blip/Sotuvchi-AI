@@ -1137,11 +1137,15 @@ function renderKbStatus(d) {
     const fields = [d.delivery_fee_city, d.payment_info, d.warranty_info,
                     d.return_policy, d.working_hours, d.faq];
     const filled = fields.filter(v => v !== null && v !== undefined && v !== '').length;
+    el.classList.remove('is-ok', 'is-warn');
     if (filled === fields.length) {
+        el.classList.add('is-ok');
         el.textContent = '✅ Bilimlar bazasi to\'liq — AI bu savollarga o\'zi javob beradi.';
     } else if (filled === 0) {
+        el.classList.add('is-warn');
         el.textContent = '⚠️ Bo\'sh. AI to\'lov/kafolat/yetkazib berish savollarida operatorga uzatadi.';
     } else {
+        el.classList.add('is-warn');
         el.textContent = `${filled}/${fields.length} to'ldirilgan. To'ldirmagan bo'limlarda AI operatorga uzatadi.`;
     }
 }

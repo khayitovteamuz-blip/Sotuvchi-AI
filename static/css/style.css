@@ -9,6 +9,10 @@
     
     --primary: #00b87c;
     --primary-dark: #009664;
+    /* Darkest brand green — the only one that carries white text at the
+       readable threshold (4.55:1). --primary manages 2.58:1, which is why a
+       filled pill in it looked blank. */
+    --primary-ink: #00875a;
     --accent-cyan: #0284c7;
     --accent-green: #059669;
     --accent-warning: #d97706;
@@ -123,7 +127,7 @@ body {
 
 .nav-item.active {
     color: #ffffff;
-    background: var(--primary);
+    background: var(--primary-ink);
     font-weight: 700;
     box-shadow: 0 4px 16px rgba(0, 184, 124, 0.3);
 }
@@ -1022,7 +1026,8 @@ textarea.form-control {
 }
 .period-picker button:hover { color: var(--text-main); }
 .period-picker button.is-active {
-    color: #fff; background: var(--accent-primary); border-color: var(--accent-primary);
+    color: #fff; background: var(--primary-ink); border-color: var(--primary-ink);
+    font-weight: 700;
 }
 .kpi-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .kpi-hint { font-size: 11.5px; color: var(--text-dim); }
@@ -1051,7 +1056,7 @@ textarea.form-control {
     transition: var(--transition);
 }
 .subtab:hover { color: var(--text-main); border-color: var(--card-hover-border); }
-.subtab.active { background: var(--primary); border-color: var(--primary); color: #fff; box-shadow: 0 4px 14px rgba(0,184,124,0.28); }
+.subtab.active { background: var(--primary-ink); border-color: var(--primary-ink); color: #fff; box-shadow: 0 4px 14px rgba(0,184,124,0.28); }
 .ai-sub { display: none; }
 .ai-sub.active { display: block; animation: fadeIn 0.25s ease; }
 
@@ -1084,7 +1089,7 @@ textarea.form-control {
     font-size: 12px; font-weight: 700; cursor: pointer;
     transition: var(--transition);
 }
-.inbox-filter.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.inbox-filter.active { background: var(--primary-ink); border-color: var(--primary-ink); color: #fff; }
 .inbox-conversations { overflow-y: auto; flex: 1; }
 .inbox-empty-list {
     padding: 40px 20px; text-align: center;
@@ -1308,8 +1313,16 @@ textarea.form-control {
 .agent-row .form-group:first-child { flex: 1 1 190px; }
 .field-hint { font-size: 12px; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
 .agent-note {
-    display: block; margin-top: 14px; font-size: 12px; color: var(--text-dim); line-height: 1.5;
+    /* --text-dim is ~2.6:1 on white — below the readable threshold. These notes
+       carry the actual consequence ("AI will hand off"), so they have to be
+       legible rather than decorative. */
+    display: block; margin-top: 14px; font-size: 12.5px;
+    color: var(--text-muted); line-height: 1.5;
 }
+/* Colour follows the state: a warning that the AI cannot answer must not look
+   the same as confirmation that it can. */
+.agent-note.is-ok { color: #047857; font-weight: 600; }
+.agent-note.is-warn { color: #b45309; font-weight: 600; }
 .agent-test-head {
     padding: 14px 18px; border-bottom: 1px solid var(--card-border);
     font-weight: 700; font-size: 14px; color: var(--text-main);
@@ -1512,7 +1525,7 @@ textarea.form-control {
 }
 .cat-chip:hover { border-color: var(--primary); color: var(--primary); }
 .cat-chip.active {
-    background: var(--primary); border-color: var(--primary); color: #fff;
+    background: var(--primary-ink); border-color: var(--primary-ink); color: #fff;
     box-shadow: 0 3px 12px rgba(0, 184, 124, 0.28);
 }
 .cat-chip.active span { background: rgba(255,255,255,0.24); color: #fff; }
@@ -1565,7 +1578,7 @@ textarea.form-control {
 .cost-row b { color: var(--text-main); font-variant-numeric: tabular-nums; }
 /* The money line is the point of the panel — tokens are supporting detail */
 .cost-row--lead { font-size: 14px; }
-.cost-row--lead b { font-size: 17px; font-weight: 800; color: var(--accent-primary); }
+.cost-row--lead b { font-size: 17px; font-weight: 800; color: var(--primary-ink); }
 .cost-hint { font-size: 11.5px; color: var(--text-dim); margin-top: 10px; line-height: 1.5; }
 
 .btn-mini.danger { color: var(--accent-danger); }
