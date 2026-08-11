@@ -359,6 +359,8 @@ async def create_order(
         if conv and conv.last_latitude:
             order.latitude = conv.last_latitude
             order.longitude = conv.last_longitude
+        if conv and conv.last_photo_file_id:
+            order.payment_photo_file_id = conv.last_photo_file_id
     for i in items:
         order.items.append(OrderItem(
             product_id=i.get("product_id", ""),

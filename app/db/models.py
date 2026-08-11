@@ -190,6 +190,8 @@ class Order(Base):
     # Customer's pinned location, when they share one in the chat
     latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Payment slip the customer photographed — the team confirms against this
+    payment_photo_file_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
 
     # Team confirmation from the orders group — first tap wins, and we keep who
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -230,6 +232,9 @@ class Conversation(Base):
     # Last map pin the customer shared — copied onto the order when one is placed
     last_latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     last_longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Last photo the customer sent (payment slip). Telegram file_id, so the bot
+    # can forward it to the team without re-uploading the image.
+    last_photo_file_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="ai")  # ai | operator | closed
     assigned_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     assigned_user_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)

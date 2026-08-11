@@ -24,8 +24,8 @@ logger = logging.getLogger("group_service")
 
 # panel key -> (tenant id column, tenant title column, human label)
 GROUP_KINDS = {
-    "buyurtmalar": ("orders_group_id", "orders_group_title", "Buyurtmalar guruhi"),
-    "ishchi":      ("work_group_id", "work_group_title", "Ishchi guruh"),
+    "buyurtmalar": ("orders_group_id", "orders_group_title", "Chek guruhi (to'lov tasdiqlash)"),
+    "ishchi":      ("work_group_id", "work_group_title", "Tayyor buyurtmalar guruhi"),
     "operatorlar": ("operators_group_id", "operators_group_title", "Operatorlar guruhi"),
 }
 
@@ -48,7 +48,7 @@ async def send_order_receipt(session: AsyncSession, tenant: Tenant, order: Order
         return False
 
     text = (
-        "🧾 *YANGI BUYURTMA*\n"
+        "🧾 *YANGI BUYURTMA — to'lov tekshirilsin*\n"
         f"`{order.id}`\n\n"
         f"👤 {order.customer_name}\n"
         f"📞 {order.customer_phone}\n\n"
@@ -59,11 +59,25 @@ async def send_order_receipt(session: AsyncSession, tenant: Tenant, order: Order
         text += f"📍 {order.delivery_address}\n"
     if order.latitude and order.longitude:
         text += "🗺 Lokatsiya biriktirilgan\n"
-    text += "\n⏳ _Tasdiqlanmagan_"
+    text += "\n⏳ _To'lov kutilmoqda_"
 
     keyboard = {"inline_keyboard": [[
-        {"text": "✅ Tasdiqlash", "callback_data": f"confirm:{order.id}"}
+        {"text": "✅ To'lov tasdiqlandi", "callback_data": f"confirm:{order.id}"}
     ]]}
+
+    # The team confirms payment against the slip, so it has to travel with the
+    # receipt. Telegram re-sends by file_id, so nothing is re-uploaded.
+    if order.payment_photo_file_id:
+        msg = await bot_service.send_photo_full(
+            tenant.telegram_bot_token, tenant.orders_group_id,
+            order.payment_photo_file_id, caption=text, reply_markup=keyboard,
+        )
+        if msg and msg.get("message_id"):
+            order.receipt_message_id = str(msg["message_id"])
+            await session.commit()
+            return True
+        # Photo failed (bad id, too large) — still deliver the order as text
+        logger.warning("Payment slip could not be sent; falling back to text")
 
     msg = await bot_service.send_message_full(
         tenant.telegram_bot_token, tenant.orders_group_id, text, reply_markup=keyboard
@@ -77,6 +91,47 @@ async def send_order_receipt(session: AsyncSession, tenant: Tenant, order: Order
     return False
 
 
+async def attach_payment_slip(
+    session: AsyncSession, tenant: Tenant, conversation_id: str, file_id: str
+) -> bool:
+    """Customer sent a payment slip: put it in front of the team.
+
+    The order is created before the customer pays, so the first receipt has no
+    slip. When the photo arrives we retire that message's button and repost the
+    receipt as the photo itself — one order, one live button, slip attached.
+    """
+    from sqlalchemy import select
+
+    res = await session.execute(
+        select(Order)
+        .where(
+            Order.tenant_id == tenant.id,
+            Order.conversation_id == conversation_id,
+            Order.confirmed_at.is_(None),
+        )
+        .order_by(Order.created_at.desc())
+        .limit(1)
+    )
+    order = res.scalar_one_or_none()
+    if not order:
+        return False          # a photo unrelated to any pending order
+
+    order.payment_photo_file_id = file_id
+    await session.commit()
+
+    # Retire the old button so only the slip version is actionable
+    if order.receipt_message_id and tenant.orders_group_id:
+        await bot_service.edit_message(
+            tenant.telegram_bot_token, tenant.orders_group_id,
+            order.receipt_message_id,
+            f"🧾 `{order.id}` — _chek rasmi keldi, quyida_",
+            reply_markup={"inline_keyboard": []},
+        )
+        order.receipt_message_id = None
+
+    return await send_order_receipt(session, tenant, order)
+
+
 # ─── Confirmation from the group ──────────────────────────────────────────────
 async def confirm_order(
     session: AsyncSession, tenant: Tenant, order_id: str, who: str
@@ -88,7 +143,7 @@ async def confirm_order(
 
     if order.confirmed_at:
         # Someone got here first — say who, and change nothing
-        return False, f"Allaqachon tasdiqlangan: {order.confirmed_by}"
+        return False, f"To'lovni allaqachon tasdiqlagan: {order.confirmed_by}"
 
     from datetime import datetime, timezone
     order.confirmed_at = datetime.now(timezone.utc)
@@ -101,7 +156,7 @@ async def confirm_order(
         await _mark_receipt_confirmed(tenant, order)
 
     await send_to_work_group(session, tenant, order)
-    return True, f"✅ Tasdiqladingiz: {order.id}"
+    return True, f"✅ To'lov tasdiqlandi: {order.id}"
 
 
 async def _mark_receipt_confirmed(tenant: Tenant, order: Order) -> None:
@@ -115,7 +170,16 @@ async def _mark_receipt_confirmed(tenant: Tenant, order: Order) -> None:
     )
     if order.delivery_address:
         text += f"📍 {order.delivery_address}\n"
-    text += f"\n✅ *Tasdiqladi: {order.confirmed_by}*"
+    text += f"\n✅ *To'lov tasdiqlandi — {order.confirmed_by}*"
+
+    # Photo receipts carry a caption; text receipts carry text
+    if order.payment_photo_file_id:
+        ok = await bot_service.edit_caption(
+            tenant.telegram_bot_token, tenant.orders_group_id,
+            order.receipt_message_id, text, reply_markup={"inline_keyboard": []},
+        )
+        if ok:
+            return
 
     await bot_service.edit_message(
         tenant.telegram_bot_token, tenant.orders_group_id,
@@ -138,9 +202,17 @@ async def send_to_work_group(session: AsyncSession, tenant: Tenant, order: Order
         f"📍 *Manzil:* {order.delivery_address or '—'}\n\n"
         f"{_fmt_items(order)}\n\n"
         f"💰 *Jami: {order.total_amount:,.0f} UZS*\n"
-        f"✅ Tasdiqladi: {order.confirmed_by}"
+        f"✅ To'lovni tasdiqladi: {order.confirmed_by}"
     )
-    ok = await bot_service.send_message(tenant.telegram_bot_token, target, text)
+    if order.payment_photo_file_id:
+        msg = await bot_service.send_photo_full(
+            tenant.telegram_bot_token, target, order.payment_photo_file_id, caption=text
+        )
+        ok = bool(msg)
+        if not ok:
+            ok = await bot_service.send_message(tenant.telegram_bot_token, target, text)
+    else:
+        ok = await bot_service.send_message(tenant.telegram_bot_token, target, text)
 
     # A pinned location is far more useful to a courier than a text address
     if order.latitude and order.longitude:
@@ -167,12 +239,25 @@ async def try_pair_group(
     id_col, title_col, label = GROUP_KINDS[kind]
     setattr(tenant, id_col, str(chat_id))
     setattr(tenant, title_col, chat_title or kind)
-    tenant.group_pairing_code = None      # single use
+
+    # Codes stay single-use, but hand out the next one right here — otherwise
+    # connecting three groups means three trips back to the panel.
+    tenant.group_pairing_code = generate_pairing_code()
     await session.commit()
 
     extra = {
-        "buyurtmalar": "Yangi buyurtmalar cheki shu yerga tushadi. Tasdiqlash tugmasi bilan.",
-        "ishchi": "Tasdiqlangan buyurtmalar yetkazish uchun shu yerga keladi.",
+        "buyurtmalar": "Yangi buyurtma cheki shu yerga tushadi — to'lovni tasdiqlash tugmasi bilan.",
+        "ishchi": "To'lovi tasdiqlangan, yetkazishga tayyor buyurtmalar shu yerga keladi.",
         "operatorlar": "Mijoz operator so'raganda xabar shu yerga keladi.",
     }[kind]
-    return f"✅ *{label}* ulandi!\n\n{extra}"
+
+    remaining = [
+        f"`{k}`" for k in GROUP_KINDS
+        if not getattr(tenant, GROUP_KINDS[k][0])
+    ]
+    nxt = ""
+    if remaining:
+        nxt = (f"\n\n➡️ Keyingi guruh uchun kod: `{tenant.group_pairing_code}`\n"
+               f"Qolgan turlar: {', '.join(remaining)}")
+
+    return f"✅ *{label}* ulandi!\n\n{extra}{nxt}"

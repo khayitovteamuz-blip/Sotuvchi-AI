@@ -79,6 +79,23 @@ class TelegramBotService:
             logger.error(f"Telegram editMessageText error: {e}")
             return False
 
+    async def edit_caption(
+        self, token: str, chat_id: str, message_id: str, caption: str,
+        reply_markup: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """A photo message carries a caption, not text — editMessageText fails on it."""
+        payload = {"chat_id": chat_id, "message_id": int(message_id),
+                   "caption": caption[:1024], "parse_mode": "Markdown"}
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(f"{TELEGRAM_API.format(token=token)}/editMessageCaption", json=payload)
+                return resp.json().get("ok", False)
+        except Exception as e:
+            logger.error(f"Telegram editMessageCaption error: {e}")
+            return False
+
     async def answer_callback(
         self, token: str, callback_id: str, text: str = "", alert: bool = False
     ) -> bool:
@@ -125,6 +142,31 @@ class TelegramBotService:
         except Exception as e:
             logger.error(f"Telegram sendPhoto error: {e}")
             return False
+
+    async def send_photo_full(
+        self, token: str, chat_id: str, photo: str,
+        caption: Optional[str] = None, reply_markup: Optional[Dict[str, Any]] = None,
+    ) -> Optional[dict]:
+        """Send a photo (URL or Telegram file_id) and return the sent message."""
+        if not token or not photo:
+            return None
+        payload = {"chat_id": chat_id, "photo": photo}
+        if caption:
+            payload["caption"] = caption[:1024]
+            payload["parse_mode"] = "Markdown"
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                resp = await client.post(f"{TELEGRAM_API.format(token=token)}/sendPhoto", json=payload)
+                data = resp.json()
+                if not data.get("ok"):
+                    logger.warning(f"sendPhoto failed: {str(data)[:180]}")
+                    return None
+                return data["result"]
+        except Exception as e:
+            logger.error(f"Telegram sendPhoto error: {e}")
+            return None
 
     async def send_media_group(self, token: str, chat_id: str, items: list) -> bool:
         """Send 2-10 product images as one album."""
@@ -185,7 +227,7 @@ class TelegramBotService:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(
                     f"{TELEGRAM_API.format(token=token)}/setWebhook",
-                    json={"url": url, "allowed_updates": ["message", "callback_query"]},
+                    json={"url": url, "allowed_updates": ["message", "callback_query", "my_chat_member"]},
                 )
                 return resp.json().get("ok", False)
         except Exception as e:
@@ -272,6 +314,16 @@ class TelegramBotService:
             conv.last_longitude = loc.get("longitude")
             await session.commit()
             text = text or "📍 [lokatsiya yubordi]"
+
+        # Keep the photo's file_id: a payment slip must reach the team as an
+        # image, and Telegram lets us forward it by id without re-uploading.
+        if msg.get("photo"):
+            file_id = msg["photo"][-1]["file_id"]
+            conv.last_photo_file_id = file_id
+            await session.commit()
+            # If a payment is pending for this chat, the slip goes to the team now
+            from app.services import group_service
+            await group_service.attach_payment_slip(session, tenant, conv.id, file_id)
 
         # Photo / voice: customers here often show a product or just talk.
         # Gemini reads both, so hand the bytes straight to the agent.

@@ -89,6 +89,11 @@ QAT'IY QOIDALAR (buzilishi mumkin emas):
 12. Mahsulot haqida gapirganda RASMINI ham yuboring — send_product_photo
    chaqiring. Rasm matndan ko'ra yaxshiroq sotadi. Lekin har javobda emas:
    mijoz aniq mahsulotga qiziqqanda yoki variantlarni taqqoslaganda.
+13. Buyurtma rasmiylashtirilgandan keyin mijozdan TO'LOV CHEKI rasmini
+   so'rang: "To'lovni amalga oshirib, chek rasmini shu yerga yuboring —
+   tasdiqlangach buyurtmangiz yetkazishga chiqadi."
+   Mijoz chek rasmini yuborsa — rahmat ayting va tekshiruvga
+   yuborilganini bildiring. Chekni o'zingiz tasdiqlamang, bu odam ishi.
 """
 
 

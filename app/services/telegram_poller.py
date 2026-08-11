@@ -9,6 +9,7 @@ One poll loop runs per tenant that has a bot token. Production should use
 webhooks instead (set PUBLIC_BASE_URL and connect from the Integrations tab).
 """
 import asyncio
+import json
 import logging
 from typing import Dict, Optional
 
@@ -23,6 +24,8 @@ from app.services.bot_service import TELEGRAM_API, bot_service
 logger = logging.getLogger("telegram_poller")
 
 POLL_TIMEOUT = 25       # seconds Telegram holds the request open
+# Every update type the bot acts on. Missing one here means it never arrives.
+ALLOWED_UPDATES = ["message", "callback_query", "my_chat_member"]
 ERROR_BACKOFF = 5       # seconds to wait after a failure
 REFRESH_INTERVAL = 30   # seconds between tenant-list refreshes
 
@@ -103,7 +106,14 @@ class TelegramPoller:
         async with httpx.AsyncClient(timeout=POLL_TIMEOUT + 10) as client:
             while self._running:
                 try:
-                    params = {"timeout": POLL_TIMEOUT}
+                    # Always state the update types explicitly. Telegram remembers
+                    # the last allowed_updates it was given, so relying on the
+                    # default can silently drop callback_query — which is exactly
+                    # how the order confirm button stopped arriving.
+                    params = {
+                        "timeout": POLL_TIMEOUT,
+                        "allowed_updates": json.dumps(ALLOWED_UPDATES),
+                    }
                     if tenant_id in self._offsets:
                         params["offset"] = self._offsets[tenant_id]
 
