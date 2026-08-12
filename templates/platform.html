@@ -1,74 +1,69 @@
-{# Platform operator's panel. Separate page and separate session from the
-   business panel — same domain, same database, different door. #}
+{# Platform operator's console. Loads only platform.css — style.css is written
+   for the light business panel and its bare element rules leaked in twice. #}
 <!DOCTYPE html>
 <html lang="uz">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
-    <title>Sotuvchi AI — Platforma boshqaruvi</title>
-    <link rel="stylesheet" href="/static/css/style.css?v={{ asset_v }}">
+    <meta name="color-scheme" content="dark">
+    <title>Dispetcher — Sotuvchi AI</title>
     <link rel="stylesheet" href="/static/css/platform.css?v={{ asset_v }}">
 </head>
 <body>
 
-<!-- ═══ LOGIN ═══ -->
-<div id="plat-login" class="plat-login">
-    <form class="plat-login-card" id="plat-login-form" autocomplete="on">
-        <div class="plat-login-head">
-            <span class="plat-logo">🛡</span>
-            <div>
-                <h1>Platforma boshqaruvi</h1>
-                <p>Sotuvchi AI — operator paneli</p>
-            </div>
-        </div>
-        <label class="plat-field">
+<!-- ═══ KIRISH ═══ -->
+<div id="plat-login" class="login">
+    <form class="login-card" id="plat-login-form" autocomplete="on">
+        <div class="login-mark">Sotuvchi AI</div>
+        <h1>Dispetcher</h1>
+        <p class="login-sub">Platforma operatori paneli</p>
+
+        <label class="field">
             <span>Email</span>
             <input type="email" id="plat-email" autocomplete="username" required>
         </label>
-        <label class="plat-field">
+        <label class="field">
             <span>Parol</span>
             <input type="password" id="plat-password" autocomplete="current-password" required>
         </label>
-        <button type="submit" class="btn-primary" id="plat-login-btn">Kirish</button>
-        <p class="plat-error" id="plat-login-error"></p>
-        <p class="plat-hint">
-            Hisob faqat serverda yaratiladi:
-            <code>python -m scripts.create_platform_admin</code>
+
+        <button type="submit" class="btn btn-go" id="plat-login-btn">Kirish</button>
+        <p class="login-err" id="plat-login-error"></p>
+        <p class="login-note">
+            Hisob serverda yaratiladi: <code>python -m scripts.create_platform_admin</code>
         </p>
     </form>
 </div>
 
-<!-- ═══ PANEL ═══ -->
-<div id="plat-app" class="plat-app" hidden>
-    <header class="plat-header">
-        <div class="plat-brand">
-            <span class="plat-logo">🛡</span>
-            <div>
-                <h1>Platforma boshqaruvi</h1>
-                <p id="plat-admin-email"></p>
-            </div>
-        </div>
-        <nav class="plat-nav">
-            <button class="plat-tab is-active" data-view="businesses">Bizneslar</button>
-            <button class="plat-tab" data-view="plans">Tariflar</button>
-            <button class="plat-tab" data-view="audit">Audit</button>
+<!-- ═══ KONSOL ═══ -->
+<div id="plat-app" hidden>
+    <header class="bar">
+        <div class="bar-mark"><span class="mark-dot"></span> Sotuvchi AI <em>/ dispetcher</em></div>
+        <nav class="bar-nav">
+            <button class="tab on" data-view="businesses">Bizneslar</button>
+            <button class="tab" data-view="plans">Tariflar</button>
+            <button class="tab" data-view="audit">Audit</button>
         </nav>
-        <button class="btn-secondary" id="plat-logout">Chiqish</button>
+        <div class="bar-who">
+            <span id="plat-admin-email"></span>
+            <button class="btn btn-quiet" id="plat-logout">Chiqish</button>
+        </div>
     </header>
 
-    <main class="plat-main">
-        <section class="plat-kpis" id="plat-kpis"></section>
+    <!-- Muammo bo'lgandagina ko'rinadi -->
+    <div class="alerts" id="plat-alerts" hidden></div>
 
-        <section class="plat-view" id="view-businesses">
-            <div class="plat-toolbar">
-                <input type="search" id="plat-search" placeholder="Biznes nomi yoki email bo'yicha qidirish...">
-                <select id="plat-plan-filter">
-                    <option value="">Barcha tariflar</option>
-                </select>
+    <section class="stats" id="plat-stats"></section>
+
+    <div class="wrap">
+        <section id="view-businesses">
+            <div class="toolbar">
+                <input type="search" id="plat-search" placeholder="Biznes nomi yoki email">
+                <select id="plat-plan-filter"><option value="">Barcha tariflar</option></select>
             </div>
-            <div class="plat-table-wrap">
-                <table class="plat-table">
+            <div class="board">
+                <table>
                     <thead>
                         <tr>
                             <th>Biznes</th>
@@ -81,42 +76,42 @@
                             <th>Oxirgi faollik</th>
                         </tr>
                     </thead>
-                    <tbody id="plat-tenants-body"></tbody>
+                    <tbody id="plat-rows"></tbody>
                 </table>
             </div>
         </section>
 
-        <section class="plat-view" id="view-plans" hidden>
-            <div class="plat-plans" id="plat-plans"></div>
+        <section id="view-plans" hidden>
+            <div class="plans" id="plat-plans"></div>
         </section>
 
-        <section class="plat-view" id="view-audit" hidden>
-            <div class="plat-table-wrap">
-                <table class="plat-table">
+        <section id="view-audit" hidden>
+            <div class="board">
+                <table>
                     <thead>
                         <tr><th>Vaqt</th><th>Admin</th><th>Amal</th><th>Biznes</th><th>Tafsilot</th></tr>
                     </thead>
-                    <tbody id="plat-audit-body"></tbody>
+                    <tbody id="plat-audit-rows"></tbody>
                 </table>
             </div>
         </section>
-    </main>
+    </div>
 </div>
 
-<!-- ═══ BIZNES TAFSILOTI ═══ -->
-<div class="plat-drawer-backdrop" id="plat-drawer-backdrop" hidden></div>
-<aside class="plat-drawer" id="plat-drawer" hidden>
-    <div class="plat-drawer-head">
+<!-- ═══ BIZNES KARTASI ═══ -->
+<div class="scrim" id="plat-scrim" hidden></div>
+<aside class="drawer" id="plat-drawer" hidden aria-label="Biznes tafsiloti">
+    <div class="drawer-head">
         <div>
             <h2 id="drawer-title">—</h2>
             <p id="drawer-sub"></p>
         </div>
-        <button class="plat-close" id="drawer-close">✕</button>
+        <button class="drawer-x" id="drawer-close" aria-label="Yopish">✕</button>
     </div>
-    <div class="plat-drawer-body" id="drawer-body"></div>
+    <div class="drawer-body" id="drawer-body"></div>
 </aside>
 
-<div class="plat-toast" id="plat-toast" hidden></div>
+<div class="toast" id="plat-toast" hidden></div>
 
 <script src="/static/js/platform.js?v={{ asset_v }}"></script>
 </body>

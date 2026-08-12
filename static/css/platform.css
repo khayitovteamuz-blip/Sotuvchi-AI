@@ -1,258 +1,342 @@
-/* Platform operator's panel.
-   Layers on top of style.css for the shared tokens and buttons; everything here
-   is specific to the operator view. Deliberately a colder palette than the
-   business panel — a glance at the screen should say which one you are in, so
-   nobody edits a customer's data thinking it is their own. */
+/* ═══════════════════════════════════════════════════════════════════════════
+   Sotuvchi AI — Dispetcher (platform operator's console)
+
+   Standalone by design. This page used to also load style.css, whose bare
+   `th`/`td`/`*` rules were written for the light business panel and leaked in
+   twice — a white header on a dark board, and near-black text on it. Nothing is
+   imported here, so that class of bug cannot come back.
+
+   Direction: an instrument, not a dashboard. Colour is reserved for signal:
+   when every business is healthy the board is achromatic, so any colour on
+   screen means something needs attention. Geometry is squared and rules are
+   hairlines — a console, not a set of cards.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
 :root {
-    --plat-bg: #0f172a;
-    --plat-surface: #1e293b;
-    --plat-surface-2: #273449;
-    --plat-border: #334155;
-    --plat-text: #e2e8f0;
-    --plat-text-dim: #94a3b8;
-    --plat-accent: #38bdf8;
+    /* Surfaces — warm-neutral dark, deliberately not navy */
+    --ink:      #101116;
+    --board:    #16181f;
+    --board-2:  #1c1f27;
+    --rule:     #262a34;
+    --rule-2:   #333846;
+
+    /* Text */
+    --chalk:    #e9e7e2;   /* warm off-white, reads as chalk not glare */
+    --dim:      #9aa0ae;
+    --faint:    #6b7180;
+
+    /* Signal only. Nothing decorative may use these. */
+    --alert:    #ff6f5e;   /* over limit, stopped */
+    --warn:     #f2ae3c;   /* nearing limit */
+    --live:     #45d99a;   /* connected — used at 6px or smaller */
+
+    --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+    --r: 3px;              /* instruments are not pillowy */
+    --ease: 140ms cubic-bezier(0.2, 0, 0.2, 1);
 }
 
-/* The `hidden` attribute is enforced by a browser default rule, which any
-   author `display` loses to — so a panel styled `display: flex` stays on screen
-   while the markup says it is closed. This puts the attribute back in charge for
-   every element on the page, not just the drawer that exposed the problem. */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* The `hidden` attribute is enforced by a browser default rule that any author
+   `display` outranks — so a panel styled `display:flex` stays on screen while
+   the markup says it is closed. This keeps the attribute in charge. */
 [hidden] { display: none !important; }
 
-body:has(.plat-app), body:has(.plat-login) {
-    background: var(--plat-bg);
-    background-image: none;
+body {
+    background: var(--ink);
+    color: var(--chalk);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
 }
 
-/* ─── Login ─── */
-.plat-login {
-    min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    padding: 24px; background: var(--plat-bg);
-}
-.plat-login-card {
-    width: 100%; max-width: 400px; background: var(--plat-surface);
-    border: 1px solid var(--plat-border); border-radius: 18px; padding: 32px;
-    display: flex; flex-direction: column; gap: 16px;
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
-}
-.plat-login-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
-.plat-login-head h1 { font-size: 19px; font-weight: 800; color: var(--plat-text); }
-.plat-login-head p { font-size: 12.5px; color: var(--plat-text-dim); margin-top: 2px; }
-.plat-logo {
-    width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center; font-size: 22px;
-    background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3);
-}
-.plat-field { display: flex; flex-direction: column; gap: 6px; }
-.plat-field span { font-size: 12.5px; font-weight: 600; color: var(--plat-text-dim); }
-.plat-field input, .plat-field textarea, .plat-field select {
-    background: var(--plat-bg); border: 1px solid var(--plat-border);
-    border-radius: 10px; padding: 11px 13px; color: var(--plat-text);
-    font-size: 14px; font-family: inherit; width: 100%;
-}
-.plat-field input:focus, .plat-field textarea:focus, .plat-field select:focus {
-    outline: none; border-color: var(--plat-accent);
-}
-.plat-error { font-size: 13px; color: #fda4af; min-height: 18px; font-weight: 600; }
-.plat-hint { font-size: 11.5px; color: var(--plat-text-dim); line-height: 1.6; }
-.plat-hint code {
-    background: var(--plat-bg); padding: 2px 6px; border-radius: 5px;
-    font-size: 11px; color: var(--plat-accent);
+button, input, select, textarea { font: inherit; color: inherit; }
+button { background: none; border: none; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--chalk); outline-offset: 2px; }
+
+/* Every number on this page is monospaced so columns line up and a digit
+   changing does not shift the row. */
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* Tiny wide-tracked caps carry all labelling — the type does the structuring
+   work that borders and cards would otherwise do. */
+.eyebrow {
+    font-family: var(--mono); font-size: 10px; font-weight: 500;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint);
 }
 
-/* ─── Shell ─── */
-.plat-app { min-height: 100vh; color: var(--plat-text); }
-.plat-header {
-    display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
-    padding: 16px 28px; background: var(--plat-surface);
-    border-bottom: 1px solid var(--plat-border);
-    position: sticky; top: 0; z-index: 50;
+/* ─── Login ─────────────────────────────────────────────────────────────── */
+.login { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.login-card {
+    width: 100%; max-width: 380px;
+    border: 1px solid var(--rule); border-radius: var(--r);
+    background: var(--board); padding: 34px 32px 28px;
 }
-.plat-brand { display: flex; align-items: center; gap: 12px; }
-.plat-brand h1 { font-size: 16px; font-weight: 800; }
-.plat-brand p { font-size: 12px; color: var(--plat-text-dim); }
-.plat-nav { display: flex; gap: 6px; margin-left: auto; }
-.plat-tab {
-    font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
-    padding: 9px 16px; border-radius: 9px; color: var(--plat-text-dim);
-    background: transparent; border: 1px solid transparent; transition: var(--transition);
+.login-mark {
+    font-family: var(--mono); font-size: 10px; font-weight: 500;
+    letter-spacing: 0.18em; color: var(--faint); text-transform: uppercase;
 }
-.plat-tab:hover { color: var(--plat-text); background: var(--plat-surface-2); }
-.plat-tab.is-active { color: #06263a; background: var(--plat-accent); border-color: var(--plat-accent); }
-.plat-main { padding: 24px 28px 60px; max-width: 1500px; margin: 0 auto; }
+.login-card h1 {
+    font-size: 25px; font-weight: 600; letter-spacing: -0.02em; margin-top: 10px;
+}
+.login-sub { font-size: 13px; color: var(--dim); margin-top: 3px; margin-bottom: 26px; }
+.field { display: block; margin-bottom: 15px; }
+.field > span {
+    display: block; margin-bottom: 6px;
+    font-family: var(--mono); font-size: 10px; font-weight: 500;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint);
+}
+.field input, .field select, .field textarea {
+    width: 100%; background: var(--ink); border: 1px solid var(--rule);
+    border-radius: var(--r); padding: 10px 12px; font-size: 14px;
+    transition: border-color var(--ease);
+}
+.field input:focus, .field select:focus, .field textarea:focus {
+    outline: none; border-color: var(--rule-2); background: #0c0d11;
+}
+.field textarea { min-height: 150px; resize: vertical; line-height: 1.65; font-size: 13px; }
 
-/* ─── KPIs ─── */
-.plat-kpis {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
-    gap: 14px; margin-bottom: 24px;
+.btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    padding: 10px 16px; border-radius: var(--r); font-size: 13px; font-weight: 600;
+    border: 1px solid var(--rule-2); color: var(--chalk);
+    transition: background var(--ease), border-color var(--ease), color var(--ease);
 }
-.plat-kpi {
-    background: var(--plat-surface); border: 1px solid var(--plat-border);
-    border-radius: 14px; padding: 16px 18px;
-}
-.plat-kpi-label {
-    font-size: 11px; font-weight: 700; color: var(--plat-text-dim);
-    text-transform: uppercase; letter-spacing: 0.5px;
-}
-.plat-kpi-value {
-    font-size: 24px; font-weight: 800; margin-top: 8px;
-    font-variant-numeric: tabular-nums; letter-spacing: -0.5px;
-}
-.plat-kpi-value small { font-size: 13px; color: var(--plat-text-dim); font-weight: 700; }
-.plat-kpi-sub { font-size: 11.5px; color: var(--plat-text-dim); margin-top: 5px; }
+.btn:hover { background: var(--board-2); border-color: var(--faint); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-go { width: 100%; background: var(--chalk); color: var(--ink); border-color: var(--chalk); padding: 11px; }
+.btn-go:hover { background: #fff; border-color: #fff; color: var(--ink); }
+.btn-quiet { border-color: var(--rule); color: var(--dim); font-weight: 500; }
+.btn-quiet:hover { color: var(--chalk); }
+.btn-alert { border-color: rgba(255, 111, 94, 0.4); color: var(--alert); }
+.btn-alert:hover { background: rgba(255, 111, 94, 0.1); border-color: var(--alert); }
 
-/* ─── Toolbar ─── */
-.plat-toolbar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
-.plat-toolbar input, .plat-toolbar select {
-    background: var(--plat-surface); border: 1px solid var(--plat-border);
-    border-radius: 10px; padding: 10px 14px; color: var(--plat-text);
-    font-size: 13.5px; font-family: inherit;
-}
-.plat-toolbar input { flex: 1; min-width: 220px; }
-.plat-toolbar input:focus, .plat-toolbar select:focus {
-    outline: none; border-color: var(--plat-accent);
+.login-err { min-height: 20px; margin-top: 12px; font-size: 13px; color: var(--alert); }
+.login-note { margin-top: 6px; font-size: 11.5px; color: var(--faint); line-height: 1.7; }
+.login-note code {
+    font-family: var(--mono); font-size: 11px; color: var(--dim);
+    background: var(--ink); padding: 2px 5px; border-radius: 2px;
 }
 
-/* ─── Table ─── */
-.plat-table-wrap {
-    background: var(--plat-surface); border: 1px solid var(--plat-border);
-    border-radius: 14px; overflow-x: auto;
+/* ─── Top bar ───────────────────────────────────────────────────────────── */
+.bar {
+    display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+    padding: 0 22px; height: 52px;
+    border-bottom: 1px solid var(--rule); background: var(--board);
+    position: sticky; top: 0; z-index: 40;
 }
-.plat-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-/* style.css styles bare `th`/`td` for the light business panel — a white header
-   and near-black text. Those element rules reach this page too, so background
-   and colour are restated here rather than inherited. */
-.plat-table th {
-    text-align: left; padding: 13px 16px; font-size: 11px; font-weight: 700;
-    background: var(--plat-surface); color: var(--plat-text-dim);
-    text-transform: uppercase; letter-spacing: 0.5px;
-    border-bottom: 1px solid var(--plat-border); white-space: nowrap;
+.bar-mark {
+    display: flex; align-items: center; gap: 9px;
+    font-family: var(--mono); font-size: 11px; font-weight: 500;
+    letter-spacing: 0.16em; text-transform: uppercase;
 }
-.plat-table td {
-    padding: 13px 16px; border-bottom: 1px solid rgba(51, 65, 85, 0.5);
-    vertical-align: middle; color: var(--plat-text); background: transparent;
-}
-.plat-table tbody tr { cursor: pointer; transition: background 0.15s; }
-.plat-table tbody tr:hover { background: var(--plat-surface-2); }
-.plat-table tbody tr:last-child td { border-bottom: none; }
-.plat-biz-name { font-weight: 700; color: var(--plat-text); }
-.plat-biz-email { font-size: 11.5px; color: var(--plat-text-dim); margin-top: 2px; }
-.plat-empty { padding: 40px; text-align: center; color: var(--plat-text-dim); }
+.bar-mark em { font-style: normal; color: var(--faint); }
+/* The one always-on colour: a 5px dot saying the console itself is live. */
+.mark-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--live); }
 
-/* ─── Badges & meters ─── */
-.plat-badge {
-    display: inline-block; padding: 3px 10px; border-radius: 20px;
-    font-size: 11px; font-weight: 700; white-space: nowrap;
+.bar-nav { display: flex; gap: 2px; margin-left: 8px; }
+.tab {
+    padding: 7px 13px; border-radius: var(--r); font-size: 13px; font-weight: 500;
+    color: var(--faint); transition: color var(--ease), background var(--ease);
 }
-.plat-badge.plan-start    { background: rgba(148,163,184,.18); color: #cbd5e1; }
-.plat-badge.plan-business { background: rgba(56,189,248,.18);  color: #7dd3fc; }
-.plat-badge.plan-pro      { background: rgba(167,139,250,.18); color: #c4b5fd; }
-.plat-badge.ok            { background: rgba(52,211,153,.16);  color: #6ee7b7; }
-.plat-badge.off           { background: rgba(248,113,113,.16); color: #fca5a5; }
-.plat-badge.warn          { background: rgba(251,191,36,.16);  color: #fcd34d; }
+.tab:hover { color: var(--chalk); background: var(--board-2); }
+.tab.on { color: var(--ink); background: var(--chalk); font-weight: 600; }
 
-.plat-meter { min-width: 92px; }
-.plat-meter-top {
-    display: flex; justify-content: space-between; gap: 8px;
-    font-size: 12px; font-variant-numeric: tabular-nums;
-}
-.plat-meter-track {
-    height: 4px; background: rgba(148,163,184,.2); border-radius: 3px;
-    margin-top: 5px; overflow: hidden;
-}
-.plat-meter-fill { height: 100%; border-radius: 3px; background: var(--plat-accent); }
-.plat-meter-fill.near { background: #fbbf24; }
-.plat-meter-fill.over { background: #f87171; }
+.bar-who { display: flex; align-items: center; gap: 14px; margin-left: auto; }
+.bar-who span { font-size: 12px; color: var(--faint); font-family: var(--mono); }
 
-/* ─── Drawer ─── */
-.plat-drawer-backdrop {
-    position: fixed; inset: 0; background: rgba(2, 6, 23, 0.6);
-    z-index: 90; backdrop-filter: blur(2px);
+/* ─── Alert strip ────────────────────────────────────────────────────────
+   Present only when something is wrong. A calm board is the healthy state, so
+   this appearing at all is the signal — the counts are the detail. */
+.alerts {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 11px 22px; border-bottom: 1px solid var(--rule);
+    background: rgba(255, 111, 94, 0.06);
+    animation: drop 180ms cubic-bezier(0.2, 0, 0.2, 1);
 }
-.plat-drawer {
-    position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100%);
-    background: var(--plat-surface); border-left: 1px solid var(--plat-border);
+@keyframes drop { from { opacity: 0; transform: translateY(-5px); } }
+.alerts-lead {
+    font-family: var(--mono); font-size: 10px; font-weight: 600;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--alert);
+}
+.alert-chip {
+    padding: 4px 11px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    border: 1px solid var(--rule-2); color: var(--dim);
+    transition: border-color var(--ease), color var(--ease);
+}
+.alert-chip:hover { color: var(--chalk); border-color: var(--faint); }
+.alert-chip b { font-family: var(--mono); font-weight: 600; color: var(--chalk); }
+
+/* ─── Stat row ───────────────────────────────────────────────────────────
+   Numbers separated by hairlines rather than boxed into cards: five identical
+   rounded tiles is the templated answer and boxes each figure away from the
+   others, when the point is reading them together. */
+.stats {
+    display: flex; flex-wrap: wrap;
+    border-bottom: 1px solid var(--rule); background: var(--board);
+}
+.stat { padding: 16px 26px; border-right: 1px solid var(--rule); min-width: 132px; }
+.stat:last-child { border-right: none; }
+.stat-val { font-family: var(--mono); font-size: 26px; font-weight: 500; letter-spacing: -0.02em; }
+.stat-val small { font-size: 13px; color: var(--faint); margin-left: 3px; }
+.stat-label {
+    margin-top: 5px; font-family: var(--mono); font-size: 10px; font-weight: 500;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint);
+}
+.stat-note { margin-top: 3px; font-size: 11.5px; color: var(--faint); }
+
+.wrap { padding: 22px; max-width: 1560px; margin: 0 auto; }
+
+/* ─── Toolbar ───────────────────────────────────────────────────────────── */
+.toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.toolbar input, .toolbar select {
+    background: var(--board); border: 1px solid var(--rule); border-radius: var(--r);
+    padding: 9px 13px; font-size: 13px; transition: border-color var(--ease);
+}
+.toolbar input { flex: 1; min-width: 230px; }
+.toolbar input::placeholder { color: var(--faint); }
+.toolbar input:focus, .toolbar select:focus { outline: none; border-color: var(--rule-2); }
+
+/* ─── Board ─────────────────────────────────────────────────────────────── */
+.board { border: 1px solid var(--rule); border-radius: var(--r); overflow-x: auto; background: var(--board); }
+table { width: 100%; border-collapse: collapse; }
+thead th {
+    text-align: left; padding: 11px 16px; white-space: nowrap;
+    font-family: var(--mono); font-size: 10px; font-weight: 500;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint);
+    border-bottom: 1px solid var(--rule); background: var(--board);
+}
+tbody td {
+    padding: 13px 16px; border-bottom: 1px solid var(--rule);
+    color: var(--chalk); vertical-align: middle;
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr.row { cursor: pointer; transition: background var(--ease); }
+tbody tr.row:hover { background: var(--board-2); }
+
+/* The signature: a rail on each row carrying that business's worst signal.
+   Transparent when nothing is wrong, so a healthy board shows a clean edge and
+   a problem row is the only thing your eye lands on. */
+tbody td:first-child { border-left: 3px solid transparent; }
+tr.sig-warn  td:first-child { border-left-color: var(--warn); }
+tr.sig-alert td:first-child { border-left-color: var(--alert); }
+tr.sig-off   td:first-child { border-left-color: var(--faint); }
+tr.sig-off .biz-name { color: var(--dim); }
+
+.biz-name { font-weight: 600; font-size: 14px; letter-spacing: -0.01em; }
+.biz-mail { font-family: var(--mono); font-size: 11.5px; color: var(--faint); margin-top: 2px; }
+.cell-dim { color: var(--faint); font-size: 12.5px; }
+.empty { padding: 46px; text-align: center; color: var(--faint); font-size: 13px; }
+
+/* Plan is set as a typographic label, not a coloured pill — a tariff is not a
+   status and must not compete with the signal colours. */
+.plan-tag {
+    font-family: var(--mono); font-size: 11px; font-weight: 500;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim);
+}
+.state { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.state.on { color: var(--faint); }
+.state.off { color: var(--alert); }
+
+.tg { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.tg-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--live); flex-shrink: 0; }
+.tg-none { color: var(--faint); font-size: 12.5px; }
+
+/* ─── Usage meter ───────────────────────────────────────────────────────── */
+.meter { min-width: 104px; }
+.meter-nums {
+    display: flex; justify-content: space-between; gap: 10px;
+    font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums;
+}
+.meter-nums .cap { color: var(--faint); }
+.meter-track { height: 2px; background: var(--rule-2); margin-top: 6px; overflow: hidden; }
+.meter-fill { height: 100%; background: var(--faint); transition: width var(--ease); }
+.meter-fill.warn { background: var(--warn); }
+.meter-fill.over { background: var(--alert); }
+.meter-inf { font-family: var(--mono); font-size: 12.5px; color: var(--faint); }
+
+/* ─── Drawer ────────────────────────────────────────────────────────────── */
+.scrim { position: fixed; inset: 0; background: rgba(8, 9, 12, 0.66); z-index: 90; }
+.drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(600px, 100%);
+    background: var(--board); border-left: 1px solid var(--rule);
     z-index: 100; display: flex; flex-direction: column;
-    box-shadow: -20px 0 60px rgba(0,0,0,.45);
+    animation: slide 200ms cubic-bezier(0.2, 0, 0.2, 1);
 }
-.plat-drawer-head {
-    display: flex; align-items: flex-start; gap: 16px; padding: 22px 24px;
-    border-bottom: 1px solid var(--plat-border);
+@keyframes slide { from { transform: translateX(22px); opacity: 0; } }
+.drawer-head {
+    display: flex; align-items: flex-start; gap: 16px;
+    padding: 20px 24px; border-bottom: 1px solid var(--rule);
 }
-.plat-drawer-head h2 { font-size: 18px; font-weight: 800; }
-.plat-drawer-head p { font-size: 12.5px; color: var(--plat-text-dim); margin-top: 3px; }
-.plat-close {
-    margin-left: auto; background: transparent; border: none; cursor: pointer;
-    color: var(--plat-text-dim); font-size: 18px; padding: 4px 8px; border-radius: 6px;
+.drawer-head h2 { font-size: 19px; font-weight: 600; letter-spacing: -0.02em; }
+.drawer-head p { font-family: var(--mono); font-size: 11.5px; color: var(--faint); margin-top: 4px; }
+.drawer-x {
+    margin-left: auto; color: var(--faint); font-size: 15px; line-height: 1;
+    padding: 6px 8px; border-radius: var(--r); transition: color var(--ease), background var(--ease);
 }
-.plat-close:hover { color: var(--plat-text); background: var(--plat-surface-2); }
-.plat-drawer-body { padding: 22px 24px 40px; overflow-y: auto; flex: 1; }
+.drawer-x:hover { color: var(--chalk); background: var(--board-2); }
+.drawer-body { padding: 22px 24px 44px; overflow-y: auto; flex: 1; }
 
-.plat-section { margin-bottom: 26px; }
-.plat-section h3 {
-    font-size: 12px; font-weight: 700; color: var(--plat-text-dim);
-    text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px;
-}
-.plat-rows { display: flex; flex-direction: column; gap: 9px; }
-.plat-row {
-    display: flex; justify-content: space-between; align-items: center; gap: 14px;
-    font-size: 13px; color: var(--plat-text-dim);
-}
-.plat-row b { color: var(--plat-text); font-variant-numeric: tabular-nums; text-align: right; }
-.plat-actions { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 14px; }
-.plat-btn {
-    font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
-    padding: 9px 15px; border-radius: 9px; transition: var(--transition);
-    background: var(--plat-surface-2); border: 1px solid var(--plat-border);
-    color: var(--plat-text);
-}
-.plat-btn:hover { border-color: var(--plat-accent); color: var(--plat-accent); }
-.plat-btn.primary { background: var(--plat-accent); border-color: var(--plat-accent); color: #06263a; }
-.plat-btn.primary:hover { opacity: .9; color: #06263a; }
-.plat-btn.danger { color: #fca5a5; border-color: rgba(248,113,113,.35); }
-.plat-btn.danger:hover { background: rgba(248,113,113,.12); color: #fca5a5; border-color: #f87171; }
-.plat-btn:disabled { opacity: .5; cursor: not-allowed; }
+.block { margin-bottom: 28px; }
+.block > .eyebrow { display: block; margin-bottom: 12px; }
+.kv { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 7px 0; font-size: 13px; }
+.kv + .kv { border-top: 1px solid var(--rule); }
+.kv span { color: var(--dim); }
+.kv b { font-family: var(--mono); font-weight: 500; text-align: right; }
+.acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
 
-.plat-drawer textarea {
-    min-height: 150px; resize: vertical; line-height: 1.6; font-size: 13px;
+/* ─── Plans ─────────────────────────────────────────────────────────────── */
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); gap: 14px; }
+.plan {
+    background: var(--board); border: 1px solid var(--rule);
+    border-radius: var(--r); padding: 20px 22px;
+}
+.plan h3 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.plan-price { font-family: var(--mono); font-size: 13px; color: var(--dim); margin-top: 4px; }
+.plan-users { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-top: 2px; margin-bottom: 18px; }
+.plan-line { display: flex; align-items: center; gap: 12px; padding: 8px 0; font-size: 12.5px; }
+.plan-line + .plan-line { border-top: 1px solid var(--rule); }
+.plan-line span { color: var(--dim); flex: 1; }
+.plan-line input {
+    width: 92px; background: var(--ink); border: 1px solid var(--rule); border-radius: var(--r);
+    padding: 6px 9px; font-family: var(--mono); font-size: 12.5px; text-align: right;
+    transition: border-color var(--ease);
+}
+.plan-line input:focus { outline: none; border-color: var(--rule-2); }
+.plan-line input::placeholder { color: var(--faint); }
+.plan-note { margin-top: 12px; font-size: 11.5px; color: var(--faint); }
+
+/* ─── Audit ─────────────────────────────────────────────────────────────── */
+.act-name { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+.act-detail {
+    font-family: var(--mono); font-size: 11.5px; color: var(--faint);
+    max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* ─── Plans ─── */
-.plat-plans {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;
+/* ─── Toast ─────────────────────────────────────────────────────────────── */
+.toast {
+    position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+    background: var(--chalk); color: var(--ink); padding: 11px 20px;
+    border-radius: var(--r); font-size: 13px; font-weight: 600; z-index: 200;
+    animation: rise 160ms cubic-bezier(0.2, 0, 0.2, 1);
 }
-.plat-plan-card {
-    background: var(--plat-surface); border: 1px solid var(--plat-border);
-    border-radius: 14px; padding: 20px 22px;
-}
-.plat-plan-card h3 { font-size: 17px; font-weight: 800; margin-bottom: 3px; }
-.plat-plan-price { font-size: 13px; color: var(--plat-accent); font-weight: 700; margin-bottom: 4px; }
-.plat-plan-count { font-size: 11.5px; color: var(--plat-text-dim); margin-bottom: 16px; }
-.plat-plan-fields { display: flex; flex-direction: column; gap: 11px; }
-.plat-plan-field { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
-.plat-plan-field span { color: var(--plat-text-dim); flex: 1; }
-.plat-plan-field input {
-    width: 96px; background: var(--plat-bg); border: 1px solid var(--plat-border);
-    border-radius: 8px; padding: 7px 9px; color: var(--plat-text);
-    font-size: 12.5px; font-family: inherit; text-align: right;
-}
-.plat-plan-field input:focus { outline: none; border-color: var(--plat-accent); }
-.plat-plan-field input::placeholder { color: #64748b; }
+.toast.err { background: var(--alert); color: #2a0d08; }
+@keyframes rise { from { opacity: 0; transform: translate(-50%, 8px); } }
 
-/* ─── Toast ─── */
-.plat-toast {
-    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-    background: var(--plat-surface); border: 1px solid var(--plat-border);
-    color: var(--plat-text); padding: 12px 20px; border-radius: 11px;
-    font-size: 13.5px; font-weight: 600; z-index: 200;
-    box-shadow: 0 12px 40px rgba(0,0,0,.4);
+@media (max-width: 760px) {
+    .bar { height: auto; padding: 12px 16px; }
+    .bar-who { width: 100%; margin-left: 0; }
+    .stat { padding: 14px 18px; min-width: 118px; }
+    .stat-val { font-size: 21px; }
+    .wrap { padding: 16px 12px 40px; }
+    .alerts { padding: 10px 16px; }
 }
-.plat-toast.err { border-color: #f87171; color: #fca5a5; }
-.plat-toast.ok { border-color: #34d399; color: #6ee7b7; }
 
-@media (max-width: 720px) {
-    .plat-header { padding: 14px 16px; gap: 12px; }
-    .plat-nav { margin-left: 0; width: 100%; }
-    .plat-main { padding: 18px 14px 50px; }
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
 }
