@@ -152,16 +152,92 @@ $('modal-close').addEventListener('click', closeModal);
 $('modal-scrim').addEventListener('click', closeModal);
 
 // ═══ NAVIGATSIYA ═══
-const VIEW_NAMES = { home: 'Umumiy holat', plans: 'Tariflar', admins: 'Adminlar', audit: 'Audit' };
+const VIEW_NAMES = {
+    home: 'Umumiy holat', plans: 'Tariflar', payments: 'To\'lovlar',
+    admins: 'Adminlar', audit: 'Audit',
+};
+let payFilter = 'pending';
 
 function goto(view) {
     document.querySelectorAll('.nav').forEach((n) => n.classList.toggle('on', n.dataset.view === view));
     Object.keys(VIEW_NAMES).forEach((v) => { $(`view-${v}`).hidden = v !== view; });
     $('crumb').textContent = VIEW_NAMES[view];
     if (view === 'plans') loadPlans();
+    if (view === 'payments') loadPayments();
     if (view === 'admins') loadAdmins();
     if (view === 'audit') loadAudit();
 }
+
+// ═══ TO'LOVLAR ═══
+const PAY_KIND = { topup: 'To\'ldirish', subscription: 'Tarif', adjustment: 'Tuzatish' };
+const PAY_STATE = { pending: ['warn', 'Kutilmoqda'], confirmed: ['ok', 'Tasdiqlangan'], rejected: ['bad', 'Rad etilgan'] };
+
+/** Pending count on the sidebar, so money waiting to be confirmed is visible
+ *  from anywhere in the panel rather than only on its own page. */
+async function refreshPendingCount() {
+    try {
+        const n = (await api('/api/platform/payments?status=pending')).length;
+        const badge = $('nav-pay');
+        badge.textContent = n;
+        badge.hidden = n === 0;
+    } catch { /* ignore — the badge is never worth an error */ }
+}
+
+async function loadPayments() {
+    const rows = await api(`/api/platform/payments?status=${payFilter}&limit=200`);
+    const body = $('plat-pay-rows');
+    if (!rows.length) {
+        body.innerHTML = `<tr><td colspan="7" class="empty">${
+            payFilter === 'pending' ? 'Tasdiqlash kutayotgan to\'lov yo\'q.' : 'To\'lov yo\'q.'}</td></tr>`;
+        return;
+    }
+    body.innerHTML = rows.map((p) => {
+        const [cls, label] = PAY_STATE[p.status] || ['idle', p.status];
+        const sign = p.amount >= 0 ? '+' : '';
+        return `
+        <tr>
+            <td class="cell-dim num" style="white-space:nowrap">${esc(p.created_at)}</td>
+            <td><span class="biz-name">${esc(p.business_name)}</span></td>
+            <td class="cell-dim">${esc(PAY_KIND[p.kind] || p.kind)}</td>
+            <td class="num" style="font-weight:600">${sign}${fmt(p.amount)}</td>
+            <td class="cell-dim">${esc(p.note || '—')}</td>
+            <td><span class="state ${cls}">${label}</span>${
+                t.sub_status === 'expired' ? ' <span class="state bad">Muddati tugagan</span>'
+                : t.sub_status === 'frozen' ? ' <span class="state idle">Muzlatilgan</span>' : ''}</td>
+            <td class="num">${fmt(t.balance)}<div class="cell-dim">${
+                t.days_left != null ? Math.round(t.days_left) + ' kun' : '—'}</div></td>
+            <td style="text-align:right;white-space:nowrap">
+                ${p.status === 'pending' && p.kind === 'topup' ? `
+                    <button class="btn btn-green" data-ok="${esc(p.id)}">Tasdiqlash</button>
+                    <button class="btn btn-red" data-no="${esc(p.id)}">Rad etish</button>` : ''}
+            </td>
+        </tr>`;
+    }).join('');
+
+    body.querySelectorAll('[data-ok]').forEach((b) =>
+        b.addEventListener('click', () => decide(b.dataset.ok, 'confirm', 'Tasdiqlandi')));
+    body.querySelectorAll('[data-no]').forEach((b) =>
+        b.addEventListener('click', () => {
+            if (confirm('To\'lov rad etilsinmi? Biznes hisobiga hech narsa tushmaydi.')) {
+                decide(b.dataset.no, 'reject', 'Rad etildi');
+            }
+        }));
+}
+
+async function decide(id, action, okMsg) {
+    try {
+        await api(`/api/platform/payments/${id}/${action}`, { method: 'POST' });
+        toast(okMsg);
+        await Promise.all([loadPayments(), loadTenants(), refreshPendingCount()]);
+    } catch (e) { toast(e.message, 'err'); }
+}
+
+document.querySelectorAll('[data-pay]').forEach((b) =>
+    b.addEventListener('click', () => {
+        payFilter = b.dataset.pay;
+        document.querySelectorAll('[data-pay]').forEach((x) => x.classList.toggle('on', x === b));
+        loadPayments();
+    }));
 
 // ═══ YANGI BIZNES ═══
 $('btn-new-tenant').addEventListener('click', () => openModal({
@@ -251,7 +327,7 @@ document.querySelectorAll('[data-goto]').forEach((b) =>
 
 // ═══ YUKLASH ═══
 async function loadAll() {
-    await Promise.all([loadStats(), loadTenants(), loadPlans(), loadSeries()]);
+    await Promise.all([loadStats(), loadTenants(), loadPlans(), loadSeries(), refreshPendingCount()]);
 }
 
 async function loadStats() {
@@ -427,7 +503,7 @@ function renderRows() {
 
     const body = $('plat-rows');
     if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="8" class="empty">Bu shartlarga mos biznes yo\'q.</td></tr>';
+        body.innerHTML = '<tr><td colspan="9" class="empty">Bu shartlarga mos biznes yo\'q.</td></tr>';
         return;
     }
 
@@ -446,7 +522,11 @@ function renderRows() {
                 </div>
             </td>
             <td><span class="plan-tag">${esc(t.plan_title)}</span></td>
-            <td><span class="state ${cls}">${label}</span></td>
+            <td><span class="state ${cls}">${label}</span>${
+                t.sub_status === 'expired' ? ' <span class="state bad">Muddati tugagan</span>'
+                : t.sub_status === 'frozen' ? ' <span class="state idle">Muzlatilgan</span>' : ''}</td>
+            <td class="num">${fmt(t.balance)}<div class="cell-dim">${
+                t.days_left != null ? Math.round(t.days_left) + ' kun' : '—'}</div></td>
             <td>${meter(t.products, t.product_limit)}</td>
             <td>${meter(t.ai_messages_month, t.ai_limit)}</td>
             <td class="num">${fmt(t.orders)}</td>
@@ -546,6 +626,20 @@ async function openTenant(id) {
         </div>
 
         <div class="block">
+            <div class="block-t">Hisob va obuna</div>
+            <div class="kv"><span>Balans</span><b>${fmt(d.billing.balance)} so'm</b></div>
+            <div class="kv"><span>Holat</span><b>${esc({
+                active: 'Faol', frozen: 'Muzlatilgan', expired: 'Muddati tugagan', free: 'Bepul tarif',
+            }[d.billing.status] || d.billing.status)}</b></div>
+            <div class="kv"><span>Tugaydi</span><b>${esc(d.billing.expires_at || '—')}</b></div>
+            <div class="kv"><span>Qolgan kun</span><b>${
+                d.billing.days_left != null ? d.billing.days_left : '—'}</b></div>
+            <div class="acts">
+                <button class="btn" id="dr-balance">Balansni tuzatish</button>
+            </div>
+        </div>
+
+        <div class="block">
             <div class="block-t">Telegram</div>
             <div class="kv"><span>Bot</span><b>${d.telegram.connected ? '@' + esc(d.telegram.username || '') : 'ulanmagan'}</b></div>
             <div class="kv"><span>Webhook siri</span><b>${d.telegram.webhook_secret_set ? 'bor' : 'yo\'q'}</b></div>
@@ -628,6 +722,24 @@ async function openTenant(id) {
     }));
 
     $('dr-bot').addEventListener('click', () => patchAi(id, { bot_enabled: !d.ai.bot_enabled }));
+
+    $('dr-balance').addEventListener('click', () => openModal({
+        title: 'Balansni tuzatish',
+        submitLabel: 'Saqlash',
+        fields: [
+            { name: 'amount', label: 'Summa (manfiy — yechish)', type: 'number' },
+            { name: 'note', label: 'Sabab' },
+        ],
+        onSubmit: async (v) => {
+            await api(`/api/platform/tenants/${id}/balance`, {
+                method: 'POST',
+                body: JSON.stringify({ amount: Number(v.amount), note: v.note }),
+            });
+            toast('Balans yangilandi');
+            await loadTenants();
+            openTenant(id);
+        },
+    }));
 
     $('dr-save-kb').addEventListener('click', async () => {
         try {

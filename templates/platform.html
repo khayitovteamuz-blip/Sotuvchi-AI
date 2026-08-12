@@ -60,6 +60,10 @@
                 <button class="nav" data-view="plans">
                     <span class="nav-ico">◈</span> Tariflar
                 </button>
+                <button class="nav" data-view="payments">
+                    <span class="nav-ico">◎</span> To'lovlar
+                    <span class="nav-count" id="nav-pay" hidden></span>
+                </button>
                 <button class="nav" data-view="admins">
                     <span class="nav-ico">◐</span> Adminlar
                 </button>
@@ -179,6 +183,30 @@
                     </div>
                 </div>
                 <div class="plans" id="plat-plans"></div>
+            </section>
+
+            <!-- ─── TO'LOVLAR ─── -->
+            <section id="view-payments" hidden>
+                <div class="page-head">
+                    <div>
+                        <h1>To'lovlar</h1>
+                        <p>Pul kelganini tasdiqlaganingizdan keyingina biznes hisobiga tushadi</p>
+                    </div>
+                    <div class="right">
+                        <button class="pill on" data-pay="pending">Kutilmoqda</button>
+                        <button class="pill" data-pay="all">Hammasi</button>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr><th>Vaqt</th><th>Biznes</th><th>Turi</th><th>Summa</th><th>Izoh</th><th>Holat</th><th></th></tr>
+                            </thead>
+                            <tbody id="plat-pay-rows"></tbody>
+                        </table>
+                    </div>
+                </div>
             </section>
 
             <!-- ─── ADMINLAR ─── -->

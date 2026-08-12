@@ -192,6 +192,7 @@ const TAB_META = {
     'tab-products':     { title: 'Katalog', sub: 'Mahsulotlar, narx va ombor qoldig\'i', btn: true, load: loadCatalog },
     'tab-orders':       { title: 'Buyurtmalar', sub: 'Barcha buyurtmalar va status workflow', btn: false, load: loadOrders },
     'tab-integrations': { title: 'Integratsiyalar', sub: 'Telegram bot va operator bildirishnomasi', btn: false, load: loadIntegrations },
+    'tab-billing':      { title: 'Hisobim', sub: 'Balans, tarif va to\'lovlar', btn: false, load: loadBilling },
     'tab-settings':     { title: 'Sozlamalar', sub: 'Biznes profili, xodimlar va tarif', btn: false, load: loadAccountSettings }
 };
 
@@ -1874,4 +1875,105 @@ async function loadAccountSettings() {
     } catch (e) {
         console.error('Hisob sozlamalarini yuklashda xatolik:', e);
     }
+}
+
+// ═══════════════ HISOBIM ═══════════════
+const BILL_KIND = { topup: 'To\'ldirish', subscription: 'Tarif', adjustment: 'Tuzatish' };
+const BILL_STATE = {
+    pending: ['⏳', 'Tasdiqlanmoqda'], confirmed: ['✅', 'Tasdiqlangan'], rejected: ['❌', 'Rad etilgan'],
+};
+const SUB_STATE = {
+    active: 'Faol', frozen: 'Muzlatilgan', expired: 'Muddati tugagan', free: 'Bepul tarif',
+};
+
+async function loadBilling() {
+    try {
+        const d = await (await fetch('/api/admin/billing')).json();
+
+        document.getElementById('bill-balance').innerHTML =
+            `${fmtNum(d.balance)} <small>so'm</small>`;
+
+        // The subscription line says what happens next, not just what is true
+        const left = d.days_left;
+        let note;
+        if (d.status === 'free') {
+            note = 'Bepul tarifda muddat yo\'q. Limitlar past — kengaytirish uchun tarif tanlang.';
+        } else if (d.status === 'frozen') {
+            note = `Hisob to'xtatilgan. Qolgan ${Math.round(left)} kun saqlanib turibdi.`;
+        } else if (d.status === 'expired') {
+            note = 'Muddat tugagan. Tarifni yangilamaguningizcha bot javob bermaydi.';
+        } else {
+            note = `${d.expires_at} gacha — ${Math.round(left)} kun qoldi.`;
+        }
+        document.getElementById('bill-sub').innerHTML = `
+            <div class="bill-sub-plan">${escapeHtml(d.plan_title)}</div>
+            <div class="bill-sub-state bill-${d.status}">${SUB_STATE[d.status] || d.status}</div>
+            <p class="bill-sub-note">${escapeHtml(note)}</p>`;
+
+        document.getElementById('bill-plans').innerHTML = d.plans.map((p) => `
+            <div class="bill-plan ${p.current ? 'is-current' : ''}">
+                <h4>${escapeHtml(p.title)}</h4>
+                <div class="bill-plan-price">${fmtNum(p.price_uzs)} <small>so'm / ${p.duration_days} kun</small></div>
+                <ul class="bill-plan-list">
+                    <li>${p.max_products === null ? 'Cheksiz' : fmtNum(p.max_products)} mahsulot</li>
+                    <li>${p.max_ai_messages_monthly === null ? 'Cheksiz' : fmtNum(p.max_ai_messages_monthly)} AI xabar / oy</li>
+                    <li>${p.max_operators === null ? 'Cheksiz' : fmtNum(p.max_operators)} operator</li>
+                </ul>
+                ${p.price_uzs > 0 ? `<button class="btn-primary" data-plan="${escapeHtml(p.name)}">
+                    ${p.current ? 'Muddatni uzaytirish' : 'Shu tarifni olish'}</button>`
+                  : '<span class="bill-plan-free">Boshlang\'ich tarif</span>'}
+            </div>`).join('');
+
+        document.getElementById('bill-plans').querySelectorAll('[data-plan]').forEach((b) =>
+            b.addEventListener('click', () => buyPlan(b.dataset.plan, d.balance)));
+
+        const tb = document.getElementById('bill-history');
+        tb.innerHTML = d.history.length ? d.history.map((h) => {
+            const [icon, label] = BILL_STATE[h.status] || ['', h.status];
+            return `<tr>
+                <td>${escapeHtml(h.created_at || '')}</td>
+                <td>${escapeHtml(BILL_KIND[h.kind] || h.kind)}</td>
+                <td style="font-weight:700">${h.amount >= 0 ? '+' : ''}${fmtNum(h.amount)}</td>
+                <td>${escapeHtml(h.note || '—')}</td>
+                <td>${icon} ${label}</td>
+            </tr>`;
+        }).join('')
+          : '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:28px;">Hali to\'lov yo\'q.</td></tr>';
+    } catch (e) {
+        console.error('Hisobni yuklashda xatolik:', e);
+    }
+}
+
+document.getElementById('bill-topup-btn')?.addEventListener('click', async () => {
+    const raw = prompt('Qancha summa o\'tkazdingiz? (so\'m)');
+    if (!raw) return;
+    const amount = Number(String(raw).replace(/\s/g, ''));
+    if (!amount || amount <= 0) return alert('Summa noto\'g\'ri.');
+    const note = prompt('Izoh (qaysi karta/ilova orqali?)') || '';
+    try {
+        const r = await fetch('/api/admin/billing/topup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amount, note }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'Xatolik');
+        alert(d.message);
+        loadBilling();
+    } catch (e) { alert(e.message); }
+});
+
+async function buyPlan(plan, balance) {
+    if (!confirm('Tarif hisobingizdagi mablag\'dan yechiladi. Davom etamizmi?')) return;
+    try {
+        const r = await fetch('/api/admin/billing/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plan }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'Xatolik');
+        alert(`Tarif faollashtirildi: ${d.plan_title}. ${Math.round(d.days_left)} kun.`);
+        loadBilling();
+    } catch (e) { alert(e.message); }
 }

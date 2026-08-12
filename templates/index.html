@@ -95,6 +95,7 @@
                 <div class="nav-item" data-tab="tab-products"><span>📦</span> Katalog</div>
                 <div class="nav-item" data-tab="tab-orders"><span>🧾</span> Buyurtmalar</div>
                 <div class="nav-item" data-tab="tab-integrations"><span>🔌</span> Integratsiyalar</div>
+                <div class="nav-item" data-tab="tab-billing"><span>💳</span> Hisobim</div>
                 <div class="nav-item" data-tab="tab-settings"><span>⚙️</span> Sozlamalar</div>
             </nav>
 
@@ -452,6 +453,29 @@
             <!-- ═══ ANALITIKA ═══ -->
 
             <!-- ═══ SOZLAMALAR ═══ -->
+            <!-- ═══ HISOBIM ═══ -->
+            <section id="tab-billing" class="tab-view">
+                <div class="bill-top">
+                    <div class="bill-balance">
+                        <span class="bill-label">Hisobingiz</span>
+                        <div class="bill-amount" id="bill-balance">—</div>
+                        <button class="btn-primary" id="bill-topup-btn">Hisobni to'ldirish</button>
+                    </div>
+                    <div class="bill-sub" id="bill-sub"></div>
+                </div>
+
+                <h3 class="bill-h">Tariflar</h3>
+                <div class="bill-plans" id="bill-plans"></div>
+
+                <h3 class="bill-h">To'lovlar tarixi</h3>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Sana</th><th>Turi</th><th>Summa</th><th>Izoh</th><th>Holat</th></tr></thead>
+                        <tbody id="bill-history"></tbody>
+                    </table>
+                </div>
+            </section>
+
             <section id="tab-settings" class="tab-view">
                 <div class="panel-card" style="max-width:640px;">
                     <h3 style="margin-bottom:20px;">🏢 Biznes ma'lumoti</h3>

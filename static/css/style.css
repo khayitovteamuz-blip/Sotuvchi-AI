@@ -1690,3 +1690,76 @@ textarea.form-control {
     margin: 12px 0 0 18px; font-size: 12.5px; color: var(--text-muted); line-height: 1.9;
 }
 .group-steps code { font-size: 11.5px; }
+
+/* ═══ Hisobim ═══
+   Balans va obuna holati birinchi ekranda: do'kon egasi bu bo'limga bitta
+   savol bilan keladi — "qachongacha ishlaydi va nima qilishim kerak?". */
+.bill-top {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: 16px; margin-bottom: 28px;
+}
+@media (max-width: 780px) { .bill-top { grid-template-columns: 1fr; } }
+
+.bill-balance {
+    background: linear-gradient(140deg, #00d68f 0%, #00b87c 55%, #00a06c 100%);
+    border-radius: var(--radius-lg); padding: 24px 26px;
+    /* White on this green is 2.58:1; near-black reads at 6.3:1 and the green
+       looks stronger for it. */
+    color: #04251a;
+}
+.bill-label { font-size: 12px; font-weight: 700; opacity: 0.7; letter-spacing: 0.03em; }
+.bill-amount {
+    font-family: var(--display); font-size: 38px; font-weight: 700;
+    letter-spacing: -0.04em; line-height: 1.1; margin: 8px 0 18px;
+}
+.bill-amount small { font-size: 16px; font-weight: 600; opacity: 0.65; }
+.bill-balance .btn-primary {
+    background: #04251a; color: #fff; border: none;
+    padding: 11px 20px; border-radius: var(--radius-sm);
+    font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.bill-balance .btn-primary:hover { background: #0a3d2a; }
+
+.bill-sub {
+    background: var(--card-bg); border: 1px solid var(--card-border);
+    border-radius: var(--radius-lg); padding: 24px 26px;
+}
+.bill-sub-plan { font-family: var(--display); font-size: 24px; font-weight: 700; letter-spacing: -0.03em; }
+.bill-sub-state {
+    display: inline-block; margin-top: 8px; padding: 4px 12px; border-radius: 20px;
+    font-size: 12px; font-weight: 700;
+}
+.bill-active  { background: rgba(0, 184, 124, 0.12); color: var(--primary-text); }
+.bill-free    { background: #f1f5f9; color: var(--text-muted); }
+.bill-frozen  { background: rgba(180, 83, 9, 0.1); color: var(--accent-warning); }
+.bill-expired { background: rgba(190, 18, 60, 0.09); color: var(--accent-danger); }
+.bill-sub-note { margin-top: 14px; font-size: 13.5px; color: var(--text-muted); line-height: 1.6; }
+
+.bill-h {
+    font-family: var(--display); font-size: 17px; font-weight: 700;
+    letter-spacing: -0.02em; margin: 0 0 14px;
+}
+.bill-plans {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px; margin-bottom: 30px;
+}
+.bill-plan {
+    background: var(--card-bg); border: 1px solid var(--card-border);
+    border-radius: var(--radius-lg); padding: 22px 24px;
+    display: flex; flex-direction: column;
+}
+.bill-plan.is-current { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(0, 184, 124, 0.1); }
+.bill-plan h4 { font-family: var(--display); font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+.bill-plan-price {
+    font-size: 15px; font-weight: 700; color: var(--primary-text); margin-top: 5px;
+}
+.bill-plan-price small { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.bill-plan-list { list-style: none; margin: 16px 0 20px; padding: 0; }
+.bill-plan-list li {
+    font-size: 13px; color: var(--text-muted); padding: 5px 0 5px 20px; position: relative;
+}
+.bill-plan-list li::before {
+    content: '✓'; position: absolute; left: 0; color: var(--primary-text); font-weight: 700;
+}
+.bill-plan .btn-primary { margin-top: auto; width: 100%; }
+.bill-plan-free { margin-top: auto; font-size: 12.5px; color: var(--text-dim); text-align: center; }
