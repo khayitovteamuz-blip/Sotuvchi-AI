@@ -70,11 +70,11 @@ button { background: none; border: none; cursor: pointer; }
     border: 1px solid var(--line); border-radius: var(--r-lg); padding: 34px 32px 28px;
 }
 .login-brand { display: flex; align-items: center; gap: 11px; margin-bottom: 26px; }
+/* The product's own mark, same file the business panel uses — one logo, so the
+   two panels read as one product even though they are different tools. */
 .brand-mark {
     width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
-    display: grid; place-items: center; font-size: 17px;
-    background: linear-gradient(140deg, var(--green-lt), var(--green-dk));
-    color: var(--on-green);
+    display: block; object-fit: contain;
 }
 .login-brand b { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
 .login-card h1 { font-size: 23px; font-weight: 700; letter-spacing: -0.025em; }
