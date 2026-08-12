@@ -113,7 +113,8 @@ function openModal({ title, fields, submitLabel, onSubmit, danger }) {
             <span>${esc(f.label)}</span>
             ${f.type === 'select'
                 ? `<select id="m-${f.name}">${f.options.map((o) =>
-                    `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}</select>`
+                    `<option value="${esc(o.value)}" ${o.value === f.value ? 'selected' : ''}>${
+                        esc(o.label)}</option>`).join('')}</select>`
                 : `<input type="${f.type || 'text'}" id="m-${f.name}"
                      ${f.required === false ? '' : 'required'}
                      placeholder="${esc(f.placeholder || '')}"
@@ -610,6 +611,40 @@ document.querySelectorAll('[data-grain]').forEach((b) => {
     });
 });
 
+// ═══ AI MODELLARI ═══
+// Filled from /ai/models each time a profile opens: availability depends on
+// what the server has a key for, so it cannot be baked into the page.
+let AI_PROVIDERS = [];
+
+const provider = (name) => AI_PROVIDERS.find((p) => p.name === (name || '').toLowerCase());
+
+function providerOptions(current) {
+    return AI_PROVIDERS.map((p) => {
+        const isCurrent = p.name === (current || '').toLowerCase();
+        // A provider with no key is shown but unpickable — the operator sees
+        // that Claude exists and why it can't be chosen yet.
+        const off = !p.available && !isCurrent;
+        return `<option value="${esc(p.name)}" ${isCurrent ? 'selected' : ''} ${off ? 'disabled' : ''}>${
+            esc(p.title)}${p.available ? '' : ' — kalit yo\'q'}</option>`;
+    }).join('');
+}
+
+function modelOptions(providerName, current) {
+    const p = provider(providerName) || AI_PROVIDERS[0];
+    if (!p) return '';
+    return p.models.map((m) =>
+        `<option value="${esc(m.id)}" ${m.id === current ? 'selected' : ''}>${esc(m.title)}</option>`
+    ).join('');
+}
+
+function providerNote(providerName) {
+    const p = provider(providerName);
+    if (!p) return '';
+    return p.available
+        ? 'Tanlangan model shu biznesning chatlariga javob beradi.'
+        : (p.reason || '');
+}
+
 // ═══ BIZNES KARTASI ═══
 function closeDrawer() {
     $('plat-drawer').hidden = true;
@@ -629,6 +664,13 @@ async function openTenant(id) {
     $('drawer-body').innerHTML = '<p class="empty">Yuklanmoqda</p>';
 
     const d = await api(`/api/platform/tenants/${id}`);
+    // Which models this business may be switched to, and which of them are
+    // actually reachable — the dropdown must not offer a dead choice.
+    const cat = await api('/api/platform/ai/models'
+        + `?provider=${encodeURIComponent(d.ai.ai_provider || '')}`
+        + `&model=${encodeURIComponent(d.ai.model_name || '')}`);
+    AI_PROVIDERS = cat.providers;
+
     $('drawer-title').textContent = d.business_name;
     $('drawer-sub').textContent = `${d.id} · ${d.created_at || ''}`;
 
@@ -703,8 +745,11 @@ async function openTenant(id) {
 
         <div class="block">
             <div class="block-t">AI sozlamalari</div>
+            <label class="field"><span>AI provayderi</span>
+                <select id="dr-provider">${providerOptions(d.ai.ai_provider)}</select></label>
             <label class="field"><span>Model</span>
-                <input type="text" id="dr-model" value="${esc(d.ai.model_name)}"></label>
+                <select id="dr-model">${modelOptions(d.ai.ai_provider, d.ai.model_name)}</select></label>
+            <p class="note" id="dr-model-note">${esc(providerNote(d.ai.ai_provider))}</p>
             <label class="field"><span>Temperature</span>
                 <input type="number" id="dr-temp" step="0.1" min="0" max="1" value="${d.ai.temperature}"></label>
             <label class="field"><span>Operatorga uzatishdan oldin</span>
@@ -740,6 +785,8 @@ async function openTenant(id) {
                 <div class="kv">
                     <span>${esc(x.email)} · ${esc(x.role)}${x.is_active ? '' : ' · o\'chirilgan'}</span>
                     <span style="display:flex;gap:6px">
+                        <button class="btn btn-ghost" data-login="${esc(x.id)}"
+                                data-email="${esc(x.email)}">Login</button>
                         <button class="btn btn-ghost" data-reset="${esc(x.id)}">Parol</button>
                         <button class="btn ${x.is_active ? 'btn-red' : 'btn-ghost'}"
                                 data-user="${esc(x.id)}" data-to="${x.is_active ? '0' : '1'}">
@@ -789,8 +836,18 @@ async function openTenant(id) {
         patchTenant(id, { is_active: !d.is_active }, stopping ? 'Biznes to\'xtatildi' : 'Biznes faollashtirildi');
     });
 
+    // Switching provider swaps the model list under it — a Gemini model id
+    // left selected while the provider says Claude would be saved and then
+    // rejected, which reads as a bug rather than a mismatch.
+    $('dr-provider').addEventListener('change', () => {
+        const p = $('dr-provider').value;
+        $('dr-model').innerHTML = modelOptions(p, '');
+        $('dr-model-note').textContent = providerNote(p);
+    });
+
     $('dr-save-ai').addEventListener('click', () => patchAi(id, {
-        model_name: $('dr-model').value.trim(),
+        ai_provider: $('dr-provider').value,
+        model_name: $('dr-model').value,
         temperature: parseFloat($('dr-temp').value),
         auto_handoff_after: parseInt($('dr-handoff').value, 10),
         system_prompt: $('dr-prompt').value,
@@ -847,6 +904,28 @@ async function openTenant(id) {
             toast(r.status === 'unchanged' ? 'O\'zgarish yo\'q' : 'Bilimlar bazasi saqlandi');
         } catch (e) { toast(e.message, 'err'); }
     });
+
+    // Change the login itself, and optionally set a password you choose —
+    // "Parol" next to it generates one instead.
+    $('drawer-body').querySelectorAll('[data-login]').forEach((b) =>
+        b.addEventListener('click', () => openModal({
+            title: 'Login va parol',
+            submitLabel: 'Saqlash',
+            fields: [
+                { name: 'email', label: 'Email (login)', type: 'email', value: b.dataset.email },
+                { name: 'password', label: 'Yangi parol — bo\'sh qoldirsangiz o\'zgarmaydi',
+                  type: 'password', required: false, placeholder: 'kamida 8 ta belgi' },
+            ],
+            onSubmit: async (v) => {
+                const body = { email: v.email };
+                if (v.password) body.password = v.password;
+                const r = await api(`/api/platform/tenants/${id}/users/${b.dataset.login}`, {
+                    method: 'PATCH', body: JSON.stringify(body),
+                });
+                toast(r.status === 'unchanged' ? 'O\'zgarish yo\'q' : 'Login yangilandi');
+                openTenant(id);
+            },
+        })));
 
     $('drawer-body').querySelectorAll('[data-reset]').forEach((b) =>
         b.addEventListener('click', () => openModal({

@@ -49,7 +49,13 @@ from app.db.models import (
     User,
     UserSession,
 )
-from app.services import audit_service, billing_service, quota_service, tenant_service
+from app.services import (
+    ai_models,
+    audit_service,
+    billing_service,
+    quota_service,
+    tenant_service,
+)
 from app.services.bot_service import bot_service
 
 logger = logging.getLogger("platform_api")
@@ -545,8 +551,20 @@ async def update_contact(
     return {"status": "success", "changed": changed}
 
 
+@router.get("/ai/models")
+async def ai_model_catalog(provider: str = "", model: str = ""):
+    """What the model dropdown may offer, and which entries can really answer.
+
+    The panel needs this before it renders: a provider whose key is missing is
+    still listed, greyed out with the reason, so the operator sees why a choice
+    is unavailable instead of picking one that would quietly do nothing.
+    """
+    return {"providers": ai_models.catalog(provider, model)}
+
+
 class AiPatch(BaseModel):
     system_prompt: Optional[str] = None
+    ai_provider: Optional[str] = None
     model_name: Optional[str] = None
     temperature: Optional[float] = None
     bot_enabled: Optional[bool] = None
@@ -565,8 +583,32 @@ async def update_tenant_ai(
     await _get_tenant_or_404(session, tenant_id)
     cfg = await repo.get_settings(session, tenant_id)
 
+    # A model switch is only honoured if that model can actually serve the chat.
+    # Saving a provider whose key is absent would leave the business silently on
+    # the keyword engine while the panel claimed otherwise.
+    if patch.ai_provider or patch.model_name:
+        provider = (patch.ai_provider or cfg.ai_provider or ai_models.DEFAULT_PROVIDER).lower()
+        model = patch.model_name or cfg.model_name
+        if provider not in ai_models.PROVIDERS:
+            raise HTTPException(status_code=400, detail="Bunday AI provayderi yo'q.")
+        reason = ai_models.unavailable_reason(provider)
+        if reason:
+            raise HTTPException(status_code=400, detail=reason)
+        # An id we don't list is allowed only if the business is already on it —
+        # the dropdown shows that one as "(hozirgi)", so re-saving the profile
+        # unchanged must not be rejected.
+        if (patch.model_name and patch.model_name != cfg.model_name
+                and not ai_models.model_meta(provider, patch.model_name)):
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{patch.model_name}' — {ai_models.PROVIDERS[provider]['title']} ro'yxatida yo'q model.",
+            )
+        patch.ai_provider = provider
+        patch.model_name = model
+
     changes = {}
-    for field in ("system_prompt", "model_name", "temperature", "bot_enabled", "auto_handoff_after"):
+    for field in ("system_prompt", "ai_provider", "model_name", "temperature",
+                  "bot_enabled", "auto_handoff_after"):
         new = getattr(patch, field)
         if new is not None and new != getattr(cfg, field):
             old = getattr(cfg, field)
@@ -841,6 +883,11 @@ async def reset_user_password(
 
 class UserPatch(BaseModel):
     is_active: Optional[bool] = None
+    email: Optional[str] = None
+    password: Optional[str] = None
+
+
+MIN_PASSWORD_LEN = 8
 
 
 @router.patch("/tenants/{tenant_id}/users/{user_id}")
@@ -852,22 +899,71 @@ async def update_user(
     session: AsyncSession = Depends(get_session),
     admin: PlatformAdmin = Depends(require_platform_admin),
 ):
+    """Change a business's login, its password, or switch the account off.
+
+    The email *is* the login, so changing it and changing the password both
+    invalidate every open browser session — otherwise the old credentials keep
+    a stolen cookie alive past the very change meant to cut it off.
+    """
     await _get_tenant_or_404(session, tenant_id)
     user = await session.get(User, user_id)
     if not user or user.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi.")
 
-    if patch.is_active is None or patch.is_active == user.is_active:
+    changes: dict = {}
+    revoke = False
+    old_email = user.email
+
+    if patch.email is not None:
+        email = patch.email.strip().lower()
+        if email and email != user.email:
+            if "@" not in email or "." not in email.split("@")[-1]:
+                raise HTTPException(status_code=400, detail="Email noto'g'ri yozilgan.")
+            taken = (await session.execute(
+                select(User.id).where(User.email == email, User.id != user_id)
+            )).scalar_one_or_none()
+            if taken:
+                raise HTTPException(status_code=409, detail="Bu email boshqa hisobga biriktirilgan.")
+            changes["email"] = {"from": user.email, "to": email}
+            user.email = email
+            revoke = True
+
+    if patch.password is not None and patch.password.strip():
+        password = patch.password.strip()
+        if len(password) < MIN_PASSWORD_LEN:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Parol kamida {MIN_PASSWORD_LEN} ta belgidan iborat bo'lsin.",
+            )
+        user.password_hash = security.hash_password(password)
+        changes["password"] = "set"   # never the value itself, not even in the audit log
+        revoke = True
+
+    if patch.is_active is not None and patch.is_active != user.is_active:
+        changes["is_active"] = {"from": user.is_active, "to": patch.is_active}
+        user.is_active = patch.is_active
+        if not patch.is_active:
+            revoke = True
+
+    if not changes:
         return {"status": "unchanged"}
 
-    changes = {"email": user.email, "is_active": {"from": user.is_active, "to": patch.is_active}}
-    user.is_active = patch.is_active
     await session.commit()
-    if not patch.is_active:
+
+    if revoke:
         await session.execute(sa_delete(UserSession).where(UserSession.user_id == user_id))
+        # The throttle counter is keyed by email; both the old and the new one
+        # are cleared so a locked-out owner can use their new details at once.
+        for addr in {old_email, user.email}:
+            await session.execute(
+                sa_delete(LoginAttempt).where(LoginAttempt.key.like(f"%|{addr}"))
+            )
         await session.commit()
-    await audit_service.log(session, admin, "user_update", tenant_id, changes, request)
-    return {"status": "success", "changes": changes}
+
+    await audit_service.log(
+        session, admin, "user_update", tenant_id, {"email": user.email, **changes}, request
+    )
+    return {"status": "success", "email": user.email, "changes": changes}
 
 
 @router.post("/tenants/{tenant_id}/unlock")

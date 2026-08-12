@@ -9,6 +9,8 @@ hallucinated — that is the difference between this and a plain chatbot.
 Falls back to a keyword sales engine when no API key is configured.
 """
 import asyncio
+import base64
+import json
 import logging
 import re
 import time
@@ -20,7 +22,7 @@ from app.core.config import settings
 from app.db import repo
 from app.db.models import Conversation, Product, Tenant, TenantSettings
 from app.models.schema import ChatResponse
-from app.services import ai_tools, quota_service
+from app.services import ai_models, ai_tools, quota_service
 
 logger = logging.getLogger("ai_agent")
 
@@ -34,7 +36,7 @@ def _new_usage() -> Dict[str, int]:
 
 
 def _add_usage(usage: Dict[str, int], resp) -> None:
-    """Accumulate one response's token counts.
+    """Accumulate one Gemini response's token counts.
 
     Input and output are kept apart because they are billed at different rates —
     a single blended total cannot be priced correctly.
@@ -44,6 +46,32 @@ def _add_usage(usage: Dict[str, int], resp) -> None:
         usage["total"] += um.total_token_count or 0
         usage["prompt"] += um.prompt_token_count or 0
         usage["output"] += um.candidates_token_count or 0
+    except Exception:
+        pass
+
+
+def _bump(usage: Dict[str, int], prompt: int, output: int) -> None:
+    usage["prompt"] += prompt
+    usage["output"] += output
+    usage["total"] += prompt + output
+
+
+def _add_anthropic_usage(usage: Dict[str, int], resp) -> None:
+    """Cached input is still input the shop pays for, so it is counted here too."""
+    try:
+        u = resp.usage
+        prompt = ((u.input_tokens or 0)
+                  + (getattr(u, "cache_read_input_tokens", 0) or 0)
+                  + (getattr(u, "cache_creation_input_tokens", 0) or 0))
+        _bump(usage, prompt, u.output_tokens or 0)
+    except Exception:
+        pass
+
+
+def _add_openai_usage(usage: Dict[str, int], resp) -> None:
+    try:
+        u = resp.usage
+        _bump(usage, u.prompt_tokens or 0, u.completion_tokens or 0)
     except Exception:
         pass
 
@@ -177,12 +205,30 @@ class AISalesAgent:
         usage = _new_usage()
         tool_trace: List[Dict[str, Any]] = []
 
-        use_gemini = cfg.ai_provider == "gemini" and settings.GEMINI_API_KEY
-        if use_gemini:
-            reply_text, usage, tool_trace = await self._run_gemini_with_tools(
-                session, tenant_id, conversation, cfg, history, user_message, user_name, media
-            )
-            model_used = cfg.model_name
+        # Which model actually answers this shop — decided by what the owner
+        # picked in the panel, not by a hard-coded provider. None means no route
+        # is open (missing key or SDK) and the keyword engine takes over.
+        route = ai_models.resolve(cfg.ai_provider, cfg.model_name)
+
+        if route:
+            provider, model = route
+            # A provider that can't read a voice note must not be handed one —
+            # it would answer as though the customer had said nothing.
+            readable = [m for m in (media or []) if ai_models.accepts_media(provider, m["mime_type"])]
+            if media and not readable and not user_message:
+                reply_text = self._unreadable_media_reply(media)
+                model_used = "media-unsupported"
+            else:
+                runner = {
+                    "gemini": self._run_gemini_with_tools,
+                    "claude": self._run_anthropic_with_tools,
+                    "openai": self._run_openai_with_tools,
+                }[provider]
+                reply_text, usage, tool_trace = await runner(
+                    session, tenant_id, conversation, cfg, history,
+                    user_message, user_name, readable, model,
+                )
+                model_used = model
         elif media:
             # No key: we can't read a photo or voice note, so say so plainly
             # instead of answering as if the message was empty.
@@ -242,7 +288,8 @@ class AISalesAgent:
 
     # ─── Gemini tool-calling loop ─────────────────────────────────────────────
     async def _run_gemini_with_tools(
-        self, session, tenant_id, conversation, cfg, history, user_message, user_name, media=None
+        self, session, tenant_id, conversation, cfg, history,
+        user_message, user_name, media=None, model=None,
     ) -> Tuple[str, Dict[str, int], List[Dict[str, Any]]]:
         try:
             from google.genai import types
@@ -253,6 +300,7 @@ class AISalesAgent:
         client = self._client()
         if client is None:
             return ("", _new_usage(), [])
+        model = model or cfg.model_name
 
         system_instruction = self._system_instruction(cfg, conversation, user_name)
 
@@ -282,7 +330,7 @@ class AISalesAgent:
         trace: List[Dict[str, Any]] = []
 
         for _round in range(MAX_TOOL_ROUNDS):
-            resp = await self._generate(client, cfg.model_name, contents, config)
+            resp = await self._generate(client, model, contents, config)
             if resp is None:
                 return ("", usage, trace)
 
@@ -312,7 +360,7 @@ class AISalesAgent:
 
         # Ran out of rounds — ask for a final answer without tools
         final = await self._generate(
-            client, cfg.model_name, contents,
+            client, model, contents,
             types.GenerateContentConfig(system_instruction=system_instruction, temperature=cfg.temperature),
         )
         if final is None:
@@ -355,6 +403,248 @@ class AISalesAgent:
         if m:
             return float(m.group(1)) + 0.5
         return 2.0 * (2 ** attempt)
+
+    # ─── Claude tool-calling loop ─────────────────────────────────────────────
+    async def _run_anthropic_with_tools(
+        self, session, tenant_id, conversation, cfg, history,
+        user_message, user_name, media=None, model=None,
+    ) -> Tuple[str, Dict[str, int], List[Dict[str, Any]]]:
+        # Both the import and the constructor can fail (a missing package, an
+        # empty key), and either one must degrade to the fallback engine rather
+        # than take the customer's message down with it.
+        try:
+            import anthropic
+            client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        except Exception as e:
+            logger.error(f"Claude client init failed: {e}")
+            return ("", _new_usage(), [])
+
+        model = model or "claude-opus-5"
+        meta = ai_models.model_meta("claude", model) or {}
+        system = self._system_instruction(cfg, conversation, user_name)
+
+        messages = self._anthropic_history(history)
+        blocks: List[Dict[str, Any]] = []
+        for m in (media or []):
+            blocks.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": m["mime_type"],
+                    "data": base64.standard_b64encode(m["data"]).decode(),
+                },
+            })
+        if user_message:
+            blocks.append({"type": "text", "text": user_message})
+        if not blocks:
+            blocks.append({"type": "text", "text": "..."})
+        messages.append({"role": "user", "content": blocks})
+
+        # The 5-series takes adaptive thinking and rejects `temperature`;
+        # Haiku 4.5 is the other way round. Sending the wrong one is a 400, not
+        # a slightly worse answer — so each model carries its own flags.
+        extra: Dict[str, Any] = {}
+        if meta.get("adaptive"):
+            extra["thinking"] = {"type": "adaptive"}
+            # A sales reply is short and well specified; low effort keeps the
+            # customer from waiting on reasoning they will never see.
+            extra["output_config"] = {"effort": "low"}
+        if meta.get("temperature"):
+            extra["temperature"] = cfg.temperature
+
+        tools = ai_tools.anthropic_tools()
+        usage = _new_usage()
+        trace: List[Dict[str, Any]] = []
+
+        for _round in range(MAX_TOOL_ROUNDS):
+            resp = await self._anthropic_call(client, model, system, messages, tools, extra)
+            if resp is None:
+                return ("", usage, trace)
+            _add_anthropic_usage(usage, resp)
+
+            # A refusal returns HTTP 200 with no answer in it; reading content[0]
+            # here would hand the customer an empty bubble.
+            if resp.stop_reason == "refusal":
+                logger.warning("Claude declined the turn — using the fallback engine")
+                return ("", usage, trace)
+
+            calls = [b for b in resp.content if b.type == "tool_use"]
+            if not calls:
+                return (self._anthropic_text(resp), usage, trace)
+
+            # Echo the model's own blocks back untouched: thinking blocks must
+            # come back unchanged or the next request is rejected.
+            messages.append({"role": "assistant", "content": resp.content})
+
+            results = []
+            for call in calls:
+                args = dict(call.input or {})
+                result = await ai_tools.execute_tool(
+                    call.name, args, session, tenant_id, conversation
+                )
+                trace.append({"name": call.name, "args": args, "result": result})
+                logger.info(f"[tool] {call.name}({args}) -> {str(result)[:160]}")
+                results.append({
+                    "type": "tool_result",
+                    "tool_use_id": call.id,
+                    "content": json.dumps(result, ensure_ascii=False, default=str),
+                })
+            messages.append({"role": "user", "content": results})
+
+        final = await self._anthropic_call(client, model, system, messages, None, extra)
+        if final is None:
+            return ("", usage, trace)
+        _add_anthropic_usage(usage, final)
+        return (self._anthropic_text(final), usage, trace)
+
+    async def _anthropic_call(self, client, model, system, messages, tools, extra):
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                kwargs: Dict[str, Any] = dict(
+                    model=model, max_tokens=4096, system=system, messages=messages, **extra
+                )
+                if tools:
+                    kwargs["tools"] = tools
+                return await client.messages.create(**kwargs)
+            except Exception as e:
+                msg = str(e)
+                low = msg.lower()
+                transient = ("429" in msg or "529" in msg
+                             or "rate_limit" in low or "overloaded" in low)
+                if not transient or attempt == MAX_RETRIES:
+                    logger.error(f"Claude API error ({'rate limit' if transient else 'fatal'}): {msg[:200]}")
+                    return None
+                wait = self._retry_delay(msg, attempt)
+                if wait > MAX_RETRY_WAIT:
+                    logger.error(f"Claude rate limited, retry delay {wait}s too long — using fallback")
+                    return None
+                logger.warning(f"Claude rate limited, retrying in {wait:.1f}s (attempt {attempt + 1})")
+                await asyncio.sleep(wait)
+        return None
+
+    @staticmethod
+    def _anthropic_text(resp) -> str:
+        return "".join(b.text for b in resp.content if b.type == "text").strip()
+
+    @staticmethod
+    def _anthropic_history(history) -> List[Dict[str, Any]]:
+        """Claude rejects an empty text block and a conversation that opens on
+        the assistant, so a bot greeting sent before the customer spoke cannot
+        be the first entry."""
+        msgs: List[Dict[str, Any]] = []
+        for m in history:
+            text = (m.text or "").strip()
+            if not text:
+                continue
+            role = "user" if m.sender == "user" else "assistant"
+            if not msgs and role != "user":
+                continue
+            msgs.append({"role": role, "content": text})
+        return msgs
+
+    # ─── ChatGPT tool-calling loop ────────────────────────────────────────────
+    async def _run_openai_with_tools(
+        self, session, tenant_id, conversation, cfg, history,
+        user_message, user_name, media=None, model=None,
+    ) -> Tuple[str, Dict[str, int], List[Dict[str, Any]]]:
+        try:
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        except Exception as e:
+            logger.error(f"OpenAI client init failed: {e}")
+            return ("", _new_usage(), [])
+
+        model = model or "gpt-5-mini"
+        meta = ai_models.model_meta("openai", model) or {}
+
+        messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": self._system_instruction(cfg, conversation, user_name)}
+        ]
+        for m in history:
+            text = (m.text or "").strip()
+            if text:
+                messages.append({
+                    "role": "user" if m.sender == "user" else "assistant",
+                    "content": text,
+                })
+
+        parts: List[Dict[str, Any]] = []
+        for m in (media or []):
+            data = base64.standard_b64encode(m["data"]).decode()
+            parts.append({"type": "image_url",
+                          "image_url": {"url": f"data:{m['mime_type']};base64,{data}"}})
+        if user_message:
+            parts.append({"type": "text", "text": user_message})
+        messages.append({"role": "user", "content": parts or (user_message or "...")})
+
+        # The GPT-5 family only accepts the default temperature; the tenant's
+        # slider is honoured on the older models that still read it.
+        extra = {"temperature": cfg.temperature} if meta.get("temperature") else {}
+        tools = ai_tools.openai_tools()
+        usage = _new_usage()
+        trace: List[Dict[str, Any]] = []
+
+        for _round in range(MAX_TOOL_ROUNDS):
+            resp = await self._openai_call(client, model, messages, tools, extra)
+            if resp is None:
+                return ("", usage, trace)
+            _add_openai_usage(usage, resp)
+
+            msg = resp.choices[0].message
+            if not msg.tool_calls:
+                return ((msg.content or "").strip(), usage, trace)
+
+            messages.append(msg.model_dump(exclude_none=True))
+            for call in msg.tool_calls:
+                try:
+                    args = json.loads(call.function.arguments or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                result = await ai_tools.execute_tool(
+                    call.function.name, args, session, tenant_id, conversation
+                )
+                trace.append({"name": call.function.name, "args": args, "result": result})
+                logger.info(f"[tool] {call.function.name}({args}) -> {str(result)[:160]}")
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call.id,
+                    "content": json.dumps(result, ensure_ascii=False, default=str),
+                })
+
+        final = await self._openai_call(client, model, messages, None, extra)
+        if final is None:
+            return ("", usage, trace)
+        _add_openai_usage(usage, final)
+        return ((final.choices[0].message.content or "").strip(), usage, trace)
+
+    async def _openai_call(self, client, model, messages, tools, extra):
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                kwargs: Dict[str, Any] = dict(model=model, messages=messages, **extra)
+                if tools:
+                    kwargs["tools"] = tools
+                return await client.chat.completions.create(**kwargs)
+            except Exception as e:
+                msg = str(e)
+                low = msg.lower()
+                transient = "429" in msg or "503" in msg or "rate limit" in low or "overloaded" in low
+                if not transient or attempt == MAX_RETRIES:
+                    logger.error(f"OpenAI API error ({'rate limit' if transient else 'fatal'}): {msg[:200]}")
+                    return None
+                wait = self._retry_delay(msg, attempt)
+                if wait > MAX_RETRY_WAIT:
+                    logger.error(f"OpenAI rate limited, retry delay {wait}s too long — using fallback")
+                    return None
+                logger.warning(f"OpenAI rate limited, retrying in {wait:.1f}s (attempt {attempt + 1})")
+                await asyncio.sleep(wait)
+        return None
+
+    @staticmethod
+    def _unreadable_media_reply(media) -> str:
+        """The chosen model cannot open what the customer sent."""
+        kind = "ovozli xabar" if (media or [{}])[0].get("mime_type", "").startswith("audio/") else "fayl"
+        return (f"Kechirasiz, {kind}ni ocholmadim 😔 "
+                "Iltimos, savolingizni matn bilan yozib yuboring.")
 
     # Phrases that mean "a human will take over" — if the model says one of
     # these it has made a promise to the customer that must be kept.

@@ -31,129 +31,180 @@ DEFAULT_DELIVERY_DAYS_CITY = "1-2 kun"
 DEFAULT_DELIVERY_DAYS_REGIONS = "2-4 kun"
 
 
-# ─── Declarations sent to Gemini ──────────────────────────────────────────────
+# ─── Tool specs (one source, three renderings) ────────────────────────────────
+# Written as plain JSON Schema because Gemini, Claude and ChatGPT each want a
+# different wrapper around the same thing. Keeping one list means a tool can
+# never exist for one provider and be quietly missing on another — the moment
+# the shop switches model, the guardrails switch with it.
+TOOL_SPECS: List[Dict[str, Any]] = [
+    {
+        "name": "search_product",
+        "description": (
+            "Do'kon katalogidan mahsulot qidirish. Narx, tavsif yoki mavjudlik "
+            "haqida gapirishdan OLDIN majburiy chaqiriladi. "
+            "Faqat kalit so'z yuboring ('iphone', 'noutbuk'), butun jumlani emas. "
+            "Filtrlardan foydalaning: mijoz 'arzonroq' desa max_price, "
+            "'faqat bor bo'lganlari' desa in_stock_only."
+        ),
+        "properties": {
+            "query": {"type": "string", "description": "Mahsulot nomi yoki kategoriya kalit so'zi. Bo'sh bo'lsa — katalog ko'rsatiladi."},
+            "category": {"type": "string", "description": "Aniq kategoriya nomi (ixtiyoriy)"},
+            "min_price": {"type": "number", "description": "Eng past narx, UZS (ixtiyoriy)"},
+            "max_price": {"type": "number", "description": "Eng yuqori narx, UZS (ixtiyoriy)"},
+            "in_stock_only": {"type": "boolean", "description": "Faqat omborda bor mahsulotlar"},
+        },
+    },
+    {
+        "name": "list_categories",
+        "description": (
+            "Katalogdagi kategoriyalar ro'yxatini olish (har birida nechta mahsulot "
+            "va narx oralig'i). Mijoz 'nima bor?' deb so'raganda yoki katalog katta "
+            "bo'lganda so'rovni toraytirish uchun ishlating."
+        ),
+        "properties": {},
+    },
+    {
+        "name": "send_product_photo",
+        "description": (
+            "Mahsulot(lar) rasmini mijozga yuborish. Mijoz mahsulotga qiziqqanda, "
+            "'rasmini ko'rsating' desa, yoki bir nechta variantni taqqoslaganda ishlating. "
+            "Maksimal 4 ta. Rasm yuborgandan keyin matnda uni takrorlab tasvirlamang."
+        ),
+        "properties": {
+            "product_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "search_product qaytargan mahsulot ID lari",
+            },
+        },
+        "required": ["product_ids"],
+    },
+    {
+        "name": "check_stock",
+        "description": "Aniq mahsulotning omborda bor-yo'qligini va sonini tekshirish. Sotishdan oldin majburiy.",
+        "properties": {
+            "product_id": {"type": "string", "description": "search_product qaytargan mahsulot ID (masalan PROD-101)"},
+        },
+        "required": ["product_id"],
+    },
+    {
+        "name": "calc_delivery",
+        "description": "Yetkazib berish narxi va muddatini hisoblash.",
+        "properties": {
+            "region": {"type": "string", "description": "Manzil/viloyat (masalan 'Toshkent' yoki 'Samarqand')"},
+            "order_amount": {"type": "number", "description": "Buyurtma summasi (UZS)"},
+        },
+        "required": ["region"],
+    },
+    {
+        "name": "create_order",
+        "description": (
+            "Haqiqiy buyurtma yaratish. FAQAT mijoz ismi VA telefon raqamini bergan bo'lsa, "
+            "hamda mahsulot omborda mavjud bo'lsa chaqiring. Buyurtma ID ni o'zingiz o'ylab topmang."
+        ),
+        "properties": {
+            "customer_name": {"type": "string", "description": "Mijozning ismi"},
+            "customer_phone": {"type": "string", "description": "Telefon raqami (+998...)"},
+            "product_id": {"type": "string", "description": "Mahsulot ID"},
+            "quantity": {"type": "integer", "description": "Soni (standart 1)"},
+            "delivery_address": {"type": "string", "description": "Yetkazib berish manzili"},
+        },
+        "required": ["customer_name", "customer_phone", "product_id"],
+    },
+    {
+        "name": "search_knowledge",
+        "description": (
+            "Do'kon qoidalarini bilish: to'lov turlari, kafolat, qaytarish siyosati, "
+            "ish vaqti, yetkazib berish shartlari va boshqa FAQ. "
+            "Mahsulotdan TASHQARI har qanday savolda MAJBURIY chaqiring — "
+            "javobni o'zingizdan o'ylab topmang."
+        ),
+        "properties": {
+            "question": {"type": "string", "description": "Mijozning savoli"},
+        },
+        "required": ["question"],
+    },
+    {
+        "name": "handoff_to_human",
+        "description": (
+            "Suhbatni jonli operatorga uzatish. Mijoz operator so'raganda, shikoyat qilganda, "
+            "yoki siz javobni bilmaganingizda chaqiring."
+        ),
+        "properties": {
+            "reason": {"type": "string", "description": "Uzatish sababi"},
+        },
+        "required": ["reason"],
+    },
+]
+
+_GEMINI_TYPES = {
+    "string": types.Type.STRING,
+    "number": types.Type.NUMBER,
+    "integer": types.Type.INTEGER,
+    "boolean": types.Type.BOOLEAN,
+    "array": types.Type.ARRAY,
+    "object": types.Type.OBJECT,
+}
+
+
+def _gemini_schema(node: Dict[str, Any]) -> types.Schema:
+    kwargs: Dict[str, Any] = {"type": _GEMINI_TYPES[node["type"]]}
+    if node.get("description"):
+        kwargs["description"] = node["description"]
+    if node.get("properties") is not None:
+        kwargs["properties"] = {k: _gemini_schema(v) for k, v in node["properties"].items()}
+    if node.get("items"):
+        kwargs["items"] = _gemini_schema(node["items"])
+    if node.get("required"):
+        kwargs["required"] = node["required"]
+    return types.Schema(**kwargs)
+
+
 def tool_declarations() -> List[types.Tool]:
+    """Gemini form."""
     return [types.Tool(function_declarations=[
         types.FunctionDeclaration(
-            name="search_product",
-            description=(
-                "Do'kon katalogidan mahsulot qidirish. Narx, tavsif yoki mavjudlik "
-                "haqida gapirishdan OLDIN majburiy chaqiriladi. "
-                "Faqat kalit so'z yuboring ('iphone', 'noutbuk'), butun jumlani emas. "
-                "Filtrlardan foydalaning: mijoz 'arzonroq' desa max_price, "
-                "'faqat bor bo'lganlari' desa in_stock_only."
-            ),
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "query": types.Schema(type=types.Type.STRING, description="Mahsulot nomi yoki kategoriya kalit so'zi. Bo'sh bo'lsa — katalog ko'rsatiladi."),
-                    "category": types.Schema(type=types.Type.STRING, description="Aniq kategoriya nomi (ixtiyoriy)"),
-                    "min_price": types.Schema(type=types.Type.NUMBER, description="Eng past narx, UZS (ixtiyoriy)"),
-                    "max_price": types.Schema(type=types.Type.NUMBER, description="Eng yuqori narx, UZS (ixtiyoriy)"),
-                    "in_stock_only": types.Schema(type=types.Type.BOOLEAN, description="Faqat omborda bor mahsulotlar"),
-                },
-            ),
-        ),
-        types.FunctionDeclaration(
-            name="list_categories",
-            description=(
-                "Katalogdagi kategoriyalar ro'yxatini olish (har birida nechta mahsulot "
-                "va narx oralig'i). Mijoz 'nima bor?' deb so'raganda yoki katalog katta "
-                "bo'lganda so'rovni toraytirish uchun ishlating."
-            ),
-            parameters=types.Schema(type=types.Type.OBJECT, properties={}),
-        ),
-        types.FunctionDeclaration(
-            name="send_product_photo",
-            description=(
-                "Mahsulot(lar) rasmini mijozga yuborish. Mijoz mahsulotga qiziqqanda, "
-                "'rasmini ko'rsating' desa, yoki bir nechta variantni taqqoslaganda ishlating. "
-                "Maksimal 4 ta. Rasm yuborgandan keyin matnda uni takrorlab tasvirlamang."
-            ),
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "product_ids": types.Schema(
-                        type=types.Type.ARRAY,
-                        items=types.Schema(type=types.Type.STRING),
-                        description="search_product qaytargan mahsulot ID lari",
-                    ),
-                },
-                required=["product_ids"],
-            ),
-        ),
-        types.FunctionDeclaration(
-            name="check_stock",
-            description="Aniq mahsulotning omborda bor-yo'qligini va sonini tekshirish. Sotishdan oldin majburiy.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "product_id": types.Schema(type=types.Type.STRING, description="search_product qaytargan mahsulot ID (masalan PROD-101)"),
-                },
-                required=["product_id"],
-            ),
-        ),
-        types.FunctionDeclaration(
-            name="calc_delivery",
-            description="Yetkazib berish narxi va muddatini hisoblash.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "region": types.Schema(type=types.Type.STRING, description="Manzil/viloyat (masalan 'Toshkent' yoki 'Samarqand')"),
-                    "order_amount": types.Schema(type=types.Type.NUMBER, description="Buyurtma summasi (UZS)"),
-                },
-                required=["region"],
-            ),
-        ),
-        types.FunctionDeclaration(
-            name="create_order",
-            description=(
-                "Haqiqiy buyurtma yaratish. FAQAT mijoz ismi VA telefon raqamini bergan bo'lsa, "
-                "hamda mahsulot omborda mavjud bo'lsa chaqiring. Buyurtma ID ni o'zingiz o'ylab topmang."
-            ),
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "customer_name": types.Schema(type=types.Type.STRING, description="Mijozning ismi"),
-                    "customer_phone": types.Schema(type=types.Type.STRING, description="Telefon raqami (+998...)"),
-                    "product_id": types.Schema(type=types.Type.STRING, description="Mahsulot ID"),
-                    "quantity": types.Schema(type=types.Type.INTEGER, description="Soni (standart 1)"),
-                    "delivery_address": types.Schema(type=types.Type.STRING, description="Yetkazib berish manzili"),
-                },
-                required=["customer_name", "customer_phone", "product_id"],
-            ),
-        ),
-        types.FunctionDeclaration(
-            name="search_knowledge",
-            description=(
-                "Do'kon qoidalarini bilish: to'lov turlari, kafolat, qaytarish siyosati, "
-                "ish vaqti, yetkazib berish shartlari va boshqa FAQ. "
-                "Mahsulotdan TASHQARI har qanday savolda MAJBURIY chaqiring — "
-                "javobni o'zingizdan o'ylab topmang."
-            ),
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "question": types.Schema(type=types.Type.STRING, description="Mijozning savoli"),
-                },
-                required=["question"],
-            ),
-        ),
-        types.FunctionDeclaration(
-            name="handoff_to_human",
-            description=(
-                "Suhbatni jonli operatorga uzatish. Mijoz operator so'raganda, shikoyat qilganda, "
-                "yoki siz javobni bilmaganingizda chaqiring."
-            ),
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "reason": types.Schema(type=types.Type.STRING, description="Uzatish sababi"),
-                },
-                required=["reason"],
-            ),
-        ),
+            name=s["name"],
+            description=s["description"],
+            parameters=_gemini_schema({
+                "type": "object",
+                "properties": s["properties"],
+                "required": s.get("required"),
+            }),
+        )
+        for s in TOOL_SPECS
     ])]
+
+
+def _json_schema(spec: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": spec["properties"],
+        "required": spec.get("required", []),
+    }
+
+
+def anthropic_tools() -> List[Dict[str, Any]]:
+    """Claude form: the schema lives under `input_schema`."""
+    return [
+        {"name": s["name"], "description": s["description"], "input_schema": _json_schema(s)}
+        for s in TOOL_SPECS
+    ]
+
+
+def openai_tools() -> List[Dict[str, Any]]:
+    """ChatGPT form: a `function` envelope with the schema under `parameters`."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": s["name"],
+                "description": s["description"],
+                "parameters": _json_schema(s),
+            },
+        }
+        for s in TOOL_SPECS
+    ]
 
 
 # ─── Executors (the only source of truth) ─────────────────────────────────────

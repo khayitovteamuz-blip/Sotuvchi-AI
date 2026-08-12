@@ -27,10 +27,13 @@ class Settings:
         "postgresql+asyncpg://ibro@localhost:5432/sotuvchi_ai",
     )
 
-    # AI Keys
+    # AI Keys. Each provider the panel offers needs its own key here — a business
+    # can only be switched to a model whose key is present, so an empty value
+    # means that choice is refused with a reason rather than silently ignored.
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "gemini")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 
     # Gemini models.
     # flash-lite is the default: a sales turn costs 2+ API calls (tool round +

@@ -519,6 +519,9 @@ tr.sig-off { opacity: 0.55; }
 .kv span { color: var(--fg-2); }
 .kv b { font-family: var(--mono); font-weight: 600; text-align: right; }
 .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+/* Sits directly under the field it explains, so it pulls up against the
+   field's own bottom margin instead of floating between two rows. */
+.note { margin-top: -6px; font-size: 11.5px; line-height: 1.6; color: var(--fg-3); }
 
 /* ═══ MODAL ═══ */
 .modal {
