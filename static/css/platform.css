@@ -65,11 +65,20 @@ button { background: none; border: none; cursor: pointer; }
 
 /* ═══ LOGIN ═══ */
 .login { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+/* Vertical rhythm on a 4px scale, gaps sized by how far apart two things are in
+   meaning: identity → title → form → action. The subtitle used to carry the
+   space under the heading, so removing it left the title sitting on the first
+   label while a hole opened below the button. */
 .login-card {
     width: 100%; max-width: 386px; background: var(--panel);
-    border: 1px solid var(--line); border-radius: var(--r-lg); padding: 34px 32px 28px;
+    border: 1px solid var(--line); border-radius: var(--r-lg); padding: 36px 32px 30px;
 }
-.login-brand { display: flex; align-items: center; gap: 11px; margin-bottom: 26px; }
+.login-brand { display: flex; align-items: center; gap: 11px; margin-bottom: 30px; }
+.login-card h1 { margin-bottom: 24px; }
+.login-card .field { margin-bottom: 18px; }
+/* The button is a different kind of step from a field, so it gets more air
+   than the fields give each other. */
+.login-card .btn-go { margin-top: 8px; }
 /* The product's own mark, same file the business panel uses — one logo, so the
    two panels read as one product even though they are different tools. */
 .brand-mark {
@@ -107,7 +116,12 @@ input:-webkit-autofill:active {
     transition: background-color 9999s ease-in-out 0s;
 }
 .field textarea { min-height: 150px; resize: vertical; line-height: 1.65; font-size: 13px; }
-.login-err { min-height: 20px; margin-top: 12px; font-size: 13px; color: var(--red); font-weight: 600; }
+/* Space is reserved so an error does not shove the card upward when it appears,
+   but only as much as one line actually needs. */
+.login-err {
+    min-height: 18px; margin-top: 10px;
+    font-size: 13px; line-height: 18px; color: var(--red); font-weight: 600;
+}
 
 /* ═══ BUTTONS ═══ */
 .btn {
