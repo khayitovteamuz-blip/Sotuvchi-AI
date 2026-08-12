@@ -100,16 +100,30 @@ TOOL_SPECS: List[Dict[str, Any]] = [
         "name": "create_order",
         "description": (
             "Haqiqiy buyurtma yaratish. FAQAT mijoz ismi VA telefon raqamini bergan bo'lsa, "
-            "hamda mahsulot omborda mavjud bo'lsa chaqiring. Buyurtma ID ni o'zingiz o'ylab topmang."
+            "hamda mahsulot omborda mavjud bo'lsa chaqiring. Buyurtma ID ni o'zingiz o'ylab topmang. "
+            "Mijoz bir nechta mahsulot olsa — HAMMASINI bitta chaqiruvda, items ro'yxatida yuboring. "
+            "Har bir mahsulot uchun alohida buyurtma yaratmang: bu do'kon uchun bitta xarid."
         ),
         "properties": {
             "customer_name": {"type": "string", "description": "Mijozning ismi"},
             "customer_phone": {"type": "string", "description": "Telefon raqami (+998...)"},
-            "product_id": {"type": "string", "description": "Mahsulot ID"},
+            "items": {
+                "type": "array",
+                "description": "Buyurtmadagi mahsulotlar. Bir nechta mahsulot bo'lsa shuni ishlating.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "product_id": {"type": "string", "description": "search_product qaytargan mahsulot ID"},
+                        "quantity": {"type": "integer", "description": "Soni (standart 1)"},
+                    },
+                    "required": ["product_id"],
+                },
+            },
+            "product_id": {"type": "string", "description": "Bitta mahsulot bo'lsa — uning ID si (items o'rniga)"},
             "quantity": {"type": "integer", "description": "Soni (standart 1)"},
             "delivery_address": {"type": "string", "description": "Yetkazib berish manzili"},
         },
-        "required": ["customer_name", "customer_phone", "product_id"],
+        "required": ["customer_name", "customer_phone"],
     },
     {
         "name": "search_knowledge",
@@ -345,9 +359,14 @@ async def _send_product_photo(session, tenant_id: str, args: Dict[str, Any]) -> 
             missing.append(pid)
             continue
         url = (p.image_urls[0] if p.image_urls else None) or p.image_url
-        if not url or not url.startswith("http"):
-            missing.append(p.name)     # locally-uploaded images aren't reachable by Telegram
+        if not url:
+            missing.append(p.name)
             continue
+        # A path like /static/uploads/... is a photo the owner uploaded through
+        # the panel. It used to be skipped here because Telegram cannot fetch
+        # it — so a shop that filled its catalogue the intended way had a bot
+        # that never showed a single picture. The channel now uploads those
+        # bytes itself; the tool just passes the reference through.
         photos.append({
             "url": url,
             "caption": f"*{p.name}*\n{p.price:,.0f} {p.currency}",
@@ -463,11 +482,36 @@ async def _search_knowledge(session, tenant_id: str, question: str) -> Dict[str,
     return {"found": True, "knowledge": hits or filled}
 
 
+MAX_ORDER_LINES = 20
+
+
+def _order_lines(args: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Normalise both call shapes into one list of (product_id, quantity).
+
+    A clothing or cosmetics basket is almost never one item, so `items` is the
+    real shape; `product_id` stays because it is simpler for the single-item
+    case and older conversations may still use it.
+    """
+    raw = args.get("items")
+    if not isinstance(raw, list) or not raw:
+        pid = (args.get("product_id") or "").strip()
+        return [{"product_id": pid, "quantity": args.get("quantity")}] if pid else []
+
+    lines = []
+    for entry in raw[:MAX_ORDER_LINES]:
+        if isinstance(entry, str):
+            entry = {"product_id": entry}
+        if not isinstance(entry, dict):
+            continue
+        pid = str(entry.get("product_id") or "").strip()
+        if pid:
+            lines.append({"product_id": pid, "quantity": entry.get("quantity")})
+    return lines
+
+
 async def _create_order(session, tenant_id: str, conversation, args: Dict[str, Any]) -> Dict[str, Any]:
     name = (args.get("customer_name") or "").strip()
     phone = (args.get("customer_phone") or "").strip()
-    product_id = (args.get("product_id") or "").strip()
-    qty = int(args.get("quantity") or 1)
 
     # Guardrail: never invent a customer
     if not name or not phone:
@@ -475,18 +519,37 @@ async def _create_order(session, tenant_id: str, conversation, args: Dict[str, A
     if not re.search(r"\d{7,}", phone):
         return {"success": False, "error": "Telefon raqami noto'g'ri ko'rinadi. Mijozdan aniqlashtiring."}
 
-    # Guardrail: product and stock must be real
-    p = await repo.get_product(session, tenant_id, product_id)
-    if not p:
-        return {"success": False, "error": f"'{product_id}' mahsuloti katalogda yo'q. search_product bilan tekshiring."}
-    if not p.in_stock or p.stock_quantity < qty:
-        return {"success": False, "error": f"'{p.name}' omborda yetarli emas (qoldiq: {p.stock_quantity}). Sotib bo'lmaydi."}
+    lines = _order_lines(args)
+    if not lines:
+        return {"success": False, "error": "Qaysi mahsulot ekani ko'rsatilmagan. search_product bilan aniqlang."}
+
+    # Guardrail: every line must be a real product with real stock. The whole
+    # order is rejected if one line fails — a half-filled basket the customer
+    # never agreed to is worse than asking them again.
+    items, summary = [], []
+    for line in lines:
+        try:
+            qty = max(1, int(line.get("quantity") or 1))
+        except (TypeError, ValueError):
+            qty = 1
+        p = await repo.get_product(session, tenant_id, line["product_id"])
+        if not p:
+            return {"success": False,
+                    "error": f"'{line['product_id']}' mahsuloti katalogda yo'q. search_product bilan tekshiring."}
+        if not p.in_stock or p.stock_quantity < qty:
+            return {"success": False,
+                    "error": f"'{p.name}' omborda yetarli emas (qoldiq: {p.stock_quantity}). Sotib bo'lmaydi."}
+        items.append({"product_id": p.id, "product_name": p.name,
+                      "quantity": qty, "unit_price": p.price})
+        summary.append({"product_name": p.name, "quantity": qty, "unit_price": p.price})
+
+    currency = (await repo.get_product(session, tenant_id, items[0]["product_id"])).currency
 
     order = await repo.create_order(
         session, tenant_id,
         customer_name=name,
         customer_phone=phone,
-        items=[{"product_id": p.id, "product_name": p.name, "quantity": qty, "unit_price": p.price}],
+        items=items,
         telegram_id=conversation.external_id if conversation.channel == "telegram" else None,
         conversation_id=conversation.id,
         delivery_address=args.get("delivery_address"),
@@ -506,9 +569,8 @@ async def _create_order(session, tenant_id: str, conversation, args: Dict[str, A
         "success": True,
         "order_id": order.id,
         "total_amount": order.total_amount,
-        "currency": p.currency,
-        "product_name": p.name,
-        "quantity": qty,
+        "currency": currency,
+        "items": summary,
         "customer_phone": phone,
     }
 

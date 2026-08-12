@@ -4,12 +4,15 @@ Telegram bot service — tenant-scoped.
 Each business connects its OWN bot token (stored on the tenant). Updates arrive
 at /api/bot/webhook/{tenant_id}; replies are sent with that tenant's token.
 """
+import json
 import logging
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import BASE_DIR
 from app.db import repo
 from app.db.models import Tenant
 from app.services.ai_agent import ai_agent
@@ -20,6 +23,26 @@ TELEGRAM_API = "https://api.telegram.org/bot{token}"
 # Inline media must fit in the model request; Telegram voice/photos are far
 # smaller than this in practice, so the cap only guards against odd uploads.
 MAX_MEDIA_BYTES = 15 * 1024 * 1024
+
+UPLOADS_ROOT = (BASE_DIR / "static" / "uploads").resolve()
+
+
+def _local_photo(photo: str) -> Optional[Path]:
+    """The file on our disk this reference points at, or None if it is remote.
+
+    The resolved path is checked against the uploads folder before anything is
+    read: `photo` originates in a database row, and a row that ever held
+    '/static/uploads/../../.env' must not turn into a file we hand to Telegram.
+    """
+    if not photo or not photo.startswith("/static/uploads/"):
+        return None
+    try:
+        path = (BASE_DIR / photo.lstrip("/")).resolve()
+    except OSError:
+        return None
+    if not path.is_relative_to(UPLOADS_ROOT) or not path.is_file():
+        return None
+    return path
 
 
 def _is_markup_error(data: dict) -> bool:
@@ -150,39 +173,43 @@ class TelegramBotService:
     async def send_photo(
         self, token: str, chat_id: str, photo_url: str, caption: Optional[str] = None
     ) -> bool:
-        """Send a product image. Telegram fetches the URL itself — no download here."""
-        if not token or not photo_url:
-            return False
-        payload = {"chat_id": chat_id, "photo": photo_url}
-        if caption:
-            payload["caption"] = caption[:1024]   # Telegram caption limit
-            payload["parse_mode"] = "Markdown"
-        try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.post(f"{TELEGRAM_API.format(token=token)}/sendPhoto", json=payload)
-                if resp.status_code != 200:
-                    logger.warning(f"sendPhoto failed: {resp.text[:160]}")
-                return resp.status_code == 200
-        except Exception as e:
-            logger.error(f"Telegram sendPhoto error: {e}")
-            return False
+        """Send a product image, by URL or from our own disk."""
+        return await self.send_photo_full(token, chat_id, photo_url, caption) is not None
 
     async def send_photo_full(
         self, token: str, chat_id: str, photo: str,
         caption: Optional[str] = None, reply_markup: Optional[Dict[str, Any]] = None,
     ) -> Optional[dict]:
-        """Send a photo (URL or Telegram file_id) and return the sent message."""
+        """Send a photo and return the sent message.
+
+        `photo` is one of three things: an http(s) URL Telegram fetches itself,
+        a Telegram file_id it already holds, or a path under /static/uploads —
+        a picture the shop owner uploaded through the panel. The last case is
+        the common one and it cannot be fetched by URL (localhost, or a host
+        with no public name), so those bytes are uploaded with the request.
+        """
         if not token or not photo:
             return None
-        payload = {"chat_id": chat_id, "photo": photo}
+        payload: Dict[str, Any] = {"chat_id": chat_id}
         if caption:
             payload["caption"] = caption[:1024]
             payload["parse_mode"] = "Markdown"
         if reply_markup:
-            payload["reply_markup"] = reply_markup
+            payload["reply_markup"] = json.dumps(reply_markup)
+
+        local = _local_photo(photo)
+        files = None
+        if local is None:
+            payload["photo"] = photo
+        else:
+            files = {"photo": (local.name, local.read_bytes())}
+
         try:
             async with httpx.AsyncClient(timeout=25.0) as client:
-                resp = await client.post(f"{TELEGRAM_API.format(token=token)}/sendPhoto", json=payload)
+                url = f"{TELEGRAM_API.format(token=token)}/sendPhoto"
+                resp = (await client.post(url, data=payload, files=files) if files
+                        else await client.post(url, json={**payload, "photo": photo,
+                                                          **({"reply_markup": reply_markup} if reply_markup else {})}))
                 data = resp.json()
                 if not data.get("ok"):
                     logger.warning(f"sendPhoto failed: {str(data)[:180]}")
@@ -193,22 +220,42 @@ class TelegramBotService:
             return None
 
     async def send_media_group(self, token: str, chat_id: str, items: list) -> bool:
-        """Send 2-10 product images as one album."""
+        """Send 2-10 product images as one album.
+
+        Locally stored pictures ride along as multipart parts referenced by
+        `attach://`, which is how Telegram accepts uploads inside an album.
+        """
         if not token or len(items) < 2:
             return False
-        media = []
+
+        media, files = [], {}
         for i, it in enumerate(items[:10]):
-            entry = {"type": "photo", "media": it["url"]}
+            local = _local_photo(it["url"])
+            if local is None:
+                source = it["url"]
+            else:
+                part = f"photo{i}"
+                files[part] = (local.name, local.read_bytes())
+                source = f"attach://{part}"
+            entry = {"type": "photo", "media": source}
             if i == 0 and it.get("caption"):
                 entry["caption"] = it["caption"][:1024]
                 entry["parse_mode"] = "Markdown"
             media.append(entry)
+
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    f"{TELEGRAM_API.format(token=token)}/sendMediaGroup",
-                    json={"chat_id": chat_id, "media": media},
-                )
+                url = f"{TELEGRAM_API.format(token=token)}/sendMediaGroup"
+                if files:
+                    resp = await client.post(
+                        url,
+                        data={"chat_id": chat_id, "media": json.dumps(media)},
+                        files=files,
+                    )
+                else:
+                    resp = await client.post(url, json={"chat_id": chat_id, "media": media})
+                if resp.status_code != 200:
+                    logger.warning(f"sendMediaGroup failed: {resp.text[:180]}")
                 return resp.status_code == 200
         except Exception as e:
             logger.error(f"Telegram sendMediaGroup error: {e}")
