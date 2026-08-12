@@ -7,6 +7,12 @@ let TENANTS = [];
 let PLANS = [];
 let signalFilter = null;   // set by an alert chip: show only flagged rows
 
+/* The alert strip returns on every sign-in and can be dismissed for the rest of
+   the session. sessionStorage, not localStorage: dismissing it should mean "I
+   have read this now", not "never show me problems again". */
+const DISMISS_KEY = 'plat.alerts.dismissed';
+let alertsDismissed = sessionStorage.getItem(DISMISS_KEY) === '1';
+
 const fmt = (n) => (n === null || n === undefined ? '—' : Number(n).toLocaleString('uz-UZ'));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -56,6 +62,10 @@ $('plat-login-form').addEventListener('submit', async (e) => {
             body: JSON.stringify({ email: $('plat-email').value, password: $('plat-password').value }),
         });
         $('plat-password').value = '';
+        // A fresh sign-in is a fresh shift: whatever was dismissed last time is
+        // shown again, because the operator has not seen today's board yet.
+        sessionStorage.removeItem(DISMISS_KEY);
+        alertsDismissed = false;
         showConsole(d.admin);
     } catch (e2) {
         err.textContent = e2.message === 'unauthorized' ? 'Email yoki parol noto\'g\'ri.' : e2.message;
@@ -110,6 +120,7 @@ async function loadStats() {
 async function loadTenants() {
     TENANTS = await api('/api/platform/tenants');
     renderAlerts();
+    renderFleet();
     renderRows();
 }
 
@@ -125,12 +136,17 @@ function signalOf(t) {
     return null;
 }
 
-/** The strip exists only when something is wrong — a calm board is the healthy
- *  state, so its absence is as meaningful as its contents. */
-function renderAlerts() {
-    const box = $('plat-alerts');
+function signalCounts() {
     const counts = { alert: 0, warn: 0, off: 0 };
     TENANTS.forEach((t) => { const s = signalOf(t); if (s) counts[s] += 1; });
+    return counts;
+}
+
+/** Shown whenever something is wrong, unless dismissed this session. A calm
+ *  board is the healthy state, so its absence carries meaning too. */
+function renderAlerts() {
+    const box = $('plat-alerts');
+    const counts = signalCounts();
 
     const chips = [
         ['alert', counts.alert, 'limitdan oshgan'],
@@ -138,19 +154,58 @@ function renderAlerts() {
         ['off', counts.off, 'to\'xtatilgan'],
     ].filter(([, n]) => n > 0);
 
-    if (!chips.length) { box.hidden = true; return; }
+    if (!chips.length || alertsDismissed) { box.hidden = true; return; }
 
     box.hidden = false;
-    box.innerHTML = `<span class="alerts-lead">E'tibor kerak</span>` + chips.map(([kind, n, label]) =>
-        `<button class="alert-chip" data-signal="${kind}"><b>${n}</b> ${label}</button>`).join('')
-        + (signalFilter ? `<button class="alert-chip" data-signal="">Filtrni olib tashlash</button>` : '');
+    box.innerHTML = `<span class="alerts-lead">E'tibor kerak</span>`
+        + chips.map(([kind, n, label]) =>
+            `<button class="alert-chip ${signalFilter === kind ? 'on' : ''}" data-signal="${kind}">
+                <b>${n}</b> ${label}</button>`).join('')
+        + (signalFilter ? `<button class="alert-chip" data-signal="">Filtrni olib tashlash</button>` : '')
+        + `<button class="alerts-x" id="alerts-x" aria-label="Yopish" title="Yopish">✕</button>`;
 
     box.querySelectorAll('[data-signal]').forEach((chip) => {
         chip.addEventListener('click', () => {
-            signalFilter = chip.dataset.signal || null;
+            // Tapping the chip that is already active clears the filter, so the
+            // same control both applies and undoes it.
+            const next = chip.dataset.signal || null;
+            signalFilter = next === signalFilter ? null : next;
             renderAlerts();
             renderRows();
         });
+    });
+
+    $('alerts-x').addEventListener('click', () => {
+        alertsDismissed = true;
+        sessionStorage.setItem(DISMISS_KEY, '1');
+        signalFilter = null;
+        box.hidden = true;
+        renderRows();
+    });
+}
+
+/** The whole fleet as one bar: one tick per business, coloured only when that
+ *  business needs attention. Ticks flex, so five read as broad bars and a
+ *  hundred read as a dense band. */
+function renderFleet() {
+    const strip = $('plat-fleet');
+    const counts = signalCounts();
+    const flagged = counts.alert + counts.warn + counts.off;
+
+    $('mast-sub').innerHTML = `<b>${TENANTS.length}</b> biznes · `
+        + (flagged ? `<b>${flagged}</b> tasiga e'tibor kerak` : 'hammasi joyida');
+    $('fleet-note').textContent = flagged ? `${flagged} / ${TENANTS.length}` : '';
+
+    strip.innerHTML = TENANTS.map((t) => {
+        const s = signalOf(t);
+        const state = { alert: 'limitdan oshgan', warn: 'limitga yaqin', off: 'to\'xtatilgan' }[s] || 'joyida';
+        return `<button class="tick ${s ? `t-${s}` : ''}" data-id="${esc(t.id)}"
+                    title="${esc(t.business_name)} — ${state}"
+                    aria-label="${esc(t.business_name)}, ${state}"></button>`;
+    }).join('');
+
+    strip.querySelectorAll('[data-id]').forEach((tick) => {
+        tick.addEventListener('click', () => openTenant(tick.dataset.id));
     });
 }
 

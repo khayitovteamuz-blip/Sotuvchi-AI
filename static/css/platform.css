@@ -15,22 +15,29 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
 :root {
-    /* Surfaces — warm-neutral dark, deliberately not navy */
-    --ink:      #101116;
-    --board:    #16181f;
-    --board-2:  #1c1f27;
-    --rule:     #262a34;
-    --rule-2:   #333846;
+    /* Surfaces. The first pass set these two steps apart by three hex points,
+       which flattened every panel into one grey field. Real separation is what
+       gives a dark interface depth. */
+    --void:     #07080c;   /* page floor */
+    --ink:      #0e1016;
+    --board:    #171a23;   /* raised panels */
+    --board-2:  #1f2430;   /* hover / inset */
+    --rule:     #272d3a;
+    --rule-2:   #3a4252;
 
     /* Text */
-    --chalk:    #e9e7e2;   /* warm off-white, reads as chalk not glare */
-    --dim:      #9aa0ae;
-    --faint:    #6b7180;
+    --chalk:    #edebe6;   /* warm off-white, reads as chalk not glare */
+    --dim:      #a2a8b6;
+    --faint:    #717889;
 
-    /* Signal only. Nothing decorative may use these. */
+    /* Two colour families, kept strictly apart:
+       beam  — structure and interaction. Never means a status.
+       signal— alert / warn / live. Never used as decoration. */
+    --beam:     #8b9bff;
+
     --alert:    #ff6f5e;   /* over limit, stopped */
     --warn:     #f2ae3c;   /* nearing limit */
-    --live:     #45d99a;   /* connected — used at 6px or smaller */
+    --live:     #45d99a;   /* connected */
 
     --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
     --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
@@ -47,17 +54,32 @@
 [hidden] { display: none !important; }
 
 body {
-    background: var(--ink);
+    background: var(--void);
     color: var(--chalk);
     font-family: var(--sans);
     font-size: 14px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    position: relative;
 }
+
+/* Faint plotting grid, faded out below the masthead. A console has a surface;
+   a flat fill reads as an empty div. Non-interactive and behind everything. */
+body::before {
+    content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+        linear-gradient(var(--rule) 1px, transparent 1px),
+        linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+    background-size: 52px 52px;
+    opacity: 0.3;
+    -webkit-mask-image: radial-gradient(ellipse 110% 55% at 50% 0%, #000 25%, transparent 78%);
+            mask-image: radial-gradient(ellipse 110% 55% at 50% 0%, #000 25%, transparent 78%);
+}
+body > * { position: relative; z-index: 1; }
 
 button, input, select, textarea { font: inherit; color: inherit; }
 button { background: none; border: none; cursor: pointer; }
-:focus-visible { outline: 2px solid var(--chalk); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--beam); outline-offset: 2px; }
 
 /* Every number on this page is monospaced so columns line up and a digit
    changing does not shift the row. */
@@ -109,8 +131,11 @@ button { background: none; border: none; cursor: pointer; }
 }
 .btn:hover { background: var(--board-2); border-color: var(--faint); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-go { width: 100%; background: var(--chalk); color: var(--ink); border-color: var(--chalk); padding: 11px; }
-.btn-go:hover { background: #fff; border-color: #fff; color: var(--ink); }
+.btn-go {
+    width: 100%; padding: 11px; background: var(--beam); color: #0b0d16;
+    border-color: var(--beam); font-weight: 600;
+}
+.btn-go:hover { background: #a2aeff; border-color: #a2aeff; color: #0b0d16; }
 .btn-quiet { border-color: var(--rule); color: var(--dim); font-weight: 500; }
 .btn-quiet:hover { color: var(--chalk); }
 .btn-alert { border-color: rgba(255, 111, 94, 0.4); color: var(--alert); }
@@ -136,8 +161,14 @@ button { background: none; border: none; cursor: pointer; }
     letter-spacing: 0.16em; text-transform: uppercase;
 }
 .bar-mark em { font-style: normal; color: var(--faint); }
-/* The one always-on colour: a 5px dot saying the console itself is live. */
-.mark-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--live); }
+/* Structural, not a status: the console's own mark, breathing so the page
+   never looks frozen. */
+.mark-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--beam);
+    box-shadow: 0 0 0 3px rgba(139, 155, 255, 0.16);
+    animation: breathe 3.6s ease-in-out infinite;
+}
+@keyframes breathe { 50% { box-shadow: 0 0 0 6px rgba(139, 155, 255, 0); } }
 
 .bar-nav { display: flex; gap: 2px; margin-left: 8px; }
 .tab {
@@ -145,50 +176,111 @@ button { background: none; border: none; cursor: pointer; }
     color: var(--faint); transition: color var(--ease), background var(--ease);
 }
 .tab:hover { color: var(--chalk); background: var(--board-2); }
-.tab.on { color: var(--ink); background: var(--chalk); font-weight: 600; }
+.tab.on { color: #0b0d16; background: var(--beam); font-weight: 600; }
 
 .bar-who { display: flex; align-items: center; gap: 14px; margin-left: auto; }
 .bar-who span { font-size: 12px; color: var(--faint); font-family: var(--mono); }
 
 /* ─── Alert strip ────────────────────────────────────────────────────────
-   Present only when something is wrong. A calm board is the healthy state, so
-   this appearing at all is the signal — the counts are the detail. */
+   Shown on every sign-in when anything is wrong, and dismissible — an operator
+   who has already seen it should not have to keep reading it all shift. */
 .alerts {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    padding: 11px 22px; border-bottom: 1px solid var(--rule);
-    background: rgba(255, 111, 94, 0.06);
-    animation: drop 180ms cubic-bezier(0.2, 0, 0.2, 1);
+    padding: 11px 22px; border-bottom: 1px solid rgba(255, 111, 94, 0.22);
+    background: linear-gradient(180deg, rgba(255, 111, 94, 0.13), rgba(255, 111, 94, 0.04));
+    animation: drop 200ms cubic-bezier(0.2, 0, 0.2, 1);
 }
-@keyframes drop { from { opacity: 0; transform: translateY(-5px); } }
+@keyframes drop { from { opacity: 0; transform: translateY(-6px); } }
 .alerts-lead {
+    display: flex; align-items: center; gap: 8px;
     font-family: var(--mono); font-size: 10px; font-weight: 600;
     letter-spacing: 0.14em; text-transform: uppercase; color: var(--alert);
 }
+.alerts-lead::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--alert); box-shadow: 0 0 0 3px rgba(255, 111, 94, 0.18);
+    animation: beat 2.4s ease-in-out infinite;
+}
+@keyframes beat { 50% { box-shadow: 0 0 0 6px rgba(255, 111, 94, 0); } }
+
 .alert-chip {
-    padding: 4px 11px; border-radius: 20px; font-size: 12px; font-weight: 500;
-    border: 1px solid var(--rule-2); color: var(--dim);
+    padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    border: 1px solid var(--rule-2); color: var(--dim); background: rgba(7, 8, 12, 0.4);
     transition: border-color var(--ease), color var(--ease);
 }
 .alert-chip:hover { color: var(--chalk); border-color: var(--faint); }
+.alert-chip.on { border-color: var(--alert); color: var(--chalk); }
 .alert-chip b { font-family: var(--mono); font-weight: 600; color: var(--chalk); }
+.alerts-x {
+    margin-left: auto; color: var(--faint); font-size: 13px; line-height: 1;
+    padding: 5px 8px; border-radius: var(--r);
+    transition: color var(--ease), background var(--ease);
+}
+.alerts-x:hover { color: var(--chalk); background: rgba(7, 8, 12, 0.5); }
+
+/* ─── Masthead ───────────────────────────────────────────────────────────
+   The page opens on the thing it is actually for: the whole fleet in one
+   glance. A title alone would be a label; this is the answer to the question
+   the operator arrives with. */
+.mast {
+    display: flex; align-items: flex-end; gap: 32px; flex-wrap: wrap;
+    padding: 26px 22px 22px;
+    border-bottom: 1px solid var(--rule);
+    background: linear-gradient(180deg, rgba(139, 155, 255, 0.05), transparent 70%);
+}
+.mast h1 {
+    font-size: 34px; font-weight: 600; letter-spacing: -0.035em; line-height: 1;
+}
+.mast-sub {
+    margin-top: 8px; font-family: var(--mono); font-size: 11.5px; color: var(--faint);
+    letter-spacing: 0.02em;
+}
+.mast-sub b { color: var(--dim); font-weight: 500; }
+
+/* One tick per business, flexing so five read as broad bars and a hundred read
+   as a dense band. Colour comes only from a tick that needs attention. */
+.fleet { flex: 1; min-width: 220px; }
+.fleet-strip { display: flex; gap: 3px; align-items: flex-end; }
+.tick {
+    flex: 1 1 5px; max-width: 40px; height: 38px; border-radius: 1px;
+    background: var(--rule-2); padding: 0;
+    transition: background var(--ease), transform var(--ease);
+}
+.tick:hover { transform: scaleY(1.14); background: var(--faint); }
+.tick.t-alert { background: var(--alert); }
+.tick.t-warn  { background: var(--warn); }
+.tick.t-off   { background: var(--faint); opacity: 0.45; }
+.fleet-label {
+    display: flex; justify-content: space-between; gap: 12px; margin-bottom: 9px;
+    font-family: var(--mono); font-size: 10px; font-weight: 500;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint);
+}
 
 /* ─── Stat row ───────────────────────────────────────────────────────────
    Numbers separated by hairlines rather than boxed into cards: five identical
-   rounded tiles is the templated answer and boxes each figure away from the
-   others, when the point is reading them together. */
+   rounded tiles is the templated answer, and it walls each figure off from the
+   others when the point is reading them together. */
 .stats {
     display: flex; flex-wrap: wrap;
     border-bottom: 1px solid var(--rule); background: var(--board);
 }
-.stat { padding: 16px 26px; border-right: 1px solid var(--rule); min-width: 132px; }
+.stat {
+    padding: 18px 28px; border-right: 1px solid var(--rule); min-width: 138px;
+    transition: background var(--ease);
+}
 .stat:last-child { border-right: none; }
-.stat-val { font-family: var(--mono); font-size: 26px; font-weight: 500; letter-spacing: -0.02em; }
-.stat-val small { font-size: 13px; color: var(--faint); margin-left: 3px; }
+.stat:hover { background: var(--board-2); }
 .stat-label {
-    margin-top: 5px; font-family: var(--mono); font-size: 10px; font-weight: 500;
+    font-family: var(--mono); font-size: 10px; font-weight: 500;
     letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint);
 }
-.stat-note { margin-top: 3px; font-size: 11.5px; color: var(--faint); }
+/* Scale carries the hierarchy: a big figure over a small label needs no box */
+.stat-val {
+    margin-top: 7px; font-family: var(--mono); font-size: 34px; font-weight: 400;
+    letter-spacing: -0.045em; line-height: 1;
+}
+.stat-val small { font-size: 13px; color: var(--faint); margin-left: 4px; letter-spacing: 0; }
+.stat-note { margin-top: 6px; font-size: 11.5px; color: var(--faint); }
 
 .wrap { padding: 22px; max-width: 1560px; margin: 0 auto; }
 
@@ -222,11 +314,18 @@ tbody tr.row:hover { background: var(--board-2); }
 /* The signature: a rail on each row carrying that business's worst signal.
    Transparent when nothing is wrong, so a healthy board shows a clean edge and
    a problem row is the only thing your eye lands on. */
-tbody td:first-child { border-left: 3px solid transparent; }
+tbody td:first-child { border-left: 3px solid transparent; transition: border-color var(--ease); }
+/* Hovering a healthy row lights its rail in the interface colour — feedback
+   without borrowing a signal colour. Scoped away from flagged rows so pointing
+   at an alert never hides the alert. */
+tbody tr.row:not(.sig-alert):not(.sig-warn):not(.sig-off):hover td:first-child {
+    border-left-color: var(--beam);
+}
 tr.sig-warn  td:first-child { border-left-color: var(--warn); }
 tr.sig-alert td:first-child { border-left-color: var(--alert); }
 tr.sig-off   td:first-child { border-left-color: var(--faint); }
 tr.sig-off .biz-name { color: var(--dim); }
+tr.sig-off { opacity: 0.62; }
 
 .biz-name { font-weight: 600; font-size: 14px; letter-spacing: -0.01em; }
 .biz-mail { font-family: var(--mono); font-size: 11.5px; color: var(--faint); margin-top: 2px; }
