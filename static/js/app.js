@@ -543,57 +543,12 @@ async function loadDashboardStats() {
             kpiCard('🙋', '#e11d48', 'Eskalatsiya', an.escalation_rate + '<small>%</small>',
                     'operatorga uzatildi', null, 'openInboxOperator()');
 
-        renderDaySummary(data, an);
         renderStatusBars(an);
         renderCostPanel(an, data);
         renderRecentOrders(data.recent_orders);
     } catch (e) {
         console.error('Stats yuklashda xatolik:', e);
     }
-}
-
-/** The dashboard's opening line, written the way a person would say it.
- *
- *  A shop owner is not an analyst — they arrive with one question ("did it sell,
- *  and does anything need me?") and a grid of six equal tiles does not answer
- *  it. The figures stay clickable so the sentence is a set of doors, not a
- *  caption, and the wording changes with what actually happened: a period with
- *  no sales says so plainly instead of showing a confident-looking zero.
- */
-function renderDaySummary(data, an) {
-    const line = document.getElementById('daysum-line');
-    const foot = document.getElementById('daysum-foot');
-    if (!line) return;
-
-    const period = {
-        today: 'Bugun', week: 'Shu hafta', month: 'Shu oy', all: 'Butun davr mobaynida',
-    }[data.period] || 'Shu oy';
-
-    const waiting = (an.by_status && an.by_status.operator) || 0;
-    const sales = data.ai_order_count || 0;
-    const btn = (label, action) => `<button type="button" onclick="${action}">${label}</button>`;
-
-    let text;
-    if (sales > 0) {
-        text = `${period} AI ${btn(`${fmtNum(sales)} ta savdo`, "switchToTab('tab-orders')")} yopdi`
-             + ` — ${btn(fmtNum(data.ai_revenue) + " so'm", "switchToTab('tab-orders')")}.`;
-    } else if (an.total_conversations > 0) {
-        text = `${period} AI ${btn(`${fmtNum(an.total_conversations)} ta suhbat`, "switchToTab('tab-inbox')")}`
-             + ` olib bordi, lekin <span class="quiet">hali savdo yopilmadi</span>.`;
-    } else {
-        text = `${period} <span class="quiet">hali suhbat bo'lmadi.</span> `
-             + `Telegram botni ulab, birinchi mijozni kutib oling.`;
-    }
-
-    if (waiting > 0) {
-        text += ` ${btn(`${fmtNum(waiting)} ta suhbat`, "openInboxOperator()")} sizni kutmoqda.`;
-    }
-    line.innerHTML = text;
-
-    const conv = an.conversion_rate || 0;
-    foot.textContent = an.total_conversations
-        ? `${fmtNum(an.total_conversations)} suhbatdan ${conv}% buyurtmaga aylandi`
-        : '';
 }
 
 /** Where conversations stand: how many the AI still owns vs handed over. */

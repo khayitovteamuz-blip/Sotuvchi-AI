@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import and_, case, func, select, text
+from sqlalchemy import false as sa_false
+from sqlalchemy import true as sa_true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import periods
@@ -597,87 +599,6 @@ async def mark_conversation_read(session: AsyncSession, tenant_id: str, conv_id:
 
 
 # ─── Analytics ────────────────────────────────────────────────────────────────
-async def _analytics_window(session: AsyncSession, tenant_id: str, start, end) -> dict:
-    """Raw counters for one time window. start/end None means "no bound"."""
-    conv_when = [Conversation.tenant_id == tenant_id]
-    msg_when = [Message.tenant_id == tenant_id]
-    ord_when = [Order.tenant_id == tenant_id]
-    if start is not None:
-        conv_when.append(Conversation.created_at >= start)
-        msg_when.append(Message.created_at >= start)
-        ord_when.append(Order.created_at >= start)
-    if end is not None:
-        conv_when.append(Conversation.created_at < end)
-        msg_when.append(Message.created_at < end)
-        ord_when.append(Order.created_at < end)
-
-    # conversation counts by status
-    cres = await session.execute(
-        select(Conversation.status, func.count()).where(*conv_when).group_by(Conversation.status)
-    )
-    by_status = {s: n for s, n in cres.all()}
-    total_conv = sum(by_status.values())
-
-    # Escalation = conversations that ever left the AI. Counting today's
-    # "operator" + "closed" statuses got this wrong twice over: a chat the AI
-    # handled and closed itself counted as an escalation, while one that was
-    # escalated and then closed was indistinguishable from it. handoff_reason is
-    # stamped once at handoff and never cleared, so it survives both.
-    eres = await session.execute(
-        select(func.count()).select_from(Conversation).where(
-            *conv_when, Conversation.handoff_reason.isnot(None)
-        )
-    )
-    escalated_conv = eres.scalar() or 0
-
-    # assistant response latency + token totals
-    lres = await session.execute(
-        select(
-            func.avg(Message.latency_ms),
-            func.sum(Message.tokens),
-            func.sum(Message.prompt_tokens),
-            func.sum(Message.output_tokens),
-        ).where(*msg_when, Message.sender == "assistant")
-    )
-    avg_latency, total_tokens, prompt_tokens, output_tokens = lres.first()
-
-    # message volume
-    mres = await session.execute(select(func.count()).select_from(Message).where(*msg_when))
-    total_messages = mres.scalar() or 0
-
-    # orders / revenue
-    ores = await session.execute(
-        select(func.count(), func.coalesce(func.sum(Order.total_amount), 0)).where(*ord_when)
-    )
-    order_count, revenue = ores.first()
-
-    # Conversion = share of conversations that produced an order. Counting ALL
-    # orders would exceed 100% (orders can exist without a conversation).
-    cores = await session.execute(
-        select(func.count(func.distinct(Order.conversation_id)))
-        .where(*ord_when, Order.conversation_id.isnot(None))
-    )
-    converted_conv = cores.scalar() or 0
-
-    return {
-        "total_conversations": total_conv,
-        "by_status": {
-            "ai": by_status.get("ai", 0),
-            "operator": by_status.get("operator", 0),
-            "closed": by_status.get("closed", 0),
-        },
-        "total_messages": total_messages,
-        "avg_latency_ms": int(avg_latency or 0),
-        "total_tokens": int(total_tokens or 0),
-        "prompt_tokens": int(prompt_tokens or 0),
-        "output_tokens": int(output_tokens or 0),
-        "escalation_rate": round(escalated_conv / total_conv * 100, 1) if total_conv else 0.0,
-        "conversion_rate": round(converted_conv / total_conv * 100, 1) if total_conv else 0.0,
-        "order_count": order_count or 0,
-        "revenue": float(revenue or 0),
-    }
-
-
 def _cost(prompt_tokens: int, output_tokens: int, total_tokens: int) -> dict:
     """Token counts turned into money.
 
@@ -705,34 +626,131 @@ def _cost(prompt_tokens: int, output_tokens: int, total_tokens: int) -> dict:
     }
 
 
+def _windows(col, start, prev_start, prev_end):
+    """Predicates for the current and previous period on one table's timestamp.
+
+    Returning `true()`/`false()` for the "all" period lets one query shape serve
+    every period instead of branching into separate statements.
+    """
+    if start is None:
+        return sa_true(), sa_false()
+    return col >= start, and_(col >= prev_start, col < prev_end)
+
+
 async def analytics(session: AsyncSession, tenant_id: str, period: str = periods.DEFAULT_PERIOD) -> dict:
+    """Conversation, message and order figures for a period, plus the one before.
+
+    Both windows are computed with FILTER clauses inside a single statement per
+    table. Fetching them separately meant ten sequential round trips to a
+    database ~150ms away, so switching period took seconds — the query work is
+    trivial, the latency was the whole cost.
+    """
     period = periods.normalize(period)
     start, prev_start, prev_end = periods.bounds(period)
 
-    out = await _analytics_window(session, tenant_id, start, None)
-    out["period"] = period
-    out["period_label"] = periods.PERIODS[period]
+    c_cur, c_prev = _windows(Conversation.created_at, start, prev_start, prev_end)
+    m_cur, m_prev = _windows(Message.created_at, start, prev_start, prev_end)
+    o_cur, o_prev = _windows(Order.created_at, start, prev_start, prev_end)
+    handed = Conversation.handoff_reason.isnot(None)
+    assistant = Message.sender == "assistant"
+
+    conv_rows = (
+        await session.execute(
+            select(
+                Conversation.status,
+                func.count().filter(c_cur),
+                func.count().filter(c_prev),
+                func.count().filter(and_(c_cur, handed)),
+                func.count().filter(and_(c_prev, handed)),
+            )
+            .where(Conversation.tenant_id == tenant_id)
+            .group_by(Conversation.status)
+        )
+    ).all()
+
+    by_status, total_conv, prev_conv, escalated, prev_escalated = {}, 0, 0, 0, 0
+    for status, cur_n, prev_n, cur_e, prev_e in conv_rows:
+        by_status[status] = cur_n
+        total_conv += cur_n
+        prev_conv += prev_n
+        escalated += cur_e
+        prev_escalated += prev_e
+
+    avg_latency, tokens, prompt_t, output_t, msgs, prev_msgs = (
+        await session.execute(
+            select(
+                func.avg(Message.latency_ms).filter(and_(m_cur, assistant)),
+                func.sum(Message.tokens).filter(and_(m_cur, assistant)),
+                func.sum(Message.prompt_tokens).filter(and_(m_cur, assistant)),
+                func.sum(Message.output_tokens).filter(and_(m_cur, assistant)),
+                func.count().filter(m_cur),
+                func.count().filter(m_prev),
+            ).where(Message.tenant_id == tenant_id)
+        )
+    ).first()
+
+    orders, revenue, converted, prev_orders, prev_revenue = (
+        await session.execute(
+            select(
+                func.count().filter(o_cur),
+                func.coalesce(func.sum(Order.total_amount).filter(o_cur), 0),
+                func.count(func.distinct(Order.conversation_id)).filter(
+                    and_(o_cur, Order.conversation_id.isnot(None))
+                ),
+                func.count().filter(o_prev),
+                func.coalesce(func.sum(Order.total_amount).filter(o_prev), 0),
+            ).where(Order.tenant_id == tenant_id)
+        )
+    ).first()
+
+    out = {
+        "period": period,
+        "period_label": periods.PERIODS[period],
+        "total_conversations": total_conv,
+        "by_status": {
+            "ai": by_status.get("ai", 0),
+            "operator": by_status.get("operator", 0),
+            "closed": by_status.get("closed", 0),
+        },
+        "total_messages": msgs or 0,
+        "avg_latency_ms": int(avg_latency or 0),
+        "total_tokens": int(tokens or 0),
+        "prompt_tokens": int(prompt_t or 0),
+        "output_tokens": int(output_t or 0),
+        # Escalation counts conversations that ever left the AI. Reading today's
+        # status instead would call a chat the AI closed itself an escalation,
+        # and lose the fact for one that was escalated and then closed.
+        "escalation_rate": round(escalated / total_conv * 100, 1) if total_conv else 0.0,
+        # Conversion divides by distinct conversations, not orders: two orders
+        # from one chat would otherwise push it past 100%.
+        "conversion_rate": round(converted / total_conv * 100, 1) if total_conv else 0.0,
+        "order_count": orders or 0,
+        "revenue": float(revenue or 0),
+    }
     out["cost"] = _cost(out["prompt_tokens"], out["output_tokens"], out["total_tokens"])
 
     # Unit economics: what the AI spends to close one sale. A tariff that costs
     # more than this per order is not a business.
-    orders = out["order_count"] or 0
     out["cost_per_order_uzs"] = (
-        round(out["cost"]["uzs"] / orders) if orders and out["cost"]["uzs"] else 0.0
+        round(out["cost"]["uzs"] / out["order_count"])
+        if out["order_count"] and out["cost"]["uzs"] else 0.0
     )
 
-    # "all" has nothing to sit next to, so it carries no comparison
+    # "all" has nothing to sit beside, so it carries no comparison
     if start is None:
         out["previous"] = None
         out["growth"] = {}
         return out
 
-    prev = await _analytics_window(session, tenant_id, prev_start, prev_end)
-    out["previous"] = prev
-    out["growth"] = {
-        k: periods.growth(out[k], prev[k])
-        for k in ("total_conversations", "total_messages", "order_count", "revenue")
+    prev = {
+        "total_conversations": prev_conv,
+        "total_messages": prev_msgs or 0,
+        "order_count": prev_orders or 0,
+        "revenue": float(prev_revenue or 0),
+        "escalation_rate": round(prev_escalated / prev_conv * 100, 1) if prev_conv else 0.0,
     }
+    out["previous"] = prev
+    out["growth"] = {k: periods.growth(out[k], prev[k]) for k in prev if k in out}
     return out
 
 
@@ -761,72 +779,75 @@ async def list_customers(session: AsyncSession, tenant_id: str) -> List[dict]:
 
 
 # ─── Dashboard stats ──────────────────────────────────────────────────────────
-async def _orders_window(session: AsyncSession, tenant_id: str, start, end) -> dict:
-    """Order totals for one time window, aggregated in Postgres.
-
-    Orders carrying a conversation_id were created by the AI during a chat. That
-    is the number showing what this product is actually worth — the shop's
-    overall revenue is their CRM's business, not ours.
-    """
-    when = [Order.tenant_id == tenant_id]
-    if start is not None:
-        when.append(Order.created_at >= start)
-    if end is not None:
-        when.append(Order.created_at < end)
-
-    live = Order.status != "Bekor qilindi"
-    from_ai = Order.conversation_id.isnot(None)
-
-    res = await session.execute(
-        select(
-            func.count(),
-            func.coalesce(func.sum(case((live, Order.total_amount), else_=0.0)), 0.0),
-            func.count(case((from_ai, 1))),
-            func.coalesce(
-                func.sum(case((and_(live, from_ai), Order.total_amount), else_=0.0)), 0.0
-            ),
-        ).where(*when)
-    )
-    total_orders, total_revenue, ai_order_count, ai_revenue = res.first()
-
-    conv_when = [Conversation.tenant_id == tenant_id]
-    if start is not None:
-        conv_when.append(Conversation.created_at >= start)
-    if end is not None:
-        conv_when.append(Conversation.created_at < end)
-    conv_res = await session.execute(
-        select(func.count()).select_from(Conversation).where(*conv_when)
-    )
-
-    return {
-        "total_revenue": float(total_revenue or 0),
-        "ai_revenue": float(ai_revenue or 0),
-        "ai_order_count": ai_order_count or 0,
-        "total_orders": total_orders or 0,
-        "active_leads": conv_res.scalar() or 0,
-    }
-
-
 async def dashboard_stats(
     session: AsyncSession, tenant_id: str, period: str = periods.DEFAULT_PERIOD
 ) -> dict:
+    """Order figures for a period, the one before it, and all time.
+
+    All three windows come from one statement per table via FILTER clauses.
+    Running them as separate queries meant seven round trips to a database
+    ~150ms away for numbers Postgres can produce in a single pass.
+
+    Orders carrying a conversation_id were created by the AI during a chat —
+    that is the figure showing what this product is worth. The shop's overall
+    revenue is their CRM's business, not ours.
+    """
     period = periods.normalize(period)
     start, prev_start, prev_end = periods.bounds(period)
+    o_cur, o_prev = _windows(Order.created_at, start, prev_start, prev_end)
+    c_cur, c_prev = _windows(Conversation.created_at, start, prev_start, prev_end)
 
-    out = await _orders_window(session, tenant_id, start, None)
+    live = Order.status != "Bekor qilindi"
+    from_ai = Order.conversation_id.isnot(None)
+    amount_live = case((live, Order.total_amount), else_=0.0)
+    amount_ai = case((and_(live, from_ai), Order.total_amount), else_=0.0)
+
+    def block(cond):
+        return [
+            func.count().filter(cond),
+            func.coalesce(func.sum(amount_live).filter(cond), 0.0),
+            func.count().filter(and_(cond, from_ai)),
+            func.coalesce(func.sum(amount_ai).filter(cond), 0.0),
+        ]
+
+    vals = (
+        await session.execute(
+            select(*block(o_cur), *block(o_prev), *block(sa_true()))
+            .where(Order.tenant_id == tenant_id)
+        )
+    ).first()
+
+    def unpack(i):
+        n, rev, ai_n, ai_rev = vals[i:i + 4]
+        return {
+            "total_orders": n or 0,
+            "total_revenue": float(rev or 0),
+            "ai_order_count": ai_n or 0,
+            "ai_revenue": float(ai_rev or 0),
+        }
+
+    cur, prev, all_time = unpack(0), unpack(4), unpack(8)
+
+    leads, prev_leads = (
+        await session.execute(
+            select(func.count().filter(c_cur), func.count().filter(c_prev))
+            .where(Conversation.tenant_id == tenant_id)
+        )
+    ).first()
+
+    out = dict(cur)
+    out["active_leads"] = leads or 0
     out["period"] = period
     out["period_label"] = periods.PERIODS[period]
-
     # Kept whatever the period: "how much have we ever sold" is useful context,
     # it just cannot be the headline the way it used to be.
-    all_time = await _orders_window(session, tenant_id, None, None)
     out["all_time_revenue"] = all_time["total_revenue"]
     out["all_time_orders"] = all_time["total_orders"]
 
     if start is None:
         out["growth"] = {}
     else:
-        prev = await _orders_window(session, tenant_id, prev_start, prev_end)
+        prev["active_leads"] = prev_leads or 0
         out["previous"] = prev
         out["growth"] = {
             k: periods.growth(out[k], prev[k])
