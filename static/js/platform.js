@@ -338,19 +338,25 @@ async function loadStats() {
         : '—';
 
     $('home-sub').textContent =
-        `${s.tenants} biznes · ${s.conversations} suhbat · ${fmt(s.orders)} buyurtma`;
+        `${s.tenants} biznes · ${s.conversations} suhbat · do'konlar savdosi ${short(s.shops_turnover)} UZS`;
 
+    // The hero is the platform's own income. The shops' order totals are their
+    // customers' money and were never ours to count.
     $('plat-cards').innerHTML = `
-        <div class="card hero">
+        <div class="card hero" data-goto-card="payments">
             <div class="card-top">
                 <span class="card-ico">◆</span>
                 <div>
-                    <div class="card-name">Umumiy tushum</div>
-                    <div class="card-sub">Barcha bizneslar bo'yicha</div>
+                    <div class="card-name">Platforma tushumi</div>
+                    <div class="card-sub">Bizneslar bizga to'lagan</div>
                 </div>
             </div>
-            <div class="card-val">${short(s.revenue)}<small>UZS</small></div>
-            <div class="card-foot"><span>${fmt(s.orders)} buyurtma</span><span>→</span></div>
+            <div class="card-val">${short(s.cash_in)}<small>UZS</small></div>
+            <div class="card-foot">
+                <span>${short(s.subscriptions_sold)} obunaga sarflandi${
+                    s.pending_topups > 0 ? ` · ${short(s.pending_topups)} tasdiq kutmoqda` : ''}</span>
+                <span>→</span>
+            </div>
         </div>
 
         <div class="card" data-goto-card="home">
@@ -362,7 +368,7 @@ async function loadStats() {
                 </div>
             </div>
             <div class="card-val">${fmt(s.tenants)}<span class="tag">${s.tenants_active} faol</span></div>
-            <div class="card-foot"><span>Ro'yxatni ko'rish</span><span>→</span></div>
+            <div class="card-foot"><span>Hisoblarda ${short(s.balance_held)} qoldiq</span><span>→</span></div>
         </div>
 
         <div class="card" data-goto-card="plans">
@@ -383,6 +389,7 @@ async function loadStats() {
         c2.style.cursor = 'pointer';
         c2.addEventListener('click', () => {
             const v = c2.dataset.gotoCard;
+            if (v === 'payments') return goto('payments');
             if (v === 'home') document.querySelector('#view-home .panel:last-child')
                 .scrollIntoView({ behavior: 'smooth', block: 'start' });
             else goto(v);

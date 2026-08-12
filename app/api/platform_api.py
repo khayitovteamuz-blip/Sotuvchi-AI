@@ -162,11 +162,43 @@ async def platform_stats(session: AsyncSession = Depends(get_session)):
         ).all()
     }
 
+    # The platform's own money. Orders belong to the shops' customers and are
+    # none of our income — treating that sum as revenue overstated it by orders
+    # of magnitude and told the operator nothing about their own business.
+    cash_in, subs_sold, held = (
+        await session.execute(
+            select(
+                func.coalesce(
+                    func.sum(Payment.amount).filter(
+                        (Payment.kind == "topup") & (Payment.status == "confirmed")
+                    ), 0,
+                ),
+                func.coalesce(
+                    func.sum(-Payment.amount).filter(Payment.kind == "subscription"), 0
+                ),
+                func.coalesce(
+                    func.sum(Payment.amount).filter(Payment.status == "pending"), 0
+                ),
+            )
+        )
+    ).first()
+
+    balances = (
+        await session.execute(select(func.coalesce(func.sum(Tenant.balance), 0)))
+    ).scalar()
+
     return {
         "tenants": tenants,
         "tenants_active": active,
         "orders": orders or 0,
-        "revenue": float(revenue or 0),
+        # Platform income: money businesses actually transferred to us
+        "cash_in": float(cash_in or 0),
+        "subscriptions_sold": float(subs_sold or 0),
+        # Balance sitting on accounts — received but not yet earned
+        "balance_held": float(balances or 0),
+        "pending_topups": float(held or 0),
+        # The shops' own trade. Kept as context, never as our revenue.
+        "shops_turnover": float(revenue or 0),
         "conversations": convs,
         "tokens": int(tokens or 0),
         "prompt_tokens": int(prompt_t or 0),
