@@ -1352,11 +1352,26 @@ textarea.form-control {
 .switch-row input { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; }
 
 /* ═══ AI Agent — simplified two-pane layout ═══ */
+/* Three panels in two columns. Left holds the two settings cards stacked; the
+   test chat takes the right column on its own.
+   Before this the panels filled the grid in order — persona, knowledge base,
+   then the chat wrapping onto row 2. Row 2 starts below the TALLEST card in
+   row 1, so the chat hung far under the persona card with a hole above it. */
 .agent-layout {
     display: grid;
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
     gap: 18px;
     align-items: start;
+}
+.agent-layout > .panel-card:nth-child(1),
+.agent-layout > .panel-card:nth-child(2) { grid-column: 1; }
+.agent-layout > .panel-card:nth-child(3) {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    /* Follows the page, so the settings being edited can be tried immediately
+       without scrolling back */
+    position: sticky;
+    top: 20px;
 }
 .agent-row { display: flex; gap: 14px; flex-wrap: wrap; }
 .agent-row .form-group { margin-bottom: 14px; min-width: 0; }
@@ -1378,7 +1393,16 @@ textarea.form-control {
     font-weight: 700; font-size: 14px; color: var(--text-main);
 }
 @media (max-width: 1000px) {
+    /* One column: the explicit placement above must be undone or the chat
+       would still be told to sit in a second column that no longer exists. */
     .agent-layout { grid-template-columns: 1fr; }
+    .agent-layout > .panel-card:nth-child(1),
+    .agent-layout > .panel-card:nth-child(2),
+    .agent-layout > .panel-card:nth-child(3) {
+        grid-column: 1;
+        grid-row: auto;
+        position: static;
+    }
 }
 
 .conv-sandbox {
