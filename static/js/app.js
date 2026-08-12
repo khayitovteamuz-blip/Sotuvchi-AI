@@ -515,8 +515,47 @@ function initPeriodPicker() {
     });
 }
 
+/** Placeholders in the real layout while the figures are on their way.
+ *
+ *  Switching period takes about a second against a database in Frankfurt, and
+ *  for that second the panels stood empty with only their titles — which reads
+ *  as a broken page rather than a loading one. Shapes also keep the grid from
+ *  jumping when the numbers arrive.
+ */
+function showDashboardSkeleton() {
+    const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+
+    set('dashboard-kpis', Array.from({ length: 6 }, () => `
+        <div class="skel-kpi">
+            <div class="skel-kpi-top">
+                <span class="skel skel-ico"></span>
+                <span class="skel skel-line skel-w60" style="flex:1"></span>
+            </div>
+            <span class="skel skel-val"></span>
+            <span class="skel skel-foot"></span>
+        </div>`).join(''));
+
+    set('dashboard-status-bars', Array.from({ length: 3 }, () => `
+        <div class="skel-row">
+            <span class="skel skel-line" style="width:78px"></span>
+            <span class="skel skel-line" style="flex:1"></span>
+            <span class="skel skel-line" style="width:26px"></span>
+        </div>`).join(''));
+
+    set('dashboard-cost', Array.from({ length: 4 }, (_, i) => `
+        <div class="skel-row" style="justify-content:space-between">
+            <span class="skel skel-line" style="width:${[120, 96, 132, 110][i]}px"></span>
+            <span class="skel skel-line" style="width:64px"></span>
+        </div>`).join(''));
+
+    set('recent-orders-tbody', Array.from({ length: 4 }, () => `
+        <tr>${Array.from({ length: 6 }, () =>
+            '<td><span class="skel skel-line skel-w75"></span></td>').join('')}</tr>`).join(''));
+}
+
 async function loadDashboardStats() {
     initPeriodPicker();
+    showDashboardSkeleton();
     try {
         const q = `?period=${encodeURIComponent(dashPeriod)}`;
         const [statsResp, anResp] = await Promise.all([
@@ -549,6 +588,17 @@ async function loadDashboardStats() {
         renderRecentOrders(data.recent_orders);
     } catch (e) {
         console.error('Stats yuklashda xatolik:', e);
+        // The skeleton must not outlive the request. Left shimmering after a
+        // failure it promises data that is never coming.
+        document.getElementById('dashboard-kpis').innerHTML = `
+            <div class="load-fail">
+                <p>Ma'lumotlarni yuklab bo'lmadi.</p>
+                <button class="btn-primary" onclick="loadDashboardStats()">Qayta urinish</button>
+            </div>`;
+        ['dashboard-status-bars', 'dashboard-cost', 'recent-orders-tbody'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = '';
+        });
     }
 }
 

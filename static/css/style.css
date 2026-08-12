@@ -1777,3 +1777,50 @@ textarea.form-control {
     caret-color: #ffffff;
     transition: background-color 9999s ease-in-out 0s;
 }
+
+/* ═══ Yuklanish skeleti ═══
+   An empty panel with only a title reads as broken. These placeholders hold the
+   real layout so nothing jumps when the data lands, and the sweep says "still
+   working" without a spinner stealing the page. */
+.skel {
+    background: linear-gradient(90deg, #eeece7 25%, #f7f5f1 37%, #eeece7 63%);
+    background-size: 400% 100%;
+    animation: skel-sweep 1.4s ease-in-out infinite;
+    border-radius: 6px;
+    display: block;
+}
+@keyframes skel-sweep {
+    0%   { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+}
+.skel-line { height: 12px; margin-bottom: 10px; }
+.skel-line:last-child { margin-bottom: 0; }
+.skel-w40 { width: 40%; }
+.skel-w60 { width: 60%; }
+.skel-w75 { width: 75%; }
+.skel-w90 { width: 90%; }
+
+/* KPI tile placeholder mirrors the real card so the grid does not reflow */
+.skel-kpi {
+    background: var(--card-bg); border: 1px solid var(--card-border);
+    border-radius: var(--radius-lg); padding: 18px 20px 16px;
+}
+.skel-kpi-top { display: flex; align-items: center; gap: 11px; margin-bottom: 16px; }
+.skel-ico { width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0; }
+.skel-val { height: 27px; width: 55%; margin-bottom: 16px; }
+.skel-foot { height: 11px; width: 45%; }
+
+.skel-row { display: flex; align-items: center; gap: 12px; padding: 9px 0; }
+.skel-row .skel-line { margin: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+    .skel { animation: none; background: #eeece7; }
+}
+
+/* Failure state for the dashboard: an offer to retry, not a shrug */
+.load-fail {
+    grid-column: 1 / -1;
+    background: var(--card-bg); border: 1px solid var(--card-border);
+    border-radius: var(--radius-lg); padding: 34px 24px; text-align: center;
+}
+.load-fail p { font-size: 14px; color: var(--text-muted); margin-bottom: 14px; }
