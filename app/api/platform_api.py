@@ -76,12 +76,17 @@ async def platform_login(
     # Same throttle table as the business panel, but a distinct key prefix so a
     # locked business login cannot lock the operator out of their own platform.
     throttle_key = f"platform|{client_ip(request)}|{data.email.strip().lower()}"
-    allowed, wait = await security.check_login_allowed(session, throttle_key)
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Juda ko'p urinish. {max(1, wait // 60)} daqiqadan keyin urinib ko'ring.",
-        )
+    # This one account opens every business on the platform, so it also gets
+    # the address-independent counter — rotating IPs must not buy more tries.
+    account_key = security.account_key(f"platform|{data.email}")
+
+    for key in (throttle_key, account_key):
+        allowed, wait = await security.check_login_allowed(session, key)
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Juda ko'p urinish. {max(1, wait // 60)} daqiqadan keyin urinib ko'ring.",
+            )
 
     admin = (
         await session.execute(
@@ -95,11 +100,15 @@ async def platform_login(
 
     if not ok:
         await security.record_login_failure(session, throttle_key)
+        await security.record_login_failure(
+            session, account_key, security.ACCOUNT_MAX_ATTEMPTS, security.ACCOUNT_LOCKOUT
+        )
         # One message for every failure mode: a distinct "no such admin" reply
         # would confirm which emails are platform accounts.
         raise HTTPException(status_code=401, detail="Email yoki parol noto'g'ri.")
 
     await security.record_login_success(session, throttle_key)
+    await security.record_login_success(session, account_key)
     if needs_rehash:
         admin.password_hash = security.hash_password(data.password)
     admin.last_login_at = func.now()

@@ -30,7 +30,8 @@ ENV PYTHONUNBUFFERED=1 \
     HOST=0.0.0.0 \
     DEBUG=False \
     WEB_CONCURRENCY=2 \
-    TELEGRAM_POLLING=false
+    TELEGRAM_POLLING=false \
+    FORWARDED_ALLOW_IPS=*
 
 # curl is here for the HEALTHCHECK below; nothing else needs it.
 RUN apt-get update \
@@ -63,10 +64,18 @@ ENTRYPOINT ["/app/docker-entrypoint.sh"]
 # Shell form so ${PORT} expands: hosts inject their own port. --proxy-headers
 # makes the app see the client's real IP through the platform's load balancer,
 # which the login throttle keys on.
+#
+# FORWARDED_ALLOW_IPS defaults to '*' because managed hosts (Railway, Render)
+# do not publish a fixed proxy address. That setting makes uvicorn take the
+# LEFTMOST X-Forwarded-For entry, which the client controls — so the per-IP
+# throttle can be sidestepped by forging the header. The account-level
+# counter in app/core/security.py is what actually stops brute force; set
+# this to the real proxy's address wherever you know it, and the per-IP
+# counter becomes trustworthy again.
 CMD uvicorn main:app \
     --host "$HOST" \
     --port "$PORT" \
     --workers "$WEB_CONCURRENCY" \
     --proxy-headers \
-    --forwarded-allow-ips '*' \
+    --forwarded-allow-ips "$FORWARDED_ALLOW_IPS" \
     --timeout-graceful-shutdown 20

@@ -65,6 +65,17 @@ MAX_ATTEMPTS = 8
 WINDOW = timedelta(minutes=15)
 LOCKOUT = timedelta(minutes=15)
 
+# A second counter keyed on the account alone, because the first one is keyed
+# on IP+email and an attacker who can vary the source address — or forge
+# X-Forwarded-For behind a proxy that trusts every hop — gets a fresh budget
+# with every change. This one they cannot escape.
+#
+# The threshold is deliberately far above the per-IP one: an account-level lock
+# is also a way to lock a competitor out of their own shop, so it must sit well
+# beyond anything a real person mistyping their password would reach.
+ACCOUNT_MAX_ATTEMPTS = 30
+ACCOUNT_LOCKOUT = timedelta(minutes=10)
+
 
 async def check_login_allowed(db: AsyncSession, key: str) -> Tuple[bool, int]:
     """Returns (allowed, seconds_to_wait). Key is IP + email."""
@@ -77,7 +88,10 @@ async def check_login_allowed(db: AsyncSession, key: str) -> Tuple[bool, int]:
     return True, 0
 
 
-async def record_login_failure(db: AsyncSession, key: str) -> None:
+async def record_login_failure(
+    db: AsyncSession, key: str, max_attempts: int = MAX_ATTEMPTS,
+    lockout: timedelta = LOCKOUT,
+) -> None:
     now = datetime.now(timezone.utc)
     cutoff = now - WINDOW
 
@@ -112,15 +126,20 @@ async def record_login_failure(db: AsyncSession, key: str) -> None:
     )
     fails = (await db.execute(stmt)).scalar_one()
 
-    if fails >= MAX_ATTEMPTS:
+    if fails >= max_attempts:
         await db.execute(
             update(LoginAttempt)
             .where(LoginAttempt.key == key)
-            .values(locked_until=now + LOCKOUT, fail_count=0)
+            .values(locked_until=now + lockout, fail_count=0)
         )
-        logger.warning(f"Login locked for {int(LOCKOUT.total_seconds()) // 60} min: {key}")
+        logger.warning(f"Login locked for {int(lockout.total_seconds()) // 60} min: {key}")
 
     await db.commit()
+
+
+def account_key(email: str) -> str:
+    """Throttle key that does not include the client's address."""
+    return f"account|{email.strip().lower()}"
 
 
 async def record_login_success(db: AsyncSession, key: str) -> None:

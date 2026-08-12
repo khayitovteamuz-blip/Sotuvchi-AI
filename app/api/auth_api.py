@@ -50,20 +50,29 @@ async def register(data: TenantRegister, request: Request, session: AsyncSession
 
 @router.post("/login")
 async def login(data: TenantLogin, request: Request, session: AsyncSession = Depends(get_session)):
-    # Throttle per IP+account: without this a script can try passwords forever
+    # Two counters. The first is per IP+account and trips quickly; the second
+    # ignores the address entirely, so an attacker rotating IPs (or forging
+    # X-Forwarded-For) still runs into a wall on the account itself.
     throttle_key = f"{client_ip(request)}|{data.email.strip().lower()}"
-    allowed, wait = await security.check_login_allowed(session, throttle_key)
-    if not allowed:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Juda ko'p urinish. {max(1, wait // 60)} daqiqadan keyin qayta urinib ko'ring.",
-        )
+    account_key = security.account_key(data.email)
+
+    for key in (throttle_key, account_key):
+        allowed, wait = await security.check_login_allowed(session, key)
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Juda ko'p urinish. {max(1, wait // 60)} daqiqadan keyin qayta urinib ko'ring.",
+            )
 
     user = await tenant_service.authenticate(session, data.email, data.password)
     if not user:
         await security.record_login_failure(session, throttle_key)
+        await security.record_login_failure(
+            session, account_key, security.ACCOUNT_MAX_ATTEMPTS, security.ACCOUNT_LOCKOUT
+        )
         raise HTTPException(status_code=401, detail="Email yoki parol noto'g'ri.")
     await security.record_login_success(session, throttle_key)
+    await security.record_login_success(session, account_key)
 
     tenant = await tenant_service.get_tenant(session, user.tenant_id)
     token = await create_session(session, user.id, request)

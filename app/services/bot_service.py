@@ -22,23 +22,60 @@ TELEGRAM_API = "https://api.telegram.org/bot{token}"
 MAX_MEDIA_BYTES = 15 * 1024 * 1024
 
 
+def _is_markup_error(data: dict) -> bool:
+    """Did Telegram reject the text because of its Markdown, not its content?"""
+    desc = str(data.get("description", "")).lower()
+    return "parse" in desc and "entit" in desc
+
+
 class TelegramBotService:
+    async def _post_message(
+        self, token: str, chat_id: str, text: str,
+        reply_markup: Optional[Dict[str, Any]], parse_mode: Optional[str], timeout: float,
+    ) -> Optional[dict]:
+        """Send one message, and if Markdown is what broke it, send it plain.
+
+        The reply text is written by a model and product names come from the
+        shop's own catalogue, so a stray '*' or '_' is ordinary. Telegram
+        answers 400 to an unbalanced entity, and the customer used to be left
+        with silence — a lost sale over a punctuation mark. Losing the bold is
+        the cheaper failure.
+        """
+        payload: Dict[str, Any] = {"chat_id": chat_id, "text": text}
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+
+        url = f"{TELEGRAM_API.format(token=token)}/sendMessage"
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(url, json=payload)
+                data = resp.json()
+                if data.get("ok"):
+                    return data["result"]
+
+                if parse_mode and _is_markup_error(data):
+                    logger.info("Telegram rejected the Markdown — resending as plain text")
+                    payload.pop("parse_mode")
+                    resp = await client.post(url, json=payload)
+                    data = resp.json()
+                    if data.get("ok"):
+                        return data["result"]
+
+                logger.warning(f"sendMessage failed: {str(data)[:180]}")
+                return None
+        except Exception as e:
+            logger.error(f"Telegram sendMessage error: {e}")
+            return None
+
     async def send_message(
         self, token: str, chat_id: str, text: str,
         reply_markup: Optional[Dict[str, Any]] = None, parse_mode: str = "Markdown",
     ) -> bool:
         if not token:
             return False
-        payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(f"{TELEGRAM_API.format(token=token)}/sendMessage", json=payload)
-                return resp.status_code == 200
-        except Exception as e:
-            logger.error(f"Telegram sendMessage error: {e}")
-            return False
+        return await self._post_message(token, chat_id, text, reply_markup, parse_mode, 10.0) is not None
 
     async def send_message_full(
         self, token: str, chat_id: str, text: str,
@@ -48,20 +85,7 @@ class TelegramBotService:
         edit the receipt once someone confirms."""
         if not token:
             return None
-        payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(f"{TELEGRAM_API.format(token=token)}/sendMessage", json=payload)
-                data = resp.json()
-                if not data.get("ok"):
-                    logger.warning(f"sendMessage failed: {str(data)[:180]}")
-                    return None
-                return data["result"]
-        except Exception as e:
-            logger.error(f"Telegram sendMessage error: {e}")
-            return None
+        return await self._post_message(token, chat_id, text, reply_markup, parse_mode, 15.0)
 
     async def edit_message(
         self, token: str, chat_id: str, message_id: str, text: str,
