@@ -206,7 +206,9 @@
                 <!-- Kept minimal on purpose: full AI configuration lands in the
                      big admin panel once there are 10+ customers. -->
                 <div class="agent-layout">
-                    <div class="panel-card">
+                    <!-- Chap ustun: persona va sinov oynasi ustma-ust -->
+                    <div class="agent-col">
+                        <div class="panel-card">
                         <div class="agent-row">
                             <div class="form-group" style="flex:1;"><label>AI ismi</label>
                                 <input type="text" id="ai-name" class="form-control" placeholder="Sotuvchi AI">
@@ -240,7 +242,16 @@
                         <button class="btn-primary" onclick="saveSettings()">Saqlash</button>
                     </div>
 
-                    <!-- Knowledge Base: what the AI is allowed to say about your rules -->
+                        <div class="panel-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column;">
+                        <div class="agent-test-head">🧪 Sinov — mijoz sifatida yozib ko'ring</div>
+                        <div id="test-messages" class="inbox-messages" style="flex:1; min-height:300px;"></div>
+                        <div class="inbox-composer">
+                            <textarea id="test-input" placeholder="Salom, noutbuk bormi?" rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendTestMessage();}"></textarea>
+                            <button class="btn-primary" onclick="sendTestMessage()">Yuborish</button>
+                        </div>
+                    </div>
+                    </div>
+
                     <div class="panel-card">
                         <h3 class="panel-card-title">📚 Bilimlar bazasi</h3>
                         <p class="field-hint" style="margin-bottom:16px;">
@@ -301,15 +312,6 @@
 
                         <button class="btn-primary" onclick="saveSettings()">Bilimlar bazasini saqlash</button>
                         <span class="agent-note" id="kb-status"></span>
-                    </div>
-
-                    <div class="panel-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column;">
-                        <div class="agent-test-head">🧪 Sinov — mijoz sifatida yozib ko'ring</div>
-                        <div id="test-messages" class="inbox-messages" style="flex:1; min-height:300px;"></div>
-                        <div class="inbox-composer">
-                            <textarea id="test-input" placeholder="Salom, noutbuk bormi?" rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendTestMessage();}"></textarea>
-                            <button class="btn-primary" onclick="sendTestMessage()">Yuborish</button>
-                        </div>
                     </div>
                 </div>
             </section>
