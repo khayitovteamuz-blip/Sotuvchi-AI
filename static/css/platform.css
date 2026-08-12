@@ -78,7 +78,6 @@ button { background: none; border: none; cursor: pointer; }
 }
 .login-brand b { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
 .login-card h1 { font-size: 23px; font-weight: 700; letter-spacing: -0.025em; }
-.login-sub { font-size: 13px; color: var(--fg-2); margin-top: 4px; margin-bottom: 24px; }
 
 .field { display: block; margin-bottom: 14px; }
 .field > span {
@@ -109,11 +108,6 @@ input:-webkit-autofill:active {
 }
 .field textarea { min-height: 150px; resize: vertical; line-height: 1.65; font-size: 13px; }
 .login-err { min-height: 20px; margin-top: 12px; font-size: 13px; color: var(--red); font-weight: 600; }
-.login-note { margin-top: 4px; font-size: 11.5px; color: var(--fg-3); line-height: 1.7; }
-.login-note code {
-    font-family: var(--mono); font-size: 11px; color: var(--fg-2);
-    background: var(--bg); padding: 2px 5px; border-radius: 4px;
-}
 
 /* ═══ BUTTONS ═══ */
 .btn {
