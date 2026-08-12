@@ -614,6 +614,7 @@ document.querySelectorAll('[data-grain]').forEach((b) => {
 function closeDrawer() {
     $('plat-drawer').hidden = true;
     $('plat-scrim').hidden = true;
+    document.body.classList.remove('locked');
 }
 $('drawer-close').addEventListener('click', closeDrawer);
 $('plat-scrim').addEventListener('click', closeDrawer);
@@ -622,6 +623,9 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawe
 async function openTenant(id) {
     $('plat-drawer').hidden = false;
     $('plat-scrim').hidden = false;
+    // The profile covers the viewport, but the board behind it kept its own
+    // scrollbars — so the page still slid sideways under a full-screen panel.
+    document.body.classList.add('locked');
     $('drawer-body').innerHTML = '<p class="empty">Yuklanmoqda</p>';
 
     const d = await api(`/api/platform/tenants/${id}`);

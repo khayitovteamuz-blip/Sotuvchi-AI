@@ -605,12 +605,23 @@ tr.sig-off { opacity: 0.55; }
     .paylog-when { grid-column: 1 / -1; }
 }
 
-/* Divider between the metric pills and the grain pills — two different choices
-   sitting in one row read as one long list without it. */
-.pill-sep {
-    width: 1px; height: 20px; background: var(--line-2);
-    margin: 0 3px; align-self: center;
+/* Two choices, two controls. Six identical pills in a row read as one list of
+   six options, so picking "Tushum" and picking "Oy" looked mutually exclusive.
+   Each group now sits in its own track — the grouping does the explaining. */
+.seg {
+    display: inline-flex; gap: 2px; padding: 3px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 22px;
 }
+.seg-btn {
+    padding: 6px 13px; border-radius: 20px; font-size: 12.5px; font-weight: 600;
+    color: var(--fg-3); white-space: nowrap;
+    transition: color var(--ease), background var(--ease);
+}
+.seg-btn:hover { color: var(--fg); }
+.seg-btn.on { background: var(--green); color: var(--on-green); font-weight: 700; }
+
+/* The board must not scroll while the full-screen profile is over it */
+body.locked { overflow: hidden; }
 
 /* Neutral state while the session check is in flight */
 .boot { min-height: 100vh; display: grid; place-items: center; }

@@ -130,13 +130,16 @@
                         <div class="panel-head">
                             <h2>Faollik</h2>
                             <div class="right">
-                                <button class="pill on" data-metric="orders">Buyurtma</button>
-                                <button class="pill" data-metric="conversations">Suhbat</button>
-                                <button class="pill" data-metric="income">Tushum</button>
-                                <span class="pill-sep"></span>
-                                <button class="pill" data-grain="day">Kun</button>
-                                <button class="pill on" data-grain="month">Oy</button>
-                                <button class="pill" data-grain="year">Yil</button>
+                                <div class="seg" role="group" aria-label="Ko'rsatkich">
+                                    <button class="seg-btn on" data-metric="orders">Buyurtma</button>
+                                    <button class="seg-btn" data-metric="conversations">Suhbat</button>
+                                    <button class="seg-btn" data-metric="income">Tushum</button>
+                                </div>
+                                <div class="seg" role="group" aria-label="Davr">
+                                    <button class="seg-btn" data-grain="day">Kun</button>
+                                    <button class="seg-btn on" data-grain="month">Oy</button>
+                                    <button class="seg-btn" data-grain="year">Yil</button>
+                                </div>
                             </div>
                         </div>
                         <div class="panel-body">
