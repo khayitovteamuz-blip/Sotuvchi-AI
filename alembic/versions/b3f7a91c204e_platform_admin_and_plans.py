@@ -88,9 +88,9 @@ def upgrade() -> None:
         INSERT INTO plans (name, title, price_uzs, max_products,
                            max_ai_messages_monthly, max_operators, is_active, sort_order)
         VALUES
-            ('start',    'Start',    0,       500,  2000,  1,    true, 1),
-            ('business', 'Business', 490000,  5000, 20000, 5,    true, 2),
-            ('pro',      'Pro',      1490000, NULL, NULL,  NULL, true, 3)
+            ('start',    'Start',    490000,  99,   1000,  3,    true, 1),
+            ('business', 'Business', 990000,  1000, 50000, 5,    true, 2),
+            ('pro',      'Pro',      1290000, NULL, NULL,  NULL, true, 3)
         ON CONFLICT (name) DO NOTHING
         """
     )

@@ -27,17 +27,18 @@ from app.db.models import Payment, Plan, Tenant
 
 logger = logging.getLogger("billing")
 
-# Free tiers do not expire: a plan that costs nothing has nothing to renew, and
-# cutting one off would only produce a support call with no payment behind it.
-FREE_PLAN_NAMES = {"start"}
+# Whether a tier is free is decided by its price, not by its name. Naming one
+# plan "free" in code meant that raising its price left it exempt from expiry —
+# a paid tariff that never had to be renewed.
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def is_free(plan_name: str) -> bool:
-    return plan_name in FREE_PLAN_NAMES
+def is_free(plan: Optional[Plan]) -> bool:
+    """A plan costing nothing has nothing to renew."""
+    return plan is not None and float(plan.price_uzs or 0) <= 0
 
 
 def days_left(tenant: Tenant) -> Optional[float]:
@@ -48,11 +49,16 @@ def days_left(tenant: Tenant) -> Optional[float]:
     return max(0.0, (tenant.subscription_expires_at - reference).total_seconds() / 86400)
 
 
-def status_of(tenant: Tenant) -> str:
-    """frozen | expired | active | free — what the panels label the account."""
+def status_of(tenant: Tenant, plan: Optional[Plan] = None) -> str:
+    """frozen | expired | active | free — what the panels label the account.
+
+    `plan` is optional because some callers already hold it; without it a
+    tariff is assumed to be paid, which is the safe default now that every
+    tier can carry a price.
+    """
     if tenant.frozen_at is not None:
         return "frozen"
-    if is_free(tenant.plan):
+    if is_free(plan):
         return "free"
     left = days_left(tenant)
     if left is None:
@@ -83,7 +89,9 @@ async def enforce_expiry(session: AsyncSession, tenant: Tenant) -> bool:
     """
     if tenant.frozen_at is not None or not tenant.is_active:
         return False
-    if is_free(tenant.plan) or tenant.subscription_expires_at is None:
+    if tenant.subscription_expires_at is None:
+        return False
+    if is_free(await session.get(Plan, tenant.plan)):
         return False
     if tenant.subscription_expires_at > _now():
         return False
@@ -103,7 +111,7 @@ async def summary(session: AsyncSession, tenant: Tenant) -> dict:
         "plan_title": plan.title if plan else tenant.plan,
         "plan_price": float(plan.price_uzs) if plan else 0.0,
         "duration_days": plan.duration_days if plan else 30,
-        "status": status_of(tenant),
+        "status": status_of(tenant, plan),
         "is_active": tenant.is_active,
         "expires_at": (
             tenant.subscription_expires_at.strftime("%Y-%m-%d")

@@ -346,7 +346,7 @@ async def list_tenants(session: AsyncSession = Depends(get_session)):
             "ai_limit": plan.max_ai_messages_monthly if plan else None,
             "product_limit": plan.max_products if plan else None,
             "balance": float(t.balance or 0),
-            "sub_status": billing_service.status_of(t),
+            "sub_status": billing_service.status_of(t, plans.get(t.plan)),
             "days_left": (lambda d: round(d, 1) if d is not None else None)(billing_service.days_left(t)),
             "telegram_connected": bool(t.telegram_bot_token),
             "telegram_username": t.telegram_bot_username,
