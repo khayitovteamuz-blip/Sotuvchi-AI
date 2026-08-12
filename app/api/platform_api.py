@@ -9,16 +9,18 @@ Login lives on a separate router because it must be reachable *before* there is
 a session.
 """
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import security
 from app.core.auth import client_ip
+from app.core.config import settings
 from app.core.platform_auth import (
     PLATFORM_COOKIE,
     create_platform_session,
@@ -163,6 +165,77 @@ async def platform_stats(session: AsyncSession = Depends(get_session)):
         "cost": repo._cost(int(prompt_t or 0), int(out_t or 0), int(tokens or 0)),
         "by_plan": by_plan,
     }
+
+
+@router.get("/series")
+async def platform_series(months: int = 7, session: AsyncSession = Depends(get_session)):
+    """Monthly totals across the whole service, oldest first.
+
+    Months with no activity still appear with zeros: a chart that silently drops
+    empty months compresses the gaps and makes a quiet period look like steady
+    trade.
+    """
+    months = max(2, min(months, 24))
+    tz = timezone(timedelta(hours=settings.TIMEZONE_OFFSET_HOURS))
+    now = datetime.now(tz)
+
+    buckets = []
+    y, m = now.year, now.month
+    for _ in range(months):
+        buckets.append((y, m))
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    buckets.reverse()
+    start = datetime(buckets[0][0], buckets[0][1], 1, tzinfo=tz)
+
+    # date_trunc on a timestamptz truncates in the session time zone, which is
+    # UTC here. Shifting the column by the offset first makes the truncation
+    # land on local month boundaries — otherwise the first five hours of every
+    # month are counted against the previous one.
+    shift = literal_column(f"interval '{int(settings.TIMEZONE_OFFSET_HOURS)} hours'")
+
+    def by_month(rows):
+        return {(r[0].year, r[0].month): r[1:] for r in rows}
+
+    order_month = func.date_trunc("month", Order.created_at + shift)
+    orders = by_month(
+        (
+            await session.execute(
+                select(
+                    order_month,
+                    func.count(),
+                    func.coalesce(func.sum(Order.total_amount), 0),
+                )
+                .where(Order.created_at >= start)
+                .group_by(order_month)
+            )
+        ).all()
+    )
+
+    conv_month = func.date_trunc("month", Conversation.created_at + shift)
+    convs = by_month(
+        (
+            await session.execute(
+                select(conv_month, func.count())
+                .where(Conversation.created_at >= start)
+                .group_by(conv_month)
+            )
+        ).all()
+    )
+
+    names = ["Yan", "Fev", "Mar", "Apr", "May", "Iyn", "Iyl", "Avg", "Sen", "Okt", "Noy", "Dek"]
+    return [
+        {
+            "label": names[m - 1],
+            "year": y,
+            "orders": (orders.get((y, m)) or (0, 0))[0],
+            "revenue": float((orders.get((y, m)) or (0, 0))[1]),
+            "conversations": (convs.get((y, m)) or (0,))[0],
+            "current": (y, m) == (now.year, now.month),
+        }
+        for y, m in buckets
+    ]
 
 
 @router.get("/tenants")

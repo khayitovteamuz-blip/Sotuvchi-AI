@@ -1,4 +1,4 @@
-{# Platform operator's console. Loads only platform.css — style.css is written
+{# Platform operator's panel. Loads only platform.css — style.css is written
    for the light business panel and its bare element rules leaked in twice. #}
 <!DOCTYPE html>
 <html lang="uz">
@@ -7,7 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
     <meta name="color-scheme" content="dark">
-    <title>Dispetcher — Sotuvchi AI</title>
+    <title>Platforma boshqaruvi — Sotuvchi AI</title>
     <link rel="stylesheet" href="/static/css/platform.css?v={{ asset_v }}">
 </head>
 <body>
@@ -15,9 +15,12 @@
 <!-- ═══ KIRISH ═══ -->
 <div id="plat-login" class="login">
     <form class="login-card" id="plat-login-form" autocomplete="on">
-        <div class="login-mark">Sotuvchi AI</div>
-        <h1>Dispetcher</h1>
-        <p class="login-sub">Platforma operatori paneli</p>
+        <div class="login-brand">
+            <span class="brand-mark">◆</span>
+            <b>Sotuvchi AI</b>
+        </div>
+        <h1>Platforma boshqaruvi</h1>
+        <p class="login-sub">Servis operatori paneli</p>
 
         <label class="field">
             <span>Email</span>
@@ -36,81 +39,161 @@
     </form>
 </div>
 
-<!-- ═══ KONSOL ═══ -->
-<div id="plat-app" hidden>
-    <header class="bar">
-        <div class="bar-mark"><span class="mark-dot"></span> Sotuvchi AI <em>/ dispetcher</em></div>
-        <nav class="bar-nav">
-            <button class="tab on" data-view="businesses">Bizneslar</button>
-            <button class="tab" data-view="plans">Tariflar</button>
-            <button class="tab" data-view="audit">Audit</button>
-        </nav>
-        <div class="bar-who">
-            <span id="plat-admin-email"></span>
-            <button class="btn btn-quiet" id="plat-logout">Chiqish</button>
+<!-- ═══ PANEL ═══ -->
+<div class="shell" id="plat-app" hidden>
+    <aside class="side">
+        <div class="side-brand">
+            <span class="brand-mark">◆</span>
+            <div>
+                <b>Sotuvchi AI</b>
+                <span>Platforma</span>
+            </div>
         </div>
-    </header>
 
-    <!-- Har kirishda ko'rinadi, ✕ bilan yopiladi -->
-    <div class="alerts" id="plat-alerts" hidden></div>
-
-    <!-- Butun flot bir qarashda: har bir biznes bitta ustun -->
-    <section class="mast">
         <div>
-            <h1>Dispetcher</h1>
-            <p class="mast-sub" id="mast-sub">yuklanmoqda</p>
+            <div class="side-label">Boshqaruv</div>
+            <nav class="side-nav">
+                <button class="nav on" data-view="home">
+                    <span class="nav-ico">▤</span> Umumiy holat
+                </button>
+                <button class="nav" data-view="plans">
+                    <span class="nav-ico">◈</span> Tariflar
+                </button>
+                <button class="nav" data-view="audit">
+                    <span class="nav-ico">◷</span> Audit
+                </button>
+            </nav>
         </div>
-        <div class="fleet">
-            <div class="fleet-label">
-                <span>Bizneslar</span>
-                <span id="fleet-note"></span>
+
+        <div class="side-foot">
+            <div class="who">
+                <span class="who-av" id="who-av">—</span>
+                <div class="who-txt">
+                    <b id="who-name">Admin</b>
+                    <span id="who-mail"></span>
+                </div>
             </div>
-            <div class="fleet-strip" id="plat-fleet"></div>
+            <button class="btn btn-ghost w-full" id="plat-logout">Chiqish</button>
         </div>
-    </section>
+    </aside>
 
-    <section class="stats" id="plat-stats"></section>
-
-    <div class="wrap">
-        <section id="view-businesses">
-            <div class="toolbar">
-                <input type="search" id="plat-search" placeholder="Biznes nomi yoki email">
-                <select id="plat-plan-filter"><option value="">Barcha tariflar</option></select>
+    <main class="main">
+        <header class="top">
+            <div class="crumb">Sotuvchi AI <i>/</i> <b id="crumb">Umumiy holat</b></div>
+            <div class="top-right">
+                <button class="icon-btn" id="alerts-btn" title="Ogohlantirishlar" aria-label="Ogohlantirishlar">
+                    !<span class="dot" id="alerts-count" hidden></span>
+                </button>
             </div>
-            <div class="board">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Biznes</th>
-                            <th>Tarif</th>
-                            <th>Holat</th>
-                            <th>Mahsulot</th>
-                            <th>AI / oy</th>
-                            <th>Buyurtma</th>
-                            <th>Telegram</th>
-                            <th>Oxirgi faollik</th>
-                        </tr>
-                    </thead>
-                    <tbody id="plat-rows"></tbody>
-                </table>
-            </div>
-        </section>
+        </header>
 
-        <section id="view-plans" hidden>
-            <div class="plans" id="plat-plans"></div>
-        </section>
+        <!-- Har kirishda ko'rinadi, ✕ bilan yopiladi -->
+        <div class="alerts" id="plat-alerts" hidden></div>
 
-        <section id="view-audit" hidden>
-            <div class="board">
-                <table>
-                    <thead>
-                        <tr><th>Vaqt</th><th>Admin</th><th>Amal</th><th>Biznes</th><th>Tafsilot</th></tr>
-                    </thead>
-                    <tbody id="plat-audit-rows"></tbody>
-                </table>
-            </div>
-        </section>
-    </div>
+        <div class="body">
+            <!-- ─── UMUMIY HOLAT ─── -->
+            <section id="view-home">
+                <div class="page-head">
+                    <div>
+                        <h1>Umumiy holat</h1>
+                        <p id="home-sub">Butun servis bo'yicha</p>
+                    </div>
+                </div>
+
+                <div class="cards" id="plat-cards"></div>
+
+                <div class="split">
+                    <div class="panel">
+                        <div class="panel-head">
+                            <h2>Tariflar</h2>
+                            <div class="right">
+                                <button class="pill" data-goto="plans">Sozlash</button>
+                            </div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="mini-grid" id="plat-mini-plans"></div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-head">
+                            <h2>Faollik</h2>
+                            <div class="right">
+                                <button class="pill on" data-metric="orders">Buyurtma</button>
+                                <button class="pill" data-metric="conversations">Suhbat</button>
+                            </div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="chart" id="plat-chart"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>Bizneslar</h2>
+                        <div class="right">
+                            <label class="search">
+                                <span aria-hidden="true">⌕</span>
+                                <input type="search" id="plat-search" placeholder="Nomi yoki email">
+                            </label>
+                            <select class="select" id="plat-plan-filter">
+                                <option value="">Barcha tariflar</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Biznes</th>
+                                    <th>Tarif</th>
+                                    <th>Holat</th>
+                                    <th>Mahsulot</th>
+                                    <th>AI / oy</th>
+                                    <th>Buyurtma</th>
+                                    <th>Telegram</th>
+                                    <th>Oxirgi faollik</th>
+                                </tr>
+                            </thead>
+                            <tbody id="plat-rows"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ─── TARIFLAR ─── -->
+            <section id="view-plans" hidden>
+                <div class="page-head">
+                    <div>
+                        <h1>Tariflar</h1>
+                        <p>Limitlar bazada saqlanadi — o'zgartirish uchun qayta joylash kerak emas</p>
+                    </div>
+                </div>
+                <div class="plans" id="plat-plans"></div>
+            </section>
+
+            <!-- ─── AUDIT ─── -->
+            <section id="view-audit" hidden>
+                <div class="page-head">
+                    <div>
+                        <h1>Audit</h1>
+                        <p>Kim, qachon, qaysi biznesga nima qildi</p>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr><th>Vaqt</th><th>Admin</th><th>Amal</th><th>Biznes</th><th>Tafsilot</th></tr>
+                            </thead>
+                            <tbody id="plat-audit-rows"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
 </div>
 
 <!-- ═══ BIZNES KARTASI ═══ -->

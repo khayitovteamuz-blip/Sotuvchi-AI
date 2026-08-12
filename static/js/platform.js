@@ -1,21 +1,34 @@
-/* Sotuvchi AI — Dispetcher console.
-   Talks only to /api/platform/*, and carries a session cookie the business
-   panel never sees. Kept apart from app.js so the two cannot share state. */
+/* Sotuvchi AI — platform operator's panel.
+   Talks only to /api/platform/*, behind a session cookie the business panel
+   never sees. Kept apart from app.js so the two cannot share state. */
 
 const $ = (id) => document.getElementById(id);
 let TENANTS = [];
 let PLANS = [];
-let signalFilter = null;   // set by an alert chip: show only flagged rows
+let SERIES = [];
+let chartMetric = 'orders';
+let signalFilter = null;
 
-/* The alert strip returns on every sign-in and can be dismissed for the rest of
-   the session. sessionStorage, not localStorage: dismissing it should mean "I
-   have read this now", not "never show me problems again". */
+/* The alert bar returns on every sign-in and can be dismissed for the rest of
+   the session. sessionStorage, not localStorage: dismissing means "read it",
+   not "never show me problems again". */
 const DISMISS_KEY = 'plat.alerts.dismissed';
 let alertsDismissed = sessionStorage.getItem(DISMISS_KEY) === '1';
 
 const fmt = (n) => (n === null || n === undefined ? '—' : Number(n).toLocaleString('uz-UZ'));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const cap = (v) => (v === null || v === undefined ? '∞' : fmt(v));
+const initials = (s) => (s || '?').trim().charAt(0).toUpperCase();
+
+/** Long sums are unreadable in a card: 51 600 000 becomes 51.6M. */
+function short(n) {
+    const v = Number(n) || 0;
+    if (v >= 1e9) return (v / 1e9).toFixed(1).replace(/\.0$/, '') + ' mlrd';
+    if (v >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, '') + ' mln';
+    if (v >= 1e3) return (v / 1e3).toFixed(0) + ' ming';
+    return fmt(v);
+}
 
 function toast(msg, kind = '') {
     const t = $('plat-toast');
@@ -26,8 +39,8 @@ function toast(msg, kind = '') {
     toast._t = setTimeout(() => { t.hidden = true; }, 3000);
 }
 
-/** Single gate for every call, so a session that lapsed mid-shift drops to the
- *  login screen instead of quietly rendering an empty board. */
+/** Single gate for every call, so a session that lapsed mid-shift returns to
+ *  the login screen instead of quietly rendering an empty panel. */
 async function api(url, options = {}) {
     const resp = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options });
     if (resp.status === 401) { showLogin(); throw new Error('unauthorized'); }
@@ -36,16 +49,18 @@ async function api(url, options = {}) {
     return data;
 }
 
-// ─── Kirish ──────────────────────────────────────────────────────────────────
+// ═══ KIRISH ═══
 function showLogin() {
     $('plat-login').hidden = false;
     $('plat-app').hidden = true;
 }
 
-function showConsole(admin) {
+function showPanel(admin) {
     $('plat-login').hidden = true;
     $('plat-app').hidden = false;
-    $('plat-admin-email').textContent = admin.email;
+    $('who-name').textContent = admin.full_name || 'Administrator';
+    $('who-mail').textContent = admin.email;
+    $('who-av').textContent = initials(admin.full_name || admin.email);
     loadAll();
 }
 
@@ -62,11 +77,11 @@ $('plat-login-form').addEventListener('submit', async (e) => {
             body: JSON.stringify({ email: $('plat-email').value, password: $('plat-password').value }),
         });
         $('plat-password').value = '';
-        // A fresh sign-in is a fresh shift: whatever was dismissed last time is
-        // shown again, because the operator has not seen today's board yet.
+        // A fresh sign-in is a fresh shift: whatever was dismissed last time
+        // comes back, because this board has not been read yet today.
         sessionStorage.removeItem(DISMISS_KEY);
         alertsDismissed = false;
-        showConsole(d.admin);
+        showPanel(d.admin);
     } catch (e2) {
         err.textContent = e2.message === 'unauthorized' ? 'Email yoki parol noto\'g\'ri.' : e2.message;
     } finally {
@@ -80,79 +95,124 @@ $('plat-logout').addEventListener('click', async () => {
     showLogin();
 });
 
-// ─── Bo'limlar ───────────────────────────────────────────────────────────────
-document.querySelectorAll('.tab').forEach((tab) => {
-    tab.addEventListener('click', () => {
-        document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t === tab));
-        ['businesses', 'plans', 'audit'].forEach((v) => {
-            $(`view-${v}`).hidden = v !== tab.dataset.view;
-        });
-        if (tab.dataset.view === 'plans') loadPlans();
-        if (tab.dataset.view === 'audit') loadAudit();
-    });
-});
+// ═══ NAVIGATSIYA ═══
+const VIEW_NAMES = { home: 'Umumiy holat', plans: 'Tariflar', audit: 'Audit' };
 
-// ─── Yuklash ─────────────────────────────────────────────────────────────────
+function goto(view) {
+    document.querySelectorAll('.nav').forEach((n) => n.classList.toggle('on', n.dataset.view === view));
+    Object.keys(VIEW_NAMES).forEach((v) => { $(`view-${v}`).hidden = v !== view; });
+    $('crumb').textContent = VIEW_NAMES[view];
+    if (view === 'plans') loadPlans();
+    if (view === 'audit') loadAudit();
+}
+
+document.querySelectorAll('.nav').forEach((n) =>
+    n.addEventListener('click', () => goto(n.dataset.view)));
+document.querySelectorAll('[data-goto]').forEach((b) =>
+    b.addEventListener('click', () => goto(b.dataset.goto)));
+
+// ═══ YUKLASH ═══
 async function loadAll() {
-    await Promise.all([loadStats(), loadTenants(), loadPlans()]);
+    await Promise.all([loadStats(), loadTenants(), loadPlans(), loadSeries()]);
 }
 
 async function loadStats() {
     const s = await api('/api/platform/stats');
     const c = s.cost || {};
     const spend = c.configured
-        ? (c.rate_configured ? `${fmt(c.uzs)}<small>UZS</small>` : `$${c.usd ?? 0}`)
+        ? (c.rate_configured ? `${short(c.uzs)}<small>UZS</small>` : `$${c.usd ?? 0}`)
         : '—';
-    $('plat-stats').innerHTML = [
-        [fmt(s.tenants), 'Biznes', `${s.tenants_active} faol`],
-        [fmt(s.orders), 'Buyurtma', `${fmt(s.revenue)} UZS`],
-        [fmt(s.conversations), 'Suhbat', ''],
-        [fmt(s.tokens), 'Token', `${fmt(s.prompt_tokens)} / ${fmt(s.output_tokens)}`],
-        [spend, 'AI xarajati', c.configured ? '' : 'narx sozlanmagan'],
-    ].map(([val, label, note]) => `
-        <div class="stat">
-            <div class="stat-val">${val}</div>
-            <div class="stat-label">${label}</div>
-            <div class="stat-note">${note}</div>
-        </div>`).join('');
+
+    $('home-sub').textContent =
+        `${s.tenants} biznes · ${s.conversations} suhbat · ${fmt(s.orders)} buyurtma`;
+
+    $('plat-cards').innerHTML = `
+        <div class="card hero">
+            <div class="card-top">
+                <span class="card-ico">◆</span>
+                <div>
+                    <div class="card-name">Umumiy tushum</div>
+                    <div class="card-sub">Barcha bizneslar bo'yicha</div>
+                </div>
+            </div>
+            <div class="card-val">${short(s.revenue)}<small>UZS</small></div>
+            <div class="card-foot"><span>${fmt(s.orders)} buyurtma</span><span>→</span></div>
+        </div>
+
+        <div class="card" data-goto-card="home">
+            <div class="card-top">
+                <span class="card-ico">▤</span>
+                <div>
+                    <div class="card-name">Bizneslar</div>
+                    <div class="card-sub">Servisdagi do'konlar</div>
+                </div>
+            </div>
+            <div class="card-val">${fmt(s.tenants)}<span class="tag">${s.tenants_active} faol</span></div>
+            <div class="card-foot"><span>Ro'yxatni ko'rish</span><span>→</span></div>
+        </div>
+
+        <div class="card" data-goto-card="plans">
+            <div class="card-top">
+                <span class="card-ico">◈</span>
+                <div>
+                    <div class="card-name">AI xarajati</div>
+                    <div class="card-sub">${fmt(s.tokens)} token</div>
+                </div>
+            </div>
+            <div class="card-val">${spend}</div>
+            <div class="card-foot">
+                <span>${c.configured ? 'Tariflarni ko\'rish' : '.env da narx sozlanmagan'}</span><span>→</span>
+            </div>
+        </div>`;
+
+    $('plat-cards').querySelectorAll('[data-goto-card]').forEach((c2) => {
+        c2.style.cursor = 'pointer';
+        c2.addEventListener('click', () => {
+            const v = c2.dataset.gotoCard;
+            if (v === 'home') document.querySelector('#view-home .panel:last-child')
+                .scrollIntoView({ behavior: 'smooth', block: 'start' });
+            else goto(v);
+        });
+    });
 }
 
 async function loadTenants() {
     TENANTS = await api('/api/platform/tenants');
     renderAlerts();
-    renderFleet();
     renderRows();
 }
 
-/** What a business's worst problem is, or null when it has none.
- *  This drives both the row rail and the alert strip, so the two can never
- *  disagree about who needs attention. */
+// ═══ SIGNALLAR ═══
+/** A business's worst problem, or null. Drives the alert bar, the row avatar
+ *  and the status pill, so the three can never disagree. */
 function signalOf(t) {
     if (!t.is_active) return 'off';
-    const over = (used, cap) => cap != null && used >= cap;
-    const near = (used, cap) => cap != null && used >= cap * 0.8;
+    const over = (u, c) => c != null && u >= c;
+    const near = (u, c) => c != null && u >= c * 0.8;
     if (over(t.products, t.product_limit) || over(t.ai_messages_month, t.ai_limit)) return 'alert';
     if (near(t.products, t.product_limit) || near(t.ai_messages_month, t.ai_limit)) return 'warn';
     return null;
 }
 
 function signalCounts() {
-    const counts = { alert: 0, warn: 0, off: 0 };
-    TENANTS.forEach((t) => { const s = signalOf(t); if (s) counts[s] += 1; });
-    return counts;
+    const c = { alert: 0, warn: 0, off: 0 };
+    TENANTS.forEach((t) => { const s = signalOf(t); if (s) c[s] += 1; });
+    return c;
 }
 
-/** Shown whenever something is wrong, unless dismissed this session. A calm
- *  board is the healthy state, so its absence carries meaning too. */
 function renderAlerts() {
     const box = $('plat-alerts');
     const counts = signalCounts();
-
     const chips = [
         ['alert', counts.alert, 'limitdan oshgan'],
         ['warn', counts.warn, 'limitga yaqin'],
         ['off', counts.off, 'to\'xtatilgan'],
     ].filter(([, n]) => n > 0);
+
+    const total = chips.reduce((a, [, n]) => a + n, 0);
+    const badge = $('alerts-count');
+    badge.textContent = total;
+    badge.hidden = total === 0;
 
     if (!chips.length || alertsDismissed) { box.hidden = true; return; }
 
@@ -161,17 +221,18 @@ function renderAlerts() {
         + chips.map(([kind, n, label]) =>
             `<button class="alert-chip ${signalFilter === kind ? 'on' : ''}" data-signal="${kind}">
                 <b>${n}</b> ${label}</button>`).join('')
-        + (signalFilter ? `<button class="alert-chip" data-signal="">Filtrni olib tashlash</button>` : '')
         + `<button class="alerts-x" id="alerts-x" aria-label="Yopish" title="Yopish">✕</button>`;
 
     box.querySelectorAll('[data-signal]').forEach((chip) => {
         chip.addEventListener('click', () => {
-            // Tapping the chip that is already active clears the filter, so the
-            // same control both applies and undoes it.
-            const next = chip.dataset.signal || null;
+            // Tapping the active chip clears the filter, so one control both
+            // applies and undoes it.
+            const next = chip.dataset.signal;
             signalFilter = next === signalFilter ? null : next;
             renderAlerts();
             renderRows();
+            document.querySelector('#view-home .panel:last-child')
+                .scrollIntoView({ behavior: 'smooth', block: 'start' });
         });
     });
 
@@ -184,45 +245,35 @@ function renderAlerts() {
     });
 }
 
-/** The whole fleet as one bar: one tick per business, coloured only when that
- *  business needs attention. Ticks flex, so five read as broad bars and a
- *  hundred read as a dense band. */
-function renderFleet() {
-    const strip = $('plat-fleet');
-    const counts = signalCounts();
-    const flagged = counts.alert + counts.warn + counts.off;
+/* The bell reopens the bar after it has been dismissed. */
+$('alerts-btn').addEventListener('click', () => {
+    alertsDismissed = false;
+    sessionStorage.removeItem(DISMISS_KEY);
+    goto('home');
+    renderAlerts();
+});
 
-    $('mast-sub').innerHTML = `<b>${TENANTS.length}</b> biznes · `
-        + (flagged ? `<b>${flagged}</b> tasiga e'tibor kerak` : 'hammasi joyida');
-    $('fleet-note').textContent = flagged ? `${flagged} / ${TENANTS.length}` : '';
-
-    strip.innerHTML = TENANTS.map((t) => {
-        const s = signalOf(t);
-        const state = { alert: 'limitdan oshgan', warn: 'limitga yaqin', off: 'to\'xtatilgan' }[s] || 'joyida';
-        return `<button class="tick ${s ? `t-${s}` : ''}" data-id="${esc(t.id)}"
-                    title="${esc(t.business_name)} — ${state}"
-                    aria-label="${esc(t.business_name)}, ${state}"></button>`;
-    }).join('');
-
-    strip.querySelectorAll('[data-id]').forEach((tick) => {
-        tick.addEventListener('click', () => openTenant(tick.dataset.id));
-    });
-}
-
-/** Usage against a cap. A null cap is unlimited, which is a different thing
- *  from "nothing used" and must not draw a full bar. */
-function meter(used, cap) {
-    if (cap === null || cap === undefined) {
+// ═══ JADVAL ═══
+/** Usage against a cap. A null cap is unlimited — a different thing from
+ *  "nothing used", and it must not draw a full bar. */
+function meter(used, capValue) {
+    if (capValue === null || capValue === undefined) {
         return `<div class="meter"><div class="meter-nums"><span>${fmt(used)}</span>
                 <span class="meter-inf">∞</span></div></div>`;
     }
-    const pct = Math.min(100, Math.round((used / cap) * 100));
+    const pct = Math.min(100, Math.round((used / capValue) * 100));
     const cls = pct >= 100 ? 'over' : pct >= 80 ? 'warn' : '';
     return `<div class="meter">
-        <div class="meter-nums"><span>${fmt(used)}</span><span class="cap">${fmt(cap)}</span></div>
+        <div class="meter-nums"><span>${fmt(used)}</span><span class="cap">${fmt(capValue)}</span></div>
         <div class="meter-track"><div class="meter-fill ${cls}" style="width:${pct}%"></div></div>
     </div>`;
 }
+
+const STATE = {
+    alert: ['bad', 'Limitdan oshgan'],
+    warn: ['warn', 'Limitga yaqin'],
+    off: ['idle', 'To\'xtatilgan'],
+};
 
 function renderRows() {
     const q = ($('plat-search').value || '').toLowerCase().trim();
@@ -244,33 +295,82 @@ function renderRows() {
 
     body.innerHTML = rows.map((t) => {
         const sig = signalOf(t);
+        const [cls, label] = STATE[sig] || ['ok', 'Faol'];
         return `
         <tr class="row ${sig ? `sig-${sig}` : ''}" data-id="${esc(t.id)}">
             <td>
-                <div class="biz-name">${esc(t.business_name)}</div>
-                <div class="biz-mail">${esc(t.owner_email || '—')}</div>
+                <div class="biz">
+                    <span class="biz-av">${esc(initials(t.business_name))}</span>
+                    <div>
+                        <div class="biz-name">${esc(t.business_name)}</div>
+                        <div class="biz-mail">${esc(t.owner_email || '—')}</div>
+                    </div>
+                </div>
             </td>
             <td><span class="plan-tag">${esc(t.plan_title)}</span></td>
-            <td><span class="state ${t.is_active ? 'on' : 'off'}">${t.is_active ? 'faol' : 'to\'xtatilgan'}</span></td>
+            <td><span class="state ${cls}">${label}</span></td>
             <td>${meter(t.products, t.product_limit)}</td>
             <td>${meter(t.ai_messages_month, t.ai_limit)}</td>
             <td class="num">${fmt(t.orders)}</td>
             <td>${t.telegram_connected
-                ? `<span class="tg"><span class="tg-dot"></span>@${esc(t.telegram_username || '')}</span>`
-                : '<span class="tg-none">ulanmagan</span>'}</td>
+                ? `<span class="state ok">@${esc(t.telegram_username || 'ulangan')}</span>`
+                : '<span class="cell-dim">ulanmagan</span>'}</td>
             <td class="cell-dim">${esc(t.last_activity || '—')}</td>
         </tr>`;
     }).join('');
 
-    body.querySelectorAll('tr[data-id]').forEach((tr) => {
-        tr.addEventListener('click', () => openTenant(tr.dataset.id));
-    });
+    body.querySelectorAll('tr[data-id]').forEach((tr) =>
+        tr.addEventListener('click', () => openTenant(tr.dataset.id)));
 }
 
 $('plat-search').addEventListener('input', renderRows);
 $('plat-plan-filter').addEventListener('change', renderRows);
 
-// ─── Biznes kartasi ──────────────────────────────────────────────────────────
+// ═══ DIAGRAMMA ═══
+async function loadSeries() {
+    SERIES = await api('/api/platform/series?months=7');
+    renderChart();
+}
+
+function renderChart() {
+    const box = $('plat-chart');
+    const vals = SERIES.map((p) => p[chartMetric] || 0);
+    const peak = Math.max(...vals, 1);
+
+    // Four gridline labels, rounded so the axis reads in whole steps
+    const step = Math.ceil(peak / 3);
+    const ticks = [step * 3, step * 2, step, 0];
+
+    box.innerHTML = `
+        <div class="chart-y">${ticks.map((t) => `<span>${short(t)}</span>`).join('')}</div>
+        <div class="chart-plot">
+            ${SERIES.map((p) => {
+                const v = p[chartMetric] || 0;
+                const h = Math.max(2, Math.round((v / (step * 3 || 1)) * 100));
+                return `
+                <div class="bar-slot ${p.current ? 'now' : ''}">
+                    <div class="tip">
+                        <div class="tip-h">${esc(p.label)} ${p.year}</div>
+                        <div class="tip-row"><span>Buyurtma</span><b>${fmt(p.orders)}</b></div>
+                        <div class="tip-row"><span>Suhbat</span><b>${fmt(p.conversations)}</b></div>
+                        <div class="tip-row up"><span>Tushum</span><b>${short(p.revenue)}</b></div>
+                    </div>
+                    <div class="bar" style="height:${Math.min(h, 100)}%"></div>
+                    <div class="bar-x">${esc(p.label)}</div>
+                </div>`;
+            }).join('')}
+        </div>`;
+}
+
+document.querySelectorAll('[data-metric]').forEach((b) => {
+    b.addEventListener('click', () => {
+        chartMetric = b.dataset.metric;
+        document.querySelectorAll('[data-metric]').forEach((x) => x.classList.toggle('on', x === b));
+        renderChart();
+    });
+});
+
+// ═══ BIZNES KARTASI ═══
 function closeDrawer() {
     $('plat-drawer').hidden = true;
     $('plat-scrim').hidden = true;
@@ -278,8 +378,6 @@ function closeDrawer() {
 $('drawer-close').addEventListener('click', closeDrawer);
 $('plat-scrim').addEventListener('click', closeDrawer);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
-
-const cap = (v) => (v === null || v === undefined ? '∞' : fmt(v));
 
 async function openTenant(id) {
     $('plat-drawer').hidden = false;
@@ -296,30 +394,31 @@ async function openTenant(id) {
 
     $('drawer-body').innerHTML = `
         <div class="block">
-            <span class="eyebrow">Tarif va sarf</span>
+            <div class="block-t">Tarif va sarf</div>
             <label class="field"><span>Tarif</span><select id="dr-plan">${opts}</select></label>
             <div class="kv"><span>Mahsulot</span><b>${fmt(u.products.used)} / ${cap(u.products.limit)}</b></div>
             <div class="kv"><span>AI xabar, shu oy</span><b>${fmt(u.ai_messages.used)} / ${cap(u.ai_messages.limit)}</b></div>
             <div class="kv"><span>Operator</span><b>${fmt(u.operators.used)} / ${cap(u.operators.limit)}</b></div>
             <div class="acts">
-                <button class="btn" id="dr-save-plan">Tarifni saqlash</button>
-                <button class="btn ${d.is_active ? 'btn-alert' : ''}" id="dr-toggle-active">
+                <button class="btn btn-green" id="dr-save-plan">Tarifni saqlash</button>
+                <button class="btn ${d.is_active ? 'btn-red' : ''}" id="dr-toggle-active">
                     ${d.is_active ? 'Biznesni to\'xtatish' : 'Biznesni faollashtirish'}
                 </button>
             </div>
         </div>
 
         <div class="block">
-            <span class="eyebrow">Telegram</span>
+            <div class="block-t">Telegram</div>
             <div class="kv"><span>Bot</span><b>${d.telegram.connected ? '@' + esc(d.telegram.username || '') : 'ulanmagan'}</b></div>
             <div class="kv"><span>Webhook siri</span><b>${d.telegram.webhook_secret_set ? 'bor' : 'yo\'q'}</b></div>
             <div class="kv"><span>Buyurtmalar guruhi</span><b>${esc(d.telegram.orders_group || '—')}</b></div>
-            ${d.telegram.connected ? `<div class="acts">
-                <button class="btn btn-alert" id="dr-tg">Bot ulanishini tozalash</button></div>` : ''}
+            ${d.telegram.connected
+                ? `<div class="acts"><button class="btn btn-red" id="dr-tg">Bot ulanishini tozalash</button></div>`
+                : ''}
         </div>
 
         <div class="block">
-            <span class="eyebrow">AI sozlamalari</span>
+            <div class="block-t">AI sozlamalari</div>
             <label class="field"><span>Model</span>
                 <input type="text" id="dr-model" value="${esc(d.ai.model_name)}"></label>
             <label class="field"><span>Temperature</span>
@@ -329,13 +428,13 @@ async function openTenant(id) {
             <label class="field"><span>Tizim prompti</span>
                 <textarea id="dr-prompt">${esc(d.ai.system_prompt)}</textarea></label>
             <div class="acts">
-                <button class="btn" id="dr-save-ai">AI sozlamalarini saqlash</button>
-                <button class="btn btn-quiet" id="dr-bot">${d.ai.bot_enabled ? 'Botni o\'chirish' : 'Botni yoqish'}</button>
+                <button class="btn btn-green" id="dr-save-ai">AI sozlamalarini saqlash</button>
+                <button class="btn btn-ghost" id="dr-bot">${d.ai.bot_enabled ? 'Botni o\'chirish' : 'Botni yoqish'}</button>
             </div>
         </div>
 
         <div class="block">
-            <span class="eyebrow">Foydalanuvchilar</span>
+            <div class="block-t">Foydalanuvchilar</div>
             ${d.users.map((x) => `<div class="kv"><span>${esc(x.email)}</span><b>${esc(x.role)}</b></div>`).join('')
               || '<p class="empty">Yo\'q</p>'}
         </div>`;
@@ -376,7 +475,7 @@ async function patchTenant(id, body, okMsg) {
     try {
         const r = await api(`/api/platform/tenants/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
         toast(r.status === 'unchanged' ? 'O\'zgarish yo\'q' : okMsg);
-        await loadTenants();
+        await Promise.all([loadTenants(), loadStats()]);
         openTenant(id);
     } catch (e) { toast(e.message, 'err'); }
 }
@@ -389,18 +488,30 @@ async function patchAi(id, body) {
     } catch (e) { toast(e.message, 'err'); }
 }
 
-// ─── Tariflar ────────────────────────────────────────────────────────────────
+// ═══ TARIFLAR ═══
 async function loadPlans() {
     PLANS = await api('/api/platform/plans');
 
     const filter = $('plat-plan-filter');
     if (filter.options.length <= 1) PLANS.forEach((p) => filter.add(new Option(p.title, p.name)));
 
+    $('plat-mini-plans').innerHTML = PLANS.map((p) => `
+        <div class="mini">
+            <div class="mini-top">
+                <span class="mini-dot"></span>
+                <span class="mini-name">${esc(p.title)}</span>
+            </div>
+            <div class="mini-val">${short(p.price_uzs)}<small> UZS</small></div>
+            <div class="mini-meta">${p.max_products === null ? 'Cheksiz' : fmt(p.max_products)} mahsulot ·
+                ${p.max_ai_messages_monthly === null ? '∞' : fmt(p.max_ai_messages_monthly)} AI/oy</div>
+            <div class="mini-state ${p.tenants ? '' : 'idle'}">${p.tenants} ta biznes</div>
+        </div>`).join('');
+
     $('plat-plans').innerHTML = PLANS.map((p) => `
-        <div class="plan" data-plan="${esc(p.name)}">
+        <div class="plan-card" data-plan="${esc(p.name)}">
             <h3>${esc(p.title)}</h3>
             <div class="plan-price">${fmt(p.price_uzs)} UZS / oy</div>
-            <div class="plan-users">${p.tenants} biznes</div>
+            <div class="plan-users">${p.tenants} ta biznes shu tarifda</div>
             <div class="plan-line"><span>Narx, UZS</span>
                 <input type="number" data-f="price_uzs" value="${p.price_uzs}"></div>
             <div class="plan-line"><span>Mahsulot</span>
@@ -409,7 +520,7 @@ async function loadPlans() {
                 <input type="number" data-f="max_ai_messages_monthly" value="${p.max_ai_messages_monthly ?? ''}" placeholder="∞"></div>
             <div class="plan-line"><span>Operator</span>
                 <input type="number" data-f="max_operators" value="${p.max_operators ?? ''}" placeholder="∞"></div>
-            <div class="acts"><button class="btn" data-save="${esc(p.name)}">Saqlash</button></div>
+            <div class="acts"><button class="btn btn-green" data-save="${esc(p.name)}">Saqlash</button></div>
             <p class="plan-note">Bo'sh maydon — cheksiz.</p>
         </div>`).join('');
 
@@ -438,7 +549,7 @@ async function savePlan(name) {
     } catch (e) { toast(e.message, 'err'); }
 }
 
-// ─── Audit ───────────────────────────────────────────────────────────────────
+// ═══ AUDIT ═══
 async function loadAudit() {
     const rows = await api('/api/platform/audit?limit=200');
     const body = $('plat-audit-rows');
@@ -451,14 +562,14 @@ async function loadAudit() {
         <tr>
             <td class="cell-dim num" style="white-space:nowrap">${esc(r.created_at)}</td>
             <td>${esc(r.admin_email)}</td>
-            <td><span class="act-name">${esc(r.action)}</span></td>
+            <td><span class="state idle">${esc(r.action)}</span></td>
             <td>${esc(names[r.tenant_id] || r.tenant_id || '—')}</td>
-            <td class="act-detail">${esc(r.details ? JSON.stringify(r.details) : '')}</td>
+            <td class="cell-dim">${esc(r.details ? JSON.stringify(r.details) : '')}</td>
         </tr>`).join('');
 }
 
-// ─── Boshlash ────────────────────────────────────────────────────────────────
+// ═══ BOSHLASH ═══
 (async () => {
-    try { showConsole(await api('/api/platform/auth/me')); }
+    try { showPanel(await api('/api/platform/auth/me')); }
     catch { showLogin(); }
 })();
