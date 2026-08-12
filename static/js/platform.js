@@ -52,11 +52,13 @@ async function api(url, options = {}) {
 
 // ═══ KIRISH ═══
 function showLogin() {
+    $('plat-boot').hidden = true;
     $('plat-login').hidden = false;
     $('plat-app').hidden = true;
 }
 
 function showPanel(admin) {
+    $('plat-boot').hidden = true;
     $('plat-login').hidden = true;
     $('plat-app').hidden = false;
     $('who-name').textContent = admin.full_name || 'Administrator';
@@ -1002,6 +1004,11 @@ async function loadAudit() {
 }
 
 // ═══ BOSHLASH ═══
+/* The sign-in form used to paint immediately, then vanish a moment later when
+   /me confirmed an existing session. With the browser autofilling both fields
+   that looked exactly like being let in without entering a password. Nothing
+   was ever bypassed — the server returns 401 without a valid cookie — but the
+   form must not appear until we know it is needed. */
 (async () => {
     try { showPanel(await api('/api/platform/auth/me')); }
     catch { showLogin(); }

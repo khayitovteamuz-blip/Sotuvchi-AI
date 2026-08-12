@@ -471,15 +471,18 @@ tr.sig-off { opacity: 0.55; }
 /* Two columns on a wide screen so contact, billing and settings sit side by
    side instead of stacking into a long scroll. */
 .drawer-body {
-    padding: 26px 32px 60px; overflow-y: auto; flex: 1;
-    columns: 2; column-gap: 28px; max-width: 1500px; margin: 0 auto; width: 100%;
+    padding: 26px 32px 60px; overflow-y: auto; overflow-x: hidden; flex: 1;
+    max-width: 1500px; margin: 0 auto; width: 100%;
+    /* Grid, not `columns`: multi-column overflows sideways when the content is
+       taller than the box, which turned the profile into a horizontally
+       scrolling page. Grid keeps the overflow vertical. */
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 28px; align-content: start; align-items: start;
 }
-@media (max-width: 1080px) { .drawer-body { columns: 1; } }
+@media (max-width: 1080px) { .drawer-body { grid-template-columns: minmax(0, 1fr); } }
 
 .block {
-    margin-bottom: 28px;
-    /* A section must not be split across the column break */
-    break-inside: avoid; page-break-inside: avoid;
+    margin-bottom: 28px; min-width: 0;
     background: var(--panel); border: 1px solid var(--line);
     border-radius: var(--r-lg); padding: 20px 22px;
 }
@@ -608,3 +611,11 @@ tr.sig-off { opacity: 0.55; }
     width: 1px; height: 20px; background: var(--line-2);
     margin: 0 3px; align-self: center;
 }
+
+/* Neutral state while the session check is in flight */
+.boot { min-height: 100vh; display: grid; place-items: center; }
+.boot-dot {
+    width: 10px; height: 10px; border-radius: 50%; background: var(--green);
+    animation: boot-pulse 1s ease-in-out infinite;
+}
+@keyframes boot-pulse { 50% { opacity: 0.25; transform: scale(0.8); } }
