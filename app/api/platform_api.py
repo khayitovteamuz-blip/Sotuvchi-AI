@@ -208,74 +208,113 @@ async def platform_stats(session: AsyncSession = Depends(get_session)):
     }
 
 
-@router.get("/series")
-async def platform_series(months: int = 7, session: AsyncSession = Depends(get_session)):
-    """Monthly totals across the whole service, oldest first.
+# Bucket sizes: enough points to see a shape, few enough to stay readable.
+GRAIN = {"day": 30, "month": 12, "year": 5}
+_MONTHS = ["Yan", "Fev", "Mar", "Apr", "May", "Iyn",
+           "Iyl", "Avg", "Sen", "Okt", "Noy", "Dek"]
 
-    Months with no activity still appear with zeros: a chart that silently drops
-    empty months compresses the gaps and makes a quiet period look like steady
-    trade.
-    """
-    months = max(2, min(months, 24))
-    tz = timezone(timedelta(hours=settings.TIMEZONE_OFFSET_HOURS))
+
+def _bucket_starts(grain: str, count: int, tz: timezone) -> list:
+    """Period starts, oldest first, in the business's own time zone."""
     now = datetime.now(tz)
-
-    buckets = []
-    y, m = now.year, now.month
-    for _ in range(months):
-        buckets.append((y, m))
+    if grain == "day":
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return [today - timedelta(days=i) for i in range(count - 1, -1, -1)]
+    if grain == "year":
+        return [
+            datetime(now.year - i, 1, 1, tzinfo=tz) for i in range(count - 1, -1, -1)
+        ]
+    out, y, m = [], now.year, now.month
+    for _ in range(count):
+        out.append(datetime(y, m, 1, tzinfo=tz))
         m -= 1
         if m == 0:
             y, m = y - 1, 12
-    buckets.reverse()
-    start = datetime(buckets[0][0], buckets[0][1], 1, tzinfo=tz)
+    return list(reversed(out))
+
+
+def _label(grain: str, d: datetime) -> str:
+    if grain == "day":
+        return f"{d.day} {_MONTHS[d.month - 1]}"
+    if grain == "year":
+        return str(d.year)
+    return _MONTHS[d.month - 1]
+
+
+@router.get("/series")
+async def platform_series(
+    grain: str = "month",
+    session: AsyncSession = Depends(get_session),
+):
+    """Activity across the whole service, oldest first.
+
+    Empty periods still appear with zeros: a chart that drops them compresses
+    the gaps and makes a quiet stretch look like steady trade.
+    """
+    grain = grain if grain in GRAIN else "month"
+    starts = _bucket_starts(grain, GRAIN[grain], timezone(timedelta(hours=settings.TIMEZONE_OFFSET_HOURS)))
+    start = starts[0]
 
     # date_trunc on a timestamptz truncates in the session time zone, which is
     # UTC here. Shifting the column by the offset first makes the truncation
-    # land on local month boundaries — otherwise the first five hours of every
-    # month are counted against the previous one.
+    # land on local boundaries — otherwise the first five hours of every period
+    # are counted against the previous one.
     shift = literal_column(f"interval '{int(settings.TIMEZONE_OFFSET_HOURS)} hours'")
 
-    def by_month(rows):
-        return {(r[0].year, r[0].month): r[1:] for r in rows}
+    def bucketed(rows):
+        return {r[0].date(): r[1:] for r in rows}
 
-    order_month = func.date_trunc("month", Order.created_at + shift)
-    orders = by_month(
+    o_at = func.date_trunc(grain, Order.created_at + shift)
+    orders = bucketed(
         (
             await session.execute(
-                select(
-                    order_month,
-                    func.count(),
-                    func.coalesce(func.sum(Order.total_amount), 0),
-                )
+                select(o_at, func.count(), func.coalesce(func.sum(Order.total_amount), 0))
                 .where(Order.created_at >= start)
-                .group_by(order_month)
+                .group_by(o_at)
             )
         ).all()
     )
 
-    conv_month = func.date_trunc("month", Conversation.created_at + shift)
-    convs = by_month(
+    c_at = func.date_trunc(grain, Conversation.created_at + shift)
+    convs = bucketed(
         (
             await session.execute(
-                select(conv_month, func.count())
+                select(c_at, func.count())
                 .where(Conversation.created_at >= start)
-                .group_by(conv_month)
+                .group_by(c_at)
             )
         ).all()
     )
 
-    names = ["Yan", "Fev", "Mar", "Apr", "May", "Iyn", "Iyl", "Avg", "Sen", "Okt", "Noy", "Dek"]
+    # The platform's own income, so the chart can show the same figure the hero
+    # card leads with rather than only the shops' activity.
+    p_at = func.date_trunc(grain, Payment.created_at + shift)
+    income = bucketed(
+        (
+            await session.execute(
+                select(p_at, func.coalesce(func.sum(Payment.amount), 0))
+                .where(
+                    Payment.created_at >= start,
+                    Payment.kind == "topup",
+                    Payment.status == "confirmed",
+                )
+                .group_by(p_at)
+            )
+        ).all()
+    )
+
+    now_key = starts[-1].date()
     return [
         {
-            "label": names[m - 1],
-            "year": y,
-            "orders": (orders.get((y, m)) or (0, 0))[0],
-            "revenue": float((orders.get((y, m)) or (0, 0))[1]),
-            "conversations": (convs.get((y, m)) or (0,))[0],
-            "current": (y, m) == (now.year, now.month),
+            "label": _label(grain, d),
+            "year": d.year,
+            "orders": (orders.get(d.date()) or (0, 0))[0],
+            "revenue": float((orders.get(d.date()) or (0, 0))[1]),
+            "conversations": (convs.get(d.date()) or (0,))[0],
+            "income": float((income.get(d.date()) or (0,))[0]),
+            "current": d.date() == now_key,
         }
-        for y, m in buckets
+        for d in starts
     ]
 
 

@@ -7,6 +7,7 @@ let TENANTS = [];
 let PLANS = [];
 let SERIES = [];
 let chartMetric = 'orders';
+let chartGrain = 'month';
 let signalFilter = null;
 
 /* The alert bar returns on every sign-in and can be dismissed for the rest of
@@ -553,12 +554,13 @@ $('plat-plan-filter').addEventListener('change', renderRows);
 
 // ═══ DIAGRAMMA ═══
 async function loadSeries() {
-    SERIES = await api('/api/platform/series?months=7');
+    SERIES = await api(`/api/platform/series?grain=${chartGrain}`);
     renderChart();
 }
 
 function renderChart() {
     const box = $('plat-chart');
+    const money = chartMetric === 'income';
     const vals = SERIES.map((p) => p[chartMetric] || 0);
     const peak = Math.max(...vals, 1);
 
@@ -569,7 +571,7 @@ function renderChart() {
     box.innerHTML = `
         <div class="chart-y">${ticks.map((t) => `<span>${short(t)}</span>`).join('')}</div>
         <div class="chart-plot">
-            ${SERIES.map((p) => {
+            ${SERIES.map((p, i) => {
                 const v = p[chartMetric] || 0;
                 const h = Math.max(2, Math.round((v / (step * 3 || 1)) * 100));
                 return `
@@ -578,10 +580,11 @@ function renderChart() {
                         <div class="tip-h">${esc(p.label)} ${p.year}</div>
                         <div class="tip-row"><span>Buyurtma</span><b>${fmt(p.orders)}</b></div>
                         <div class="tip-row"><span>Suhbat</span><b>${fmt(p.conversations)}</b></div>
-                        <div class="tip-row up"><span>Tushum</span><b>${short(p.revenue)}</b></div>
+                        <div class="tip-row"><span>Do'kon savdosi</span><b>${short(p.revenue)}</b></div>
+                        <div class="tip-row up"><span>Platforma tushumi</span><b>${short(p.income)}</b></div>
                     </div>
                     <div class="bar" style="height:${Math.min(h, 100)}%"></div>
-                    <div class="bar-x">${esc(p.label)}</div>
+                    <div class="bar-x">${SERIES.length > 15 && i % 3 !== 0 && !p.current ? '' : esc(p.label)}</div>
                 </div>`;
             }).join('')}
         </div>`;
@@ -592,6 +595,16 @@ document.querySelectorAll('[data-metric]').forEach((b) => {
         chartMetric = b.dataset.metric;
         document.querySelectorAll('[data-metric]').forEach((x) => x.classList.toggle('on', x === b));
         renderChart();
+    });
+});
+
+/* Granularity refetches; the metric only re-renders. Day, month and year are
+   different queries, not different views of the same rows. */
+document.querySelectorAll('[data-grain]').forEach((b) => {
+    b.addEventListener('click', async () => {
+        chartGrain = b.dataset.grain;
+        document.querySelectorAll('[data-grain]').forEach((x) => x.classList.toggle('on', x === b));
+        await loadSeries();
     });
 });
 
