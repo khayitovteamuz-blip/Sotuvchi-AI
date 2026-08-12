@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -96,6 +97,36 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Headers a browser needs before it will defend the panel for us.
+
+    Without them the panel can be framed by another site (clickjacking against
+    a logged-in shop owner), and an uploaded file that slips past validation
+    can still be sniffed into something executable.
+    """
+    response = await call_next(request)
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "same-origin"
+    # The panels load only their own assets — no CDN, no external fonts — so a
+    # strict policy costs nothing here. 'unsafe-inline' stays because the
+    # templates still carry inline styles and onclick handlers.
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "img-src 'self' data: https:; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+    if settings.PUBLIC_BASE_URL.startswith("https://"):
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
 STATIC_DIR.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -163,6 +194,22 @@ async def readiness_check():
         return JSONResponse(
             status_code=503, content={"status": "not_ready", "database": "unreachable"}
         )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    """One readable sentence instead of FastAPI's array of error objects.
+
+    Every panel reads `detail` as text; handed a list it printed
+    "[object Object]", so a user who typed a short password was told nothing.
+    """
+    messages = []
+    for err in exc.errors():
+        msg = err.get("msg", "")
+        # Pydantic prefixes messages raised by a validator; the Uzbek sentence
+        # after it is the part written for the person reading it.
+        messages.append(msg.split("Value error, ", 1)[-1])
+    return JSONResponse(status_code=422, content={"detail": " ".join(messages) or "Ma'lumot noto'g'ri."})
 
 
 if __name__ == "__main__":

@@ -171,8 +171,19 @@ async def list_orders(user: User = Depends(require_auth), session: AsyncSession 
     return await repo.list_orders(session, user.tenant_id)
 
 
+# The panel filters and colours orders by these exact strings. Anything else
+# saved here would vanish from every filter — visible in no tab, counted in no
+# total — so an unknown status is refused rather than stored.
+ORDER_STATUSES = ("Yangi", "Tasdiqlandi", "Yo'lda", "Yetkazildi", "Bekor qilindi")
+
+
 @router.put("/orders/{order_id}/status", response_model=Order)
 async def update_order_status(order_id: str, status: str = Body(..., embed=True), user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    if status not in ORDER_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Noma'lum holat. Ruxsat etilganlari: {', '.join(ORDER_STATUSES)}.",
+        )
     updated = await repo.update_order_status(session, user.tenant_id, order_id, status)
     if not updated:
         raise HTTPException(status_code=404, detail="Buyurtma topilmadi.")

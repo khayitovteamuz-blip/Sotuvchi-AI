@@ -23,14 +23,29 @@ router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
 
 @router.post("/register")
-async def register(data: TenantRegister, session: AsyncSession = Depends(get_session)):
+async def register(data: TenantRegister, request: Request, session: AsyncSession = Depends(get_session)):
+    # Sign-up was wide open: one script could have filled the database with
+    # tenants, each carrying its own settings and quota rows. The login
+    # throttle already knows how to count and lock a key, so it is reused —
+    # eight new shops from one address in fifteen minutes is well past normal.
+    throttle_key = f"register|{client_ip(request)}"
+    allowed, wait = await security.check_login_allowed(session, throttle_key)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Juda ko'p urinish. {max(1, wait // 60)} daqiqadan keyin qayta urinib ko'ring.",
+        )
+
     try:
         tenant, owner = await tenant_service.register(
             session, data.business_name, data.email, data.password
         )
-        return {"status": "success", "tenant": tenant_service.safe_user_dict(owner, tenant)}
     except ValueError as e:
+        await security.record_login_failure(session, throttle_key)
         raise HTTPException(status_code=400, detail=str(e))
+
+    await security.record_login_failure(session, throttle_key)
+    return {"status": "success", "tenant": tenant_service.safe_user_dict(owner, tenant)}
 
 
 @router.post("/login")
