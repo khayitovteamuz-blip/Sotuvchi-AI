@@ -8,13 +8,18 @@ route added later inherits the check instead of silently shipping without one.
 Login lives on a separate router because it must be reachable *before* there is
 a session.
 """
+import csv
+import io
 import logging
+import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,15 +37,18 @@ from app.db import repo
 from app.db.base import get_session
 from app.db.models import (
     Conversation,
+    LoginAttempt,
     Message,
     Order,
     Plan,
     PlatformAdmin,
+    PlatformSession,
     Product,
     Tenant,
     User,
+    UserSession,
 )
-from app.services import audit_service, quota_service
+from app.services import audit_service, quota_service, tenant_service
 from app.services.bot_service import bot_service
 
 logger = logging.getLogger("platform_api")
@@ -580,6 +588,382 @@ async def update_plan(
     await session.commit()
     await audit_service.log(session, admin, "plan_update", None, {"plan": name, **changes}, request)
     return {"status": "success", "changes": changes}
+
+
+# ─── Tenant lifecycle ─────────────────────────────────────────────────────────
+class TenantCreate(BaseModel):
+    business_name: str
+    email: str
+    password: str
+    plan: str = "start"
+
+
+@router.post("/tenants")
+async def create_tenant(
+    data: TenantCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    """Onboard a business from the panel.
+
+    Goes through the same registration path customers use, so a hand-created
+    account gets identical defaults — a second code path here would drift and
+    produce tenants that behave subtly differently.
+    """
+    if len(data.password) < 8:
+        raise HTTPException(status_code=400, detail="Parol kamida 8 belgi bo'lishi kerak.")
+    if data.plan and not await session.get(Plan, data.plan):
+        raise HTTPException(status_code=400, detail=f"'{data.plan}' tarifi mavjud emas.")
+    try:
+        tenant, owner = await tenant_service.register(
+            session, data.business_name, data.email, data.password
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if data.plan and data.plan != tenant.plan:
+        tenant.plan = data.plan
+        await session.commit()
+
+    await audit_service.log(
+        session, admin, "tenant_create", tenant.id,
+        {"business_name": tenant.business_name, "email": owner.email, "plan": tenant.plan}, request,
+    )
+    return {"status": "success", "tenant_id": tenant.id, "email": owner.email}
+
+
+@router.delete("/tenants/{tenant_id}")
+async def delete_tenant(
+    tenant_id: str,
+    confirm: str = "",
+    request: Request = None,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    """Erase a business and everything it owns. Irreversible.
+
+    The caller must echo the business name back: a tenant id in a URL is easy to
+    mistype, and every order, conversation and product goes with it.
+    """
+    tenant = await _get_tenant_or_404(session, tenant_id)
+    if confirm.strip() != tenant.business_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Tasdiqlash uchun biznes nomini aynan yozing.",
+        )
+
+    snapshot = {
+        "business_name": tenant.business_name,
+        "plan": tenant.plan,
+        "products": await quota_service.count_products(session, tenant_id),
+        "orders": (
+            await session.execute(
+                select(func.count()).select_from(Order).where(Order.tenant_id == tenant_id)
+            )
+        ).scalar(),
+    }
+    if tenant.telegram_bot_token:
+        await bot_service.delete_webhook(tenant.telegram_bot_token)
+
+    # Every child table carries ondelete=CASCADE, so one statement clears the
+    # whole graph. The audit row is written first so the record survives even if
+    # the delete is the last thing this admin ever does.
+    await audit_service.log(session, admin, "tenant_delete", tenant_id, snapshot, request)
+    await session.execute(sa_delete(Tenant).where(Tenant.id == tenant_id))
+    await session.commit()
+    return {"status": "success", "deleted": snapshot}
+
+
+# ─── Users inside a tenant ────────────────────────────────────────────────────
+@router.post("/tenants/{tenant_id}/users/{user_id}/reset-password")
+async def reset_user_password(
+    tenant_id: str,
+    user_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    """Issue a new password and return it once.
+
+    The most common support call there is. The generated value is shown to the
+    admin a single time and never stored in readable form — only its argon2
+    hash goes to the database.
+    """
+    await _get_tenant_or_404(session, tenant_id)
+    user = await session.get(User, user_id)
+    if not user or user.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi.")
+
+    new_password = secrets.token_urlsafe(9)
+    user.password_hash = security.hash_password(new_password)
+    await session.commit()
+
+    # Old sessions must die with the old password, or a stolen cookie survives
+    # the very reset that was meant to cut it off.
+    await session.execute(sa_delete(UserSession).where(UserSession.user_id == user_id))
+    await session.execute(
+        sa_delete(LoginAttempt).where(LoginAttempt.key.like(f"%|{user.email}"))
+    )
+    await session.commit()
+
+    await audit_service.log(
+        session, admin, "user_password_reset", tenant_id, {"email": user.email}, request
+    )
+    return {"status": "success", "email": user.email, "password": new_password}
+
+
+class UserPatch(BaseModel):
+    is_active: Optional[bool] = None
+
+
+@router.patch("/tenants/{tenant_id}/users/{user_id}")
+async def update_user(
+    tenant_id: str,
+    user_id: str,
+    patch: UserPatch,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    await _get_tenant_or_404(session, tenant_id)
+    user = await session.get(User, user_id)
+    if not user or user.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi.")
+
+    if patch.is_active is None or patch.is_active == user.is_active:
+        return {"status": "unchanged"}
+
+    changes = {"email": user.email, "is_active": {"from": user.is_active, "to": patch.is_active}}
+    user.is_active = patch.is_active
+    await session.commit()
+    if not patch.is_active:
+        await session.execute(sa_delete(UserSession).where(UserSession.user_id == user_id))
+        await session.commit()
+    await audit_service.log(session, admin, "user_update", tenant_id, changes, request)
+    return {"status": "success", "changes": changes}
+
+
+@router.post("/tenants/{tenant_id}/unlock")
+async def unlock_tenant_logins(
+    tenant_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    """Clear the login throttle for everyone in this business.
+
+    Someone who mistyped their password eight times is locked out for fifteen
+    minutes; without this the only answer support can give them is "wait".
+    """
+    await _get_tenant_or_404(session, tenant_id)
+    emails = (
+        await session.execute(select(User.email).where(User.tenant_id == tenant_id))
+    ).scalars().all()
+    for email in emails:
+        await session.execute(sa_delete(LoginAttempt).where(LoginAttempt.key.like(f"%|{email}")))
+    await session.commit()
+    await audit_service.log(session, admin, "login_unlock", tenant_id, {"users": len(emails)}, request)
+    return {"status": "success", "users": len(emails)}
+
+
+@router.post("/tenants/{tenant_id}/logout-all")
+async def logout_all(
+    tenant_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    """End every browser session this business has open — the containment step
+    when an owner reports their account may be compromised."""
+    await _get_tenant_or_404(session, tenant_id)
+    ids = (
+        await session.execute(select(User.id).where(User.tenant_id == tenant_id))
+    ).scalars().all()
+    res = await session.execute(sa_delete(UserSession).where(UserSession.user_id.in_(ids)))
+    await session.commit()
+    await audit_service.log(session, admin, "sessions_revoked", tenant_id, {"count": res.rowcount}, request)
+    return {"status": "success", "revoked": res.rowcount or 0}
+
+
+# ─── Support views ────────────────────────────────────────────────────────────
+@router.get("/tenants/{tenant_id}/orders")
+async def tenant_orders(tenant_id: str, session: AsyncSession = Depends(get_session)):
+    await _get_tenant_or_404(session, tenant_id)
+    rows = (
+        await session.execute(
+            select(Order).where(Order.tenant_id == tenant_id)
+            .order_by(Order.created_at.desc()).limit(50)
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": o.id,
+            "customer_name": o.customer_name,
+            "customer_phone": o.customer_phone,
+            "total_amount": o.total_amount,
+            "status": o.status,
+            "from_ai": bool(o.conversation_id),
+            "created_at": o.created_at.strftime("%Y-%m-%d %H:%M") if o.created_at else None,
+        }
+        for o in rows
+    ]
+
+
+class KbPatch(BaseModel):
+    delivery_info: Optional[str] = None
+    delivery_fee_city: Optional[float] = None
+    delivery_fee_regions: Optional[float] = None
+    payment_info: Optional[str] = None
+    warranty_info: Optional[str] = None
+    return_policy: Optional[str] = None
+    working_hours: Optional[str] = None
+    faq: Optional[str] = None
+
+
+@router.patch("/tenants/{tenant_id}/kb")
+async def update_kb(
+    tenant_id: str,
+    patch: KbPatch,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    """Fill in a customer's knowledge base for them.
+
+    An empty one is why the AI escalates every delivery and warranty question,
+    and it is faster to fix it on the call than to talk someone through it.
+    """
+    await _get_tenant_or_404(session, tenant_id)
+    cfg = await repo.get_settings(session, tenant_id)
+    changed = []
+    for field, value in patch.model_dump(exclude_unset=True).items():
+        if value is not None and value != getattr(cfg, field):
+            setattr(cfg, field, value)
+            changed.append(field)
+    if not changed:
+        return {"status": "unchanged"}
+    await session.commit()
+    await audit_service.log(session, admin, "kb_update", tenant_id, {"fields": changed}, request)
+    return {"status": "success", "changed": changed}
+
+
+# ─── Platform admins ──────────────────────────────────────────────────────────
+@router.get("/admins")
+async def list_admins(session: AsyncSession = Depends(get_session)):
+    rows = (
+        await session.execute(select(PlatformAdmin).order_by(PlatformAdmin.created_at))
+    ).scalars().all()
+    return [
+        {
+            "id": a.id,
+            "email": a.email,
+            "full_name": a.full_name,
+            "is_active": a.is_active,
+            "created_at": a.created_at.strftime("%Y-%m-%d") if a.created_at else None,
+            "last_login_at": a.last_login_at.strftime("%Y-%m-%d %H:%M") if a.last_login_at else None,
+        }
+        for a in rows
+    ]
+
+
+class AdminCreate(BaseModel):
+    email: str
+    full_name: Optional[str] = None
+    password: str
+
+
+@router.post("/admins")
+async def create_admin(
+    data: AdminCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    """Only an existing admin can mint another one — the shell script stays the
+    way in for the very first account."""
+    if len(data.password) < 10:
+        raise HTTPException(status_code=400, detail="Parol kamida 10 belgi bo'lishi kerak.")
+    email = data.email.strip().lower()
+    exists = (
+        await session.execute(select(PlatformAdmin).where(PlatformAdmin.email == email))
+    ).scalars().first()
+    if exists:
+        raise HTTPException(status_code=400, detail="Bu email allaqachon ro'yxatdan o'tgan.")
+
+    session.add(
+        PlatformAdmin(
+            id=f"padmin-{uuid.uuid4().hex[:12]}",
+            email=email,
+            full_name=(data.full_name or "").strip() or None,
+            password_hash=security.hash_password(data.password),
+        )
+    )
+    await session.commit()
+    await audit_service.log(session, admin, "admin_create", None, {"email": email}, request)
+    return {"status": "success", "email": email}
+
+
+class AdminPatch(BaseModel):
+    is_active: Optional[bool] = None
+
+
+@router.patch("/admins/{admin_id}")
+async def update_admin(
+    admin_id: str,
+    patch: AdminPatch,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    target = await session.get(PlatformAdmin, admin_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Admin topilmadi.")
+    if target.id == admin.id:
+        raise HTTPException(status_code=400, detail="O'z hisobingizni o'chira olmaysiz.")
+    if patch.is_active is None or patch.is_active == target.is_active:
+        return {"status": "unchanged"}
+
+    # Guard against locking everyone out of the platform panel
+    if not patch.is_active:
+        active = (
+            await session.execute(
+                select(func.count()).select_from(PlatformAdmin)
+                .where(PlatformAdmin.is_active.is_(True))
+            )
+        ).scalar() or 0
+        if active <= 1:
+            raise HTTPException(status_code=400, detail="Oxirgi faol adminni o'chirib bo'lmaydi.")
+
+    target.is_active = patch.is_active
+    await session.commit()
+    if not patch.is_active:
+        await session.execute(sa_delete(PlatformSession).where(PlatformSession.admin_id == admin_id))
+        await session.commit()
+    await audit_service.log(
+        session, admin, "admin_update", None, {"email": target.email, "is_active": patch.is_active}, request
+    )
+    return {"status": "success"}
+
+
+# ─── Export ───────────────────────────────────────────────────────────────────
+@router.get("/export/tenants.csv")
+async def export_tenants(session: AsyncSession = Depends(get_session)):
+    rows = await list_tenants(session)
+    cols = ["business_name", "owner_email", "plan_title", "is_active", "created_at",
+            "products", "orders", "conversations", "ai_messages_month",
+            "telegram_username", "last_activity"]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(cols)
+    for r in rows:
+        w.writerow([r.get(c, "") for c in cols])
+    return Response(
+        # BOM so Excel opens Uzbek text correctly
+        content=buf.getvalue().encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="bizneslar.csv"'},
+    )
 
 
 # ─── Audit ────────────────────────────────────────────────────────────────────

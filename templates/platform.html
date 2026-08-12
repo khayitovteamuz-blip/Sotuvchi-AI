@@ -60,6 +60,9 @@
                 <button class="nav" data-view="plans">
                     <span class="nav-ico">◈</span> Tariflar
                 </button>
+                <button class="nav" data-view="admins">
+                    <span class="nav-ico">◐</span> Adminlar
+                </button>
                 <button class="nav" data-view="audit">
                     <span class="nav-ico">◷</span> Audit
                 </button>
@@ -98,6 +101,10 @@
                     <div>
                         <h1>Umumiy holat</h1>
                         <p id="home-sub">Butun servis bo'yicha</p>
+                    </div>
+                    <div class="right">
+                        <a class="pill" href="/api/platform/export/tenants.csv" download>CSV yuklab olish</a>
+                        <button class="pill on" id="btn-new-tenant">+ Yangi biznes</button>
                     </div>
                 </div>
 
@@ -174,6 +181,29 @@
                 <div class="plans" id="plat-plans"></div>
             </section>
 
+            <!-- ─── ADMINLAR ─── -->
+            <section id="view-admins" hidden>
+                <div class="page-head">
+                    <div>
+                        <h1>Platforma adminlari</h1>
+                        <p>Butun servisga kirish huquqiga ega hisoblar</p>
+                    </div>
+                    <div class="right">
+                        <button class="pill on" id="btn-new-admin">+ Yangi admin</button>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr><th>Admin</th><th>Holat</th><th>Yaratilgan</th><th>Oxirgi kirish</th><th></th></tr>
+                            </thead>
+                            <tbody id="plat-admins-rows"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
             <!-- ─── AUDIT ─── -->
             <section id="view-audit" hidden>
                 <div class="page-head">
@@ -209,6 +239,16 @@
     </div>
     <div class="drawer-body" id="drawer-body"></div>
 </aside>
+
+<!-- ═══ MODAL ═══ -->
+<div class="scrim" id="modal-scrim" hidden></div>
+<div class="modal" id="modal" hidden role="dialog" aria-modal="true">
+    <div class="modal-head">
+        <h2 id="modal-title">—</h2>
+        <button class="drawer-x" id="modal-close" aria-label="Yopish">✕</button>
+    </div>
+    <form class="modal-body" id="modal-form"></form>
+</div>
 
 <div class="toast" id="plat-toast" hidden></div>
 

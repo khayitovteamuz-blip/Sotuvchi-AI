@@ -95,16 +95,154 @@ $('plat-logout').addEventListener('click', async () => {
     showLogin();
 });
 
+// ═══ MODAL ═══
+/** One reusable dialog. `fields` render the form; `onSubmit` returns a string
+ *  to keep the dialog open showing that result (a one-time password), or
+ *  nothing to close it. */
+function openModal({ title, fields, submitLabel, onSubmit, danger }) {
+    $('modal-title').textContent = title;
+    $('modal').hidden = false;
+    $('modal-scrim').hidden = false;
+
+    const form = $('modal-form');
+    form.innerHTML = fields.map((f) => `
+        <label class="field">
+            <span>${esc(f.label)}</span>
+            ${f.type === 'select'
+                ? `<select id="m-${f.name}">${f.options.map((o) =>
+                    `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}</select>`
+                : `<input type="${f.type || 'text'}" id="m-${f.name}"
+                     ${f.required === false ? '' : 'required'}
+                     placeholder="${esc(f.placeholder || '')}"
+                     value="${esc(f.value || '')}">`}
+        </label>`).join('')
+        + `<p class="login-err" id="m-err"></p>
+           <button type="submit" class="btn ${danger ? 'btn-red' : 'btn-green'} w-full" id="m-go">${esc(submitLabel)}</button>`;
+
+    form.onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = $('m-go');
+        const err = $('m-err');
+        err.textContent = '';
+        btn.disabled = true;
+        const values = Object.fromEntries(fields.map((f) => [f.name, $(`m-${f.name}`).value]));
+        try {
+            const result = await onSubmit(values);
+            if (result) {
+                form.innerHTML = `<p style="font-size:13px;color:var(--fg-2)">${result.text}</p>
+                    <code class="reveal">${esc(result.reveal)}</code>
+                    <p class="modal-note">${esc(result.note || '')}</p>
+                    <button type="button" class="btn w-full" style="margin-top:14px" id="m-done">Yopish</button>`;
+                $('m-done').onclick = closeModal;
+            } else {
+                closeModal();
+            }
+        } catch (e2) {
+            err.textContent = e2.message;
+            btn.disabled = false;
+        }
+    };
+}
+
+function closeModal() {
+    $('modal').hidden = true;
+    $('modal-scrim').hidden = true;
+}
+$('modal-close').addEventListener('click', closeModal);
+$('modal-scrim').addEventListener('click', closeModal);
+
 // ═══ NAVIGATSIYA ═══
-const VIEW_NAMES = { home: 'Umumiy holat', plans: 'Tariflar', audit: 'Audit' };
+const VIEW_NAMES = { home: 'Umumiy holat', plans: 'Tariflar', admins: 'Adminlar', audit: 'Audit' };
 
 function goto(view) {
     document.querySelectorAll('.nav').forEach((n) => n.classList.toggle('on', n.dataset.view === view));
     Object.keys(VIEW_NAMES).forEach((v) => { $(`view-${v}`).hidden = v !== view; });
     $('crumb').textContent = VIEW_NAMES[view];
     if (view === 'plans') loadPlans();
+    if (view === 'admins') loadAdmins();
     if (view === 'audit') loadAudit();
 }
+
+// ═══ YANGI BIZNES ═══
+$('btn-new-tenant').addEventListener('click', () => openModal({
+    title: 'Yangi biznes',
+    submitLabel: 'Yaratish',
+    fields: [
+        { name: 'business_name', label: 'Biznes nomi' },
+        { name: 'email', label: 'Egasining emaili', type: 'email' },
+        { name: 'password', label: 'Boshlang\'ich parol', type: 'text',
+          value: Math.random().toString(36).slice(2, 12) },
+        { name: 'plan', label: 'Tarif', type: 'select',
+          options: PLANS.map((p) => ({ value: p.name, label: p.title })) },
+    ],
+    onSubmit: async (v) => {
+        await api('/api/platform/tenants', { method: 'POST', body: JSON.stringify(v) });
+        await Promise.all([loadTenants(), loadStats()]);
+        return {
+            text: `"${v.business_name}" yaratildi. Egasiga shu ma'lumotlarni bering:`,
+            reveal: `${v.email}\n${v.password}`,
+            note: 'Parol boshqa ko\'rsatilmaydi. Egasi kirgach o\'zgartirishi kerak.',
+        };
+    },
+}));
+
+// ═══ ADMINLAR ═══
+async function loadAdmins() {
+    const rows = await api('/api/platform/admins');
+    const me = $('who-mail').textContent;
+    $('plat-admins-rows').innerHTML = rows.map((a) => `
+        <tr>
+            <td>
+                <div class="biz">
+                    <span class="biz-av">${esc(initials(a.full_name || a.email))}</span>
+                    <div>
+                        <div class="biz-name">${esc(a.full_name || 'Administrator')}</div>
+                        <div class="biz-mail">${esc(a.email)}${a.email === me ? ' · siz' : ''}</div>
+                    </div>
+                </div>
+            </td>
+            <td><span class="state ${a.is_active ? 'ok' : 'idle'}">${a.is_active ? 'Faol' : 'O\'chirilgan'}</span></td>
+            <td class="cell-dim">${esc(a.created_at || '—')}</td>
+            <td class="cell-dim">${esc(a.last_login_at || 'hech qachon')}</td>
+            <td style="text-align:right">
+                ${a.email === me ? ''
+                    : `<button class="btn ${a.is_active ? 'btn-red' : 'btn-ghost'}"
+                          data-admin="${esc(a.id)}" data-to="${a.is_active ? '0' : '1'}">
+                        ${a.is_active ? 'O\'chirish' : 'Yoqish'}</button>`}
+            </td>
+        </tr>`).join('');
+
+    $('plat-admins-rows').querySelectorAll('[data-admin]').forEach((b) =>
+        b.addEventListener('click', async () => {
+            try {
+                await api(`/api/platform/admins/${b.dataset.admin}`, {
+                    method: 'PATCH', body: JSON.stringify({ is_active: b.dataset.to === '1' }),
+                });
+                toast('Saqlandi');
+                loadAdmins();
+            } catch (e) { toast(e.message, 'err'); }
+        }));
+}
+
+$('btn-new-admin').addEventListener('click', () => openModal({
+    title: 'Yangi platforma admini',
+    submitLabel: 'Yaratish',
+    fields: [
+        { name: 'full_name', label: 'To\'liq ism', required: false },
+        { name: 'email', label: 'Email', type: 'email' },
+        { name: 'password', label: 'Parol (kamida 10 belgi)', type: 'text',
+          value: Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 8) },
+    ],
+    onSubmit: async (v) => {
+        await api('/api/platform/admins', { method: 'POST', body: JSON.stringify(v) });
+        loadAdmins();
+        return {
+            text: 'Admin yaratildi. Kirish ma\'lumotlari:',
+            reveal: `${v.email}\n${v.password}`,
+            note: 'Parol boshqa ko\'rsatilmaydi.',
+        };
+    },
+}));
 
 document.querySelectorAll('.nav').forEach((n) =>
     n.addEventListener('click', () => goto(n.dataset.view)));
@@ -434,9 +572,43 @@ async function openTenant(id) {
         </div>
 
         <div class="block">
+            <div class="block-t">Bilimlar bazasi</div>
+            <label class="field"><span>Ish vaqti</span>
+                <input type="text" id="dr-hours" value="${esc(d.knowledge_base.working_hours || '')}"></label>
+            <label class="field"><span>To'lov</span>
+                <input type="text" id="dr-pay" value="${esc(d.knowledge_base.payment_info || '')}"></label>
+            <label class="field"><span>Kafolat</span>
+                <input type="text" id="dr-warranty" value="${esc(d.knowledge_base.warranty_info || '')}"></label>
+            <label class="field"><span>Qaytarish</span>
+                <input type="text" id="dr-return" value="${esc(d.knowledge_base.return_policy || '')}"></label>
+            <div class="acts"><button class="btn btn-green" id="dr-save-kb">Bilimlar bazasini saqlash</button></div>
+        </div>
+
+        <div class="block">
             <div class="block-t">Foydalanuvchilar</div>
-            ${d.users.map((x) => `<div class="kv"><span>${esc(x.email)}</span><b>${esc(x.role)}</b></div>`).join('')
-              || '<p class="empty">Yo\'q</p>'}
+            ${d.users.map((x) => `
+                <div class="kv">
+                    <span>${esc(x.email)} · ${esc(x.role)}${x.is_active ? '' : ' · o\'chirilgan'}</span>
+                    <span style="display:flex;gap:6px">
+                        <button class="btn btn-ghost" data-reset="${esc(x.id)}">Parol</button>
+                        <button class="btn ${x.is_active ? 'btn-red' : 'btn-ghost'}"
+                                data-user="${esc(x.id)}" data-to="${x.is_active ? '0' : '1'}">
+                            ${x.is_active ? 'O\'chirish' : 'Yoqish'}</button>
+                    </span>
+                </div>`).join('') || '<p class="empty">Yo\'q</p>'}
+            <div class="acts">
+                <button class="btn btn-ghost" id="dr-unlock">Kirish qulfini ochish</button>
+                <button class="btn btn-ghost" id="dr-logout-all">Barcha sessiyani yopish</button>
+            </div>
+        </div>
+
+        <div class="block">
+            <div class="block-t">Xavfli hudud</div>
+            <p style="font-size:12.5px;color:var(--fg-3);line-height:1.6">
+                Biznes va unga tegishli barcha narsa — mahsulotlar, buyurtmalar, suhbatlar —
+                butunlay o'chadi. Qaytarib bo'lmaydi.
+            </p>
+            <div class="acts"><button class="btn btn-red" id="dr-delete">Biznesni o'chirish</button></div>
         </div>`;
 
     $('dr-save-plan').addEventListener('click', () =>
@@ -456,6 +628,79 @@ async function openTenant(id) {
     }));
 
     $('dr-bot').addEventListener('click', () => patchAi(id, { bot_enabled: !d.ai.bot_enabled }));
+
+    $('dr-save-kb').addEventListener('click', async () => {
+        try {
+            const r = await api(`/api/platform/tenants/${id}/kb`, {
+                method: 'PATCH',
+                body: JSON.stringify({
+                    working_hours: $('dr-hours').value,
+                    payment_info: $('dr-pay').value,
+                    warranty_info: $('dr-warranty').value,
+                    return_policy: $('dr-return').value,
+                }),
+            });
+            toast(r.status === 'unchanged' ? 'O\'zgarish yo\'q' : 'Bilimlar bazasi saqlandi');
+        } catch (e) { toast(e.message, 'err'); }
+    });
+
+    $('drawer-body').querySelectorAll('[data-reset]').forEach((b) =>
+        b.addEventListener('click', () => openModal({
+            title: 'Parolni tiklash',
+            submitLabel: 'Yangi parol yaratish',
+            fields: [],
+            onSubmit: async () => {
+                const r = await api(
+                    `/api/platform/tenants/${id}/users/${b.dataset.reset}/reset-password`,
+                    { method: 'POST' });
+                return {
+                    text: `${r.email} uchun yangi parol:`,
+                    reveal: r.password,
+                    note: 'Parol boshqa ko\'rsatilmaydi. Eski sessiyalar yopildi va kirish qulfi olindi.',
+                };
+            },
+        })));
+
+    $('drawer-body').querySelectorAll('[data-user]').forEach((b) =>
+        b.addEventListener('click', async () => {
+            try {
+                await api(`/api/platform/tenants/${id}/users/${b.dataset.user}`, {
+                    method: 'PATCH', body: JSON.stringify({ is_active: b.dataset.to === '1' }),
+                });
+                toast('Saqlandi');
+                openTenant(id);
+            } catch (e) { toast(e.message, 'err'); }
+        }));
+
+    $('dr-unlock').addEventListener('click', async () => {
+        try {
+            const r = await api(`/api/platform/tenants/${id}/unlock`, { method: 'POST' });
+            toast(`Qulf olindi (${r.users} foydalanuvchi)`);
+        } catch (e) { toast(e.message, 'err'); }
+    });
+
+    $('dr-logout-all').addEventListener('click', async () => {
+        try {
+            const r = await api(`/api/platform/tenants/${id}/logout-all`, { method: 'POST' });
+            toast(`${r.revoked} ta sessiya yopildi`);
+        } catch (e) { toast(e.message, 'err'); }
+    });
+
+    $('dr-delete').addEventListener('click', () => openModal({
+        title: 'Biznesni o\'chirish',
+        submitLabel: 'Butunlay o\'chirish',
+        danger: true,
+        // Typing the name back is the guard: a tenant id in a URL is easy to
+        // mistype and everything the business owns goes with it.
+        fields: [{ name: 'confirm', label: `Tasdiqlash uchun "${d.business_name}" deb yozing` }],
+        onSubmit: async (v) => {
+            await api(`/api/platform/tenants/${id}?confirm=${encodeURIComponent(v.confirm)}`,
+                      { method: 'DELETE' });
+            closeDrawer();
+            toast('Biznes o\'chirildi');
+            await Promise.all([loadTenants(), loadStats()]);
+        },
+    }));
 
     const tg = $('dr-tg');
     if (tg) {

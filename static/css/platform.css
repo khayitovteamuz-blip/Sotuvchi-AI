@@ -445,6 +445,29 @@ tr.sig-off { opacity: 0.55; }
 .kv b { font-family: var(--mono); font-weight: 600; text-align: right; }
 .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
 
+/* ═══ MODAL ═══ */
+.modal {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: min(430px, calc(100% - 32px)); z-index: 100;
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-lg);
+    animation: pop 180ms cubic-bezier(0.2, 0, 0.2, 1);
+}
+@keyframes pop { from { opacity: 0; transform: translate(-50%, -46%); } }
+.modal-head {
+    display: flex; align-items: center; gap: 14px;
+    padding: 18px 22px; border-bottom: 1px solid var(--line);
+}
+.modal-head h2 { font-size: 16px; font-weight: 800; letter-spacing: -0.02em; }
+.modal-body { padding: 20px 22px 22px; }
+.modal-note { font-size: 11.5px; color: var(--fg-3); margin-top: 10px; line-height: 1.6; }
+/* A generated password is shown exactly once — it must be copyable, not pretty */
+.reveal {
+    display: block; margin-top: 12px; padding: 12px 14px;
+    background: var(--bg); border: 1px solid var(--green); border-radius: var(--r-sm);
+    font-family: var(--mono); font-size: 15px; font-weight: 600;
+    color: var(--green-lt); word-break: break-all; user-select: all;
+}
+
 /* ═══ PLANS EDITOR ═══ */
 .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(272px, 1fr)); gap: 14px; }
 .plan-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 20px 22px; }
