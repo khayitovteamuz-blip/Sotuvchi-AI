@@ -367,24 +367,25 @@ async function saveCategoryForm() {
     };
 
     try {
-        if (mode === 'edit') {
-            await fetch(`/api/admin/categories/${catId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-        } else {
-            await fetch('/api/admin/categories', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
+        const url = mode === 'edit' ? `/api/admin/categories/${catId}` : '/api/admin/categories';
+        const resp = await fetch(url, {
+            method: mode === 'edit' ? 'PUT' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        // fetch does not throw on 4xx — without this check a rejected save
+        // closed the modal and looked like it had worked.
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            toast(err.detail || 'Kategoriyani saqlab bo\'lmadi', 'error');
+            return;
         }
         closeCategoryModal();
         loadCategories();
+        toast(mode === 'edit' ? 'Kategoriya yangilandi' : 'Kategoriya qo\'shildi');
     } catch (e) {
         console.error('Kategoriyani saqlashda xatolik:', e);
-        alert('Kategoriyani saqlashda xatolik yuz berdi!');
+        toast('Tarmoq xatosi — kategoriya saqlanmadi', 'error');
     }
 }
 
@@ -405,46 +406,6 @@ function populateCategoryDropdown() {
         opt.value = 'Umumiy';
         opt.textContent = '📁 Umumiy';
         select.appendChild(opt);
-    }
-}
-
-// Add / Delete Category Modal Handlers
-function openAddCategoryModal() {
-    document.getElementById('cat-name').value = '';
-    document.getElementById('category-modal').style.display = 'flex';
-}
-
-function closeCategoryModal() {
-    document.getElementById('category-modal').style.display = 'none';
-}
-
-async function saveCategoryForm() {
-    const name = document.getElementById('cat-name').value.trim();
-    const icon = document.getElementById('cat-icon').value;
-
-    if (!name) {
-        alert('Iltimos, kategoriya nomini kiriting!');
-        return;
-    }
-
-    const newCat = {
-        id: 'cat-' + Date.now(),
-        name: name,
-        icon: icon,
-        product_count: 0
-    };
-
-    try {
-        await fetch('/api/admin/categories', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newCat)
-        });
-
-        closeCategoryModal();
-        loadCategories();
-    } catch (e) {
-        console.error('Kategoriyani saqlashda xatolik:', e);
     }
 }
 
@@ -584,7 +545,7 @@ async function loadDashboardStats() {
                     'operatorga uzatildi', null, 'openInboxOperator()');
 
         renderStatusBars(an);
-        renderCostPanel(an, data);
+        renderUsagePanel(data);
         renderRecentOrders(data.recent_orders);
     } catch (e) {
         console.error('Stats yuklashda xatolik:', e);
@@ -637,34 +598,45 @@ async function loadSheetsStatus() {
     }
 }
 
-/** AI spend — the number that decides whether a tariff is profitable. Shown in
- *  money when prices are configured, because tokens alone price nothing. */
-function renderCostPanel(an, data) {
-    const box = document.getElementById('dashboard-cost');
+/** How much of the tariff is spent — the question an owner actually asks.
+ *
+ *  This card used to show the platform's own token cost and margin advice
+ *  ("the tariff price must be above this cost"), which is the operator's
+ *  number, not the shop's. The shop needs to know how close it is to its
+ *  limits; the cost view lives in the operator panel.
+ */
+async function renderUsagePanel(data) {
+    const box = document.getElementById('dashboard-usage');
     if (!box) return;
-    const convs = Math.max(an.total_conversations, 1);
-    const perConv = Math.round(an.total_tokens / convs);
-    const cost = an.cost || {};
 
-    let money = '';
-    if (cost.configured && cost.rate_configured) {
-        money = `
-        <div class="cost-row cost-row--lead"><span>AI xarajati</span><b>${fmtNum(cost.uzs)} <small>UZS</small></b></div>
-        <div class="cost-row"><span>1 buyurtmaga</span><b>${fmtNum(an.cost_per_order_uzs)} <small>UZS</small></b></div>`;
-    } else if (cost.configured) {
-        money = `<div class="cost-row cost-row--lead"><span>AI xarajati</span><b>$${cost.usd}</b></div>`;
+    let u;
+    try {
+        const resp = await fetch('/api/admin/usage');
+        if (!resp.ok) throw new Error('usage');
+        u = await resp.json();
+    } catch (e) {
+        box.innerHTML = '<p class="cost-hint">Tarif ma\'lumotini yuklab bo\'lmadi.</p>';
+        return;
     }
 
-    const hint = cost.configured
-        ? "Tarif narxi shu xarajatdan yuqori bo'lishi kerak."
-        : "Pulda ko'rish uchun .env da AI_PRICE_INPUT_PER_1M, AI_PRICE_OUTPUT_PER_1M va USD_TO_UZS ni to'ldiring.";
+    const cap = (v) => (v === null || v === undefined ? '∞' : fmtNum(v));
+    const row = (label, m) => {
+        const pct = m.pct === null || m.pct === undefined ? null : Math.min(m.pct, 100);
+        // Red before the wall is hit, not after: at 90% the owner still has
+        // time to upgrade, at 100% the AI has already stopped answering.
+        const tone = pct === null ? '' : pct >= 90 ? ' is-danger' : pct >= 70 ? ' is-warn' : '';
+        return `
+        <div class="cost-row"><span>${label}</span><b>${fmtNum(m.used)} / ${cap(m.limit)}</b></div>
+        ${pct === null ? '' : `<div class="usage-bar${tone}"><i style="width:${pct}%"></i></div>`}`;
+    };
 
-    box.innerHTML = money + `
-        <div class="cost-row"><span>Jami token</span><b>${fmtNum(an.total_tokens)}</b></div>
-        <div class="cost-row"><span>Kirish / chiqish</span><b>${fmtNum(an.prompt_tokens)} / ${fmtNum(an.output_tokens)}</b></div>
-        <div class="cost-row"><span>1 suhbatga o'rtacha</span><b>${fmtNum(perConv)}</b></div>
+    box.innerHTML = `
+        <div class="cost-row cost-row--lead"><span>Tarif</span><b>${escapeHtml(u.plan_title || u.plan)}</b></div>
+        ${row('AI xabar, shu oy', u.ai_messages)}
+        ${row('Mahsulot', u.products)}
+        ${row('Operator', u.operators)}
         <div class="cost-row"><span>AI yopgan savdo</span><b>${fmtNum(data.ai_order_count)} ta</b></div>
-        <p class="cost-hint">${hint}</p>`;
+        <p class="cost-hint">Limit tugasa AI javob bermay qo'yadi va suhbat operatorga uzatiladi.</p>`;
 }
 
 function renderRecentOrders(orders) {
@@ -1092,13 +1064,15 @@ function renderOrdersTable() {
 
         const tr = document.createElement('tr');
 
-        // Build row HTML safely (no inline quotes inside template)
+        // Every value below reaches us from a Telegram customer, so it is
+        // escaped: an unescaped name let an outsider run script in the shop
+        // owner's panel, with the owner's session attached.
         tr.innerHTML = `
-            <td><code>${o.id}</code></td>
-            <td style="font-size: 12px; color: var(--text-muted);">${o.created_at}</td>
-            <td><strong>${o.customer_name}</strong></td>
-            <td>${o.customer_phone}</td>
-            <td style="max-width: 220px; font-size: 13px;">${itemsStr}</td>
+            <td><code>${escapeHtml(o.id)}</code></td>
+            <td style="font-size: 12px; color: var(--text-muted);">${escapeHtml(o.created_at)}</td>
+            <td><strong>${escapeHtml(o.customer_name)}</strong></td>
+            <td>${escapeHtml(o.customer_phone)}</td>
+            <td style="max-width: 220px; font-size: 13px;">${escapeHtml(itemsStr)}</td>
             <td><strong>${o.total_amount.toLocaleString()} UZS</strong></td>
             <td>
                 <select class="status-select ${badgeClass}" onchange="updateOrderStatus('${o.id}', this.value)">

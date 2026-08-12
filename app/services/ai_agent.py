@@ -257,6 +257,13 @@ class AISalesAgent:
             session, tenant_id, conversation, reply_text, tool_trace
         )
 
+        # "AI N marta javob topolmasa — operatorga uzat". Both panels have let
+        # the owner set this for a long time; until now nothing read it, so the
+        # promise was never kept and a customer could circle for ever.
+        tool_trace = await self._auto_handoff_on_repeated_failure(
+            session, tenant_id, conversation, cfg, tool_trace
+        )
+
         latency_ms = int((time.monotonic() - t0) * 1000)
         intent = self._intent_from_trace(tool_trace) or self._detect_intent(user_message)
 
@@ -654,6 +661,60 @@ class AISalesAgent:
         r"|mutaxassis(imiz)?\s+.*(bog'lan|javob)",
         re.IGNORECASE | re.DOTALL,
     )
+
+    # Tools whose success means the turn produced something real, and the
+    # fields that say "this call actually found data".
+    _PRODUCTIVE_TOOLS = {"handoff_to_human", "create_order", "send_product_photo"}
+
+    @staticmethod
+    def _turn_was_useless(trace: List[Dict[str, Any]]) -> bool:
+        """Did this turn fail to back its answer with any of the shop's data?
+
+        A turn with no tool calls at all is not counted: a greeting or a thank-you
+        needs no lookup, and counting those would escalate polite chatter.
+        """
+        if not trace:
+            return False
+        for t in trace:
+            name, res = t["name"], (t.get("result") or {})
+            if name in AISalesAgent._PRODUCTIVE_TOOLS:
+                return False
+            if res.get("found") not in (0, False, None):
+                return False
+            if name == "list_categories" and res.get("categories"):
+                return False
+            if name == "calc_delivery" and res.get("known"):
+                return False
+        return True
+
+    async def _auto_handoff_on_repeated_failure(
+        self, session, tenant_id, conversation, cfg, trace
+    ):
+        """Escalate after `auto_handoff_after` consecutive fruitless turns."""
+        limit = cfg.auto_handoff_after or 0
+        if limit <= 0 or conversation.status != "ai":
+            return trace
+
+        if not self._turn_was_useless(trace):
+            conversation.fail_streak = 0
+            return trace
+
+        conversation.fail_streak = (conversation.fail_streak or 0) + 1
+        if conversation.fail_streak < limit:
+            return trace
+
+        logger.info(
+            f"Conversation {conversation.id}: {conversation.fail_streak} fruitless "
+            f"turns in a row (limit {limit}) — handing to an operator"
+        )
+        reason = f"AI ketma-ket {conversation.fail_streak} marta javob topa olmadi"
+        result = await ai_tools.execute_tool(
+            "handoff_to_human", {"reason": reason}, session, tenant_id, conversation
+        )
+        conversation.fail_streak = 0
+        return trace + [{"name": "handoff_to_human",
+                         "args": {"reason": "auto-handoff-after-failures"},
+                         "result": result}]
 
     async def _enforce_promised_handoff(self, session, tenant_id, conversation, reply_text, trace):
         """Execute a handoff the model promised in text but never called."""

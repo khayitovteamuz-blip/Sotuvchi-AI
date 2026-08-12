@@ -399,7 +399,12 @@ async def get_settings(session: AsyncSession, tenant_id: str) -> TenantSettings:
 
 async def save_settings(session: AsyncSession, tenant_id: str, data: dict) -> TenantSettings:
     s = await get_settings(session, tenant_id)
-    plain = ("system_prompt", "ai_provider", "model_name", "temperature",
+    # ai_provider / model_name are deliberately NOT writable from here. Which
+    # model serves a shop is the platform operator's decision (it depends on
+    # which API keys the server holds), and the request schema carries defaults
+    # — a business panel that posted settings without them would have silently
+    # reset a Claude tenant back to Gemini.
+    plain = ("system_prompt", "temperature",
              "bot_enabled", "sheets_sync_enabled", "ai_name", "ai_tone",
              "ai_language", "greeting_message", "auto_handoff_after")
     for field in plain:

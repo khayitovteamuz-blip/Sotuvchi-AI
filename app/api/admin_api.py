@@ -195,18 +195,70 @@ UPLOADS_DIR = BASE_DIR / "static" / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+# The extension is chosen from this table, never taken from the uploaded
+# filename: a name like "x.png/../../app/main" would otherwise write outside
+# the uploads folder, and an .svg or .html would be served from our own origin
+# — stored XSS against a shop owner who is logged in.
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+}
+MAX_IMAGE_BYTES = 5 * 1024 * 1024  # matches the "max 5MB" the panel promises
+
+# Enough of the file to recognise it. The browser's Content-Type is a claim,
+# not a fact, so the bytes have to agree with it.
+_MAGIC = (
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+
+
+def _sniff(data: bytes) -> str:
+    for prefix, mime in _MAGIC:
+        if data.startswith(prefix):
+            return mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return ""
+
+
 @router.post("/upload")
 async def upload_image(file: UploadFile = File(...), user: User = Depends(require_auth)):
+    declared = (file.content_type or "").split(";")[0].strip().lower()
+    if declared not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Faqat JPG, PNG, WEBP yoki GIF rasm yuklash mumkin.",
+        )
+
+    contents = await file.read(MAX_IMAGE_BYTES + 1)
+    if len(contents) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Rasm hajmi 5 MB dan oshmasin.")
+    if not contents:
+        raise HTTPException(status_code=400, detail="Fayl bo'sh.")
+
+    actual = _sniff(contents)
+    if actual != declared:
+        raise HTTPException(
+            status_code=400,
+            detail="Fayl rasm emas yoki turi mos kelmadi.",
+        )
+
+    # Tenant-scoped folder: one shop's product photos are not guessable from
+    # another's, and a tenant can be cleaned up in one directory.
+    folder = UPLOADS_DIR / user.tenant_id
+    folder.mkdir(parents=True, exist_ok=True)
+    filename = f"img_{uuid.uuid4().hex}.{ALLOWED_IMAGE_TYPES[declared]}"
     try:
-        ext = file.filename.split(".")[-1] if "." in file.filename else "png"
-        filename = f"img_{uuid.uuid4().hex[:10]}.{ext}"
-        filepath = UPLOADS_DIR / filename
-        contents = await file.read()
-        with open(filepath, "wb") as f:
-            f.write(contents)
-        return {"status": "success", "image_url": f"/static/uploads/{filename}"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Rasm yuklashda xatolik: {str(e)}")
+        (folder / filename).write_bytes(contents)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Rasmni saqlab bo'lmadi: {e}")
+
+    return {"status": "success", "image_url": f"/static/uploads/{user.tenant_id}/{filename}"}
 
 
 # ─── Catalog import (Excel / CSV) ─────────────────────────────────────────────
