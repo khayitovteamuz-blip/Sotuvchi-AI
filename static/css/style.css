@@ -1763,3 +1763,17 @@ textarea.form-control {
 }
 .bill-plan .btn-primary { margin-top: auto; width: 100%; }
 .bill-plan-free { margin-top: auto; font-size: 12.5px; color: var(--text-dim); text-align: center; }
+
+/* Autofill on the dark sign-in overlay.
+   The browser repaints filled fields with its own pale yellow and text colour,
+   which on a dark form reads as a rendering fault. The background cannot be set
+   directly, so an inset shadow covers it. */
+#auth-overlay input:-webkit-autofill,
+#auth-overlay input:-webkit-autofill:hover,
+#auth-overlay input:-webkit-autofill:focus {
+    -webkit-text-fill-color: #ffffff;
+    -webkit-box-shadow: 0 0 0 1000px #1e293b inset;
+    box-shadow: 0 0 0 1000px #1e293b inset;
+    caret-color: #ffffff;
+    transition: background-color 9999s ease-in-out 0s;
+}

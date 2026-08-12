@@ -92,6 +92,21 @@ button { background: none; border: none; cursor: pointer; }
 .field input:focus, .field select:focus, .field textarea:focus {
     outline: none; border-color: var(--green);
 }
+
+/* Autofill repaints the field with the browser's own pale yellow and its own
+   text colour, which on a dark form looks like a rendering fault. There is no
+   way to set the background directly, so an inset shadow covers it; the long
+   transition keeps Chrome from flashing yellow before the shadow applies. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+    -webkit-text-fill-color: var(--fg);
+    -webkit-box-shadow: 0 0 0 1000px var(--bg) inset;
+    box-shadow: 0 0 0 1000px var(--bg) inset;
+    caret-color: var(--fg);
+    transition: background-color 9999s ease-in-out 0s;
+}
 .field textarea { min-height: 150px; resize: vertical; line-height: 1.65; font-size: 13px; }
 .login-err { min-height: 20px; margin-top: 12px; font-size: 13px; color: var(--red); font-weight: 600; }
 .login-note { margin-top: 4px; font-size: 11.5px; color: var(--fg-3); line-height: 1.7; }
@@ -114,7 +129,14 @@ button { background: none; border: none; cursor: pointer; }
     background: linear-gradient(140deg, var(--green-lt), var(--green-dk));
     color: var(--on-green); border-color: transparent; font-weight: 700;
 }
-.btn-go:hover { filter: brightness(1.08); border-color: transparent; }
+/* The background must be restated here. `.btn:hover` and `.btn-go:hover` have
+   equal specificity, so the later one wins per property — but `.btn:hover`
+   still outranks plain `.btn-go`, and it was repainting the button dark while
+   the near-black label stayed, erasing the text on hover. */
+.btn-go:hover {
+    background: linear-gradient(140deg, #1ae09b, var(--green));
+    border-color: transparent; color: var(--on-green);
+}
 .btn-green { background: var(--green); color: var(--on-green); border-color: transparent; font-weight: 700; }
 .btn-green:hover { background: var(--green-lt); border-color: transparent; color: var(--on-green); }
 .btn-ghost { border-color: var(--line); color: var(--fg-2); }
