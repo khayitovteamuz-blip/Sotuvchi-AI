@@ -733,6 +733,7 @@ async function openTenant(id) {
         </div>
       </div>
 
+      <div class="prof-wide">
         <div class="block">
             <div class="block-t">Foydalanuvchilar</div>
             ${d.users.map((x) => `
@@ -776,7 +777,8 @@ async function openTenant(id) {
                 butunlay o'chadi. Qaytarib bo'lmaydi.
             </p>
             <div class="acts"><button class="btn btn-red" id="dr-delete">Biznesni o'chirish</button></div>
-        </div>`;
+        </div>
+      </div>`;
 
     $('dr-save-plan').addEventListener('click', () =>
         patchTenant(id, { plan: $('dr-plan').value }, 'Tarif saqlandi'));

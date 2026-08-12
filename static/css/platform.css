@@ -485,10 +485,28 @@ tr.sig-off { opacity: 0.55; }
    (channel, AI, knowledge). Sections that concern both run full width below. */
 .prof {
     display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 22px; align-items: start;
+    gap: 22px; align-items: stretch;
 }
 .prof-col { display: flex; flex-direction: column; min-width: 0; }
-@media (max-width: 1080px) { .prof { grid-template-columns: minmax(0, 1fr); } }
+/* The last card in each column absorbs the height difference, so both columns
+   finish on the same line instead of one trailing below the other. */
+.prof-col > .block:last-child { flex: 1; margin-bottom: 0; }
+
+/* Sections that belong to neither column sit side by side beneath them. The
+   payment log gets the widest share — it is a statement, and squeezing dates,
+   amounts and notes into a third of the width would wrap every row. */
+.prof-wide {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) minmax(0, 0.9fr);
+    gap: 22px; align-items: start; margin-top: 22px;
+}
+.prof-wide > .block { margin-bottom: 0; }
+
+@media (max-width: 1080px) {
+    .prof, .prof-wide { grid-template-columns: minmax(0, 1fr); }
+    .prof-col > .block:last-child { margin-bottom: 22px; }
+    .prof-wide > .block { margin-bottom: 22px; }
+}
 
 .block {
     margin-bottom: 22px; min-width: 0;
@@ -594,7 +612,7 @@ tr.sig-off { opacity: 0.55; }
    as a statement, which is what a disputed balance needs. */
 .paylog { display: flex; flex-direction: column; }
 .paylog-row {
-    display: grid; grid-template-columns: 108px 1fr auto auto;
+    display: grid; grid-template-columns: minmax(84px, auto) 1fr auto auto;
     gap: 12px; align-items: center;
     padding: 10px 0; border-bottom: 1px solid var(--line);
     font-size: 12.5px;
