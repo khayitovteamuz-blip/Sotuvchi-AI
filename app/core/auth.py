@@ -24,7 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import security
 from app.core.config import settings
 from app.db.base import get_session
-from app.db.models import User, UserSession
+from app.db.models import Tenant, User, UserSession
+from app.services import billing_service
 
 SESSION_COOKIE = "sotuvchi_session"
 SESSION_TTL = timedelta(days=7)
@@ -155,6 +156,18 @@ async def require_auth(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Foydalanuvchi topilmadi yoki faol emas.",
         )
+
+    # A tariff that ran out closes the business. Evaluated here rather than
+    # on a timer: a timer lives in one worker and the others never see it.
+    tenant = await db.get(Tenant, user.tenant_id)
+    if tenant is not None:
+        await billing_service.enforce_expiry(db, tenant)
+        if not tenant.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Obuna muddati tugagan yoki hisob to'xtatilgan. "
+                       "Tarifni yangilash uchun qo'llab-quvvatlashga murojaat qiling.",
+            )
 
     # Sliding expiry: someone working all week should not be logged out mid-task.
     if now - sess.last_seen_at > TOUCH_INTERVAL:

@@ -40,6 +40,7 @@ from app.db.models import (
     LoginAttempt,
     Message,
     Order,
+    Payment,
     Plan,
     PlatformAdmin,
     PlatformSession,
@@ -48,7 +49,7 @@ from app.db.models import (
     User,
     UserSession,
 )
-from app.services import audit_service, quota_service, tenant_service
+from app.services import audit_service, billing_service, quota_service, tenant_service
 from app.services.bot_service import bot_service
 
 logger = logging.getLogger("platform_api")
@@ -312,6 +313,9 @@ async def list_tenants(session: AsyncSession = Depends(get_session)):
             "ai_messages_month": ai_month.get(t.id, 0),
             "ai_limit": plan.max_ai_messages_monthly if plan else None,
             "product_limit": plan.max_products if plan else None,
+            "balance": float(t.balance or 0),
+            "sub_status": billing_service.status_of(t),
+            "days_left": (lambda d: round(d, 1) if d is not None else None)(billing_service.days_left(t)),
             "telegram_connected": bool(t.telegram_bot_token),
             "telegram_username": t.telegram_bot_username,
             "last_activity": last.strftime("%Y-%m-%d %H:%M") if last else None,
@@ -341,6 +345,7 @@ async def tenant_detail(tenant_id: str, session: AsyncSession = Depends(get_sess
         "is_active": tenant.is_active,
         "created_at": tenant.created_at.strftime("%Y-%m-%d %H:%M") if tenant.created_at else None,
         "usage": await quota_service.usage(session, tenant),
+        "billing": await billing_service.summary(session, tenant),
         "telegram": {
             "connected": bool(tenant.telegram_bot_token),
             "username": tenant.telegram_bot_username,
@@ -406,6 +411,13 @@ async def update_tenant(
     if patch.is_active is not None and patch.is_active != tenant.is_active:
         changes["is_active"] = {"from": tenant.is_active, "to": patch.is_active}
         tenant.is_active = patch.is_active
+        # Suspension stops the subscription clock instead of spending it, so a
+        # business switched off for a fortnight comes back with the days it had.
+        if patch.is_active:
+            billing_service.unfreeze(tenant)
+        else:
+            billing_service.freeze(tenant)
+        changes["days_left"] = round(billing_service.days_left(tenant) or 0, 1)
 
     if patch.business_name and patch.business_name.strip() != tenant.business_name:
         changes["business_name"] = {"from": tenant.business_name, "to": patch.business_name.strip()}
@@ -944,6 +956,117 @@ async def update_admin(
         session, admin, "admin_update", None, {"email": target.email, "is_active": patch.is_active}, request
     )
     return {"status": "success"}
+
+
+# ─── Billing ──────────────────────────────────────────────────────────────────
+@router.get("/payments")
+async def list_payments(
+    status: str = "pending",
+    limit: int = 100,
+    session: AsyncSession = Depends(get_session),
+):
+    """Top-up claims awaiting a decision, newest first."""
+    q = (
+        select(Payment, Tenant.business_name)
+        .join(Tenant, Tenant.id == Payment.tenant_id)
+        .order_by(Payment.created_at.desc())
+        .limit(min(limit, 500))
+    )
+    if status != "all":
+        q = q.where(Payment.status == status)
+
+    return [
+        {
+            "id": p.id,
+            "tenant_id": p.tenant_id,
+            "business_name": name,
+            "amount": p.amount,
+            "kind": p.kind,
+            "status": p.status,
+            "note": p.note,
+            "plan_name": p.plan_name,
+            "created_at": p.created_at.strftime("%Y-%m-%d %H:%M") if p.created_at else None,
+            "confirmed_by": p.confirmed_by,
+        }
+        for p, name in (await session.execute(q)).all()
+    ]
+
+
+@router.post("/payments/{payment_id}/confirm")
+async def confirm_payment(
+    payment_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    """Money only becomes balance here. A business filing a claim cannot credit
+    itself — an admin has to say the transfer actually arrived."""
+    payment = await session.get(Payment, payment_id)
+    if not payment:
+        raise HTTPException(status_code=404, detail="To'lov topilmadi.")
+    tenant = await _get_tenant_or_404(session, payment.tenant_id)
+    try:
+        await billing_service.confirm_topup(session, payment, tenant, admin.email)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await audit_service.log(
+        session, admin, "payment_confirm", tenant.id,
+        {"amount": payment.amount, "balance": tenant.balance}, request,
+    )
+    return {"status": "success", "balance": tenant.balance}
+
+
+@router.post("/payments/{payment_id}/reject")
+async def reject_payment(
+    payment_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    payment = await session.get(Payment, payment_id)
+    if not payment:
+        raise HTTPException(status_code=404, detail="To'lov topilmadi.")
+    try:
+        await billing_service.reject_topup(session, payment, admin.email)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await audit_service.log(
+        session, admin, "payment_reject", payment.tenant_id, {"amount": payment.amount}, request
+    )
+    return {"status": "success"}
+
+
+class BalanceAdjust(BaseModel):
+    amount: float
+    note: str = ""
+
+
+@router.post("/tenants/{tenant_id}/balance")
+async def adjust_tenant_balance(
+    tenant_id: str,
+    data: BalanceAdjust,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    """Manual correction — a refund, a goodwill credit, a bank fee."""
+    tenant = await _get_tenant_or_404(session, tenant_id)
+    if data.amount == 0:
+        raise HTTPException(status_code=400, detail="Summa nol bo'lmasligi kerak.")
+    if not data.note.strip():
+        raise HTTPException(status_code=400, detail="Sabab yozilishi shart.")
+    await billing_service.adjust_balance(session, tenant, data.amount, admin.email, data.note)
+    await audit_service.log(
+        session, admin, "balance_adjust", tenant_id,
+        {"amount": data.amount, "note": data.note, "balance": tenant.balance}, request,
+    )
+    return {"status": "success", "balance": tenant.balance}
+
+
+@router.get("/tenants/{tenant_id}/payments")
+async def tenant_payments(tenant_id: str, session: AsyncSession = Depends(get_session)):
+    await _get_tenant_or_404(session, tenant_id)
+    return await billing_service.history(session, tenant_id)
 
 
 # ─── Export ───────────────────────────────────────────────────────────────────

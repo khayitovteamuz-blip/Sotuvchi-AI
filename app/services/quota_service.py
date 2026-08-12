@@ -109,6 +109,13 @@ async def ai_allowed(db: AsyncSession, tenant: Tenant) -> bool:
     real customer waiting, and the caller needs to reply politely rather than
     surface an error.
     """
+    # An expired or suspended business gets no AI, however much quota is left.
+    from app.services import billing_service
+    await billing_service.enforce_expiry(db, tenant)
+    if not tenant.is_active:
+        logger.warning(f"Tenant {tenant.id} is inactive — AI withheld")
+        return False
+
     plan = await get_plan(db, tenant)
     if plan is None or plan.max_ai_messages_monthly is None:
         return True

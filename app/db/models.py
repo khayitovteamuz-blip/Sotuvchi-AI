@@ -79,8 +79,36 @@ class Plan(Base):
     max_products: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     max_ai_messages_monthly: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     max_operators: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # A tariff lasts this long from the day it is bought. Data, not a constant,
+    # so a promotional period needs no deploy.
+    duration_days: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Payment(Base):
+    """Money ledger: every top-up request and every subscription charge.
+
+    Kept as rows rather than a running total on the tenant so a disputed balance
+    can be reconstructed — "why is my balance this number" has to be answerable.
+    Positive amounts add, negative amounts spend.
+    """
+    __tablename__ = "payments"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    amount: Mapped[float] = mapped_column(Float)
+    kind: Mapped[str] = mapped_column(String(24))       # topup | subscription | adjustment
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    plan_name: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
 
 class PlatformAuditLog(Base):
@@ -113,6 +141,20 @@ class Tenant(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     plan: Mapped[str] = mapped_column(String(32), default="start")  # start | business | pro
+
+    # ── Billing ──
+    # Balance in UZS. Top-ups land here only after an admin confirms the
+    # transfer actually arrived; a business cannot credit itself.
+    balance: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    subscription_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Suspension stops the clock rather than burning the days: the moment of
+    # freezing is recorded, and on resume the expiry moves forward by exactly
+    # how long the account sat idle. Unused days therefore survive.
+    frozen_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Per-tenant Telegram channel (each business connects its OWN bot)
     telegram_bot_token: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)

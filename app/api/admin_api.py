@@ -6,6 +6,7 @@ import uuid
 from typing import List
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import periods
@@ -13,9 +14,10 @@ from app.core.auth import require_auth
 from app.core.config import BASE_DIR
 from app.db import repo
 from app.db.base import get_session
-from app.db.models import User
+from app.db.models import Plan, User
 from app.models.schema import Category, DashboardStats, Order, Product, SystemSettings
-from app.services import categorize_service, import_service, quota_service, tenant_service
+from app.services import (billing_service, categorize_service, import_service,
+                          quota_service, tenant_service)
 from app.services.sheets_service import sheets_service
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
@@ -80,6 +82,72 @@ async def get_usage(user: User = Depends(require_auth), session: AsyncSession = 
     """What the business has consumed against its tariff."""
     tenant = await tenant_service.get_tenant(session, user.tenant_id)
     return await quota_service.usage(session, tenant)
+
+
+# ─── Billing (the business's own account) ─────────────────────────────────────
+@router.get("/billing")
+async def get_billing(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    tenant = await tenant_service.get_tenant(session, user.tenant_id)
+    plans = (
+        await session.execute(
+            select(Plan).where(Plan.is_active.is_(True)).order_by(Plan.sort_order)
+        )
+    ).scalars().all()
+    return {
+        **await billing_service.summary(session, tenant),
+        "plans": [
+            {
+                "name": p.name,
+                "title": p.title,
+                "price_uzs": p.price_uzs,
+                "duration_days": p.duration_days,
+                "max_products": p.max_products,
+                "max_ai_messages_monthly": p.max_ai_messages_monthly,
+                "max_operators": p.max_operators,
+                "current": p.name == tenant.plan,
+            }
+            for p in plans
+        ],
+        "history": await billing_service.history(session, user.tenant_id, limit=20),
+    }
+
+
+@router.post("/billing/topup")
+async def request_topup(
+    amount: float = Body(..., embed=True),
+    note: str = Body("", embed=True),
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+):
+    """File a transfer claim. It sits pending until an operator confirms the
+    money arrived — a business cannot credit its own balance."""
+    try:
+        payment = await billing_service.request_topup(session, user.tenant_id, amount, note)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "status": "pending",
+        "id": payment.id,
+        "message": "So'rov yuborildi. To'lov tasdiqlangach hisobingizga tushadi.",
+    }
+
+
+@router.post("/billing/subscribe")
+async def subscribe(
+    plan: str = Body(..., embed=True),
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+):
+    """Buy or renew a tariff from the balance."""
+    tenant = await tenant_service.get_tenant(session, user.tenant_id)
+    target = await session.get(Plan, plan)
+    if not target or not target.is_active:
+        raise HTTPException(status_code=404, detail="Bunday tarif yo'q.")
+    try:
+        return await billing_service.buy_plan(session, tenant, target)
+    except ValueError as e:
+        # 402: the fix is money, not a corrected request
+        raise HTTPException(status_code=402, detail=str(e))
 
 
 @router.put("/products/{product_id}", response_model=Product)
