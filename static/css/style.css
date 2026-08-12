@@ -1038,23 +1038,38 @@ textarea.form-control {
    Fixed 3 columns so six tiles land as a clean 2×3 block. auto-fit used to
    wrap them 4+2, which left a ragged gap and made the tiles uneven. */
 /* Six identical tiles make every figure equally important, which means none of
-   them is. The first card — what the AI actually earned — takes two columns and
-   a larger figure; the rest are the supporting detail. */
+   them is — so the first card, what the AI actually earned, is given weight.
+   The grid is twelve columns because three columns cannot carry a double-width
+   card without stranding the last tile alone on its own row:
+       6 + 3 + 3  = 12   revenue leads, orders and chats beside it
+       4 + 4 + 4  = 12   the derived figures, evenly
+   Both rows fill completely, so the block ends on a straight edge. */
 .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(12, minmax(0, 1fr));
     gap: 14px;
 }
-.kpi-card:first-child { grid-column: span 2; }
-.kpi-card:first-child .kpi-value { font-size: 38px; }
+.kpi-card { grid-column: span 4; }
+.kpi-card:first-child { grid-column: span 6; }
+.kpi-card:nth-child(2), .kpi-card:nth-child(3) { grid-column: span 3; }
+
+.kpi-card:first-child .kpi-value { font-size: 40px; }
 .kpi-card:first-child .kpi-icon { width: 40px; height: 40px; font-size: 19px; }
+
 @media (max-width: 1180px) {
-    .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    /* Six columns: revenue takes the full width, then 2 + 3 below it */
+    .kpi-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .kpi-card { grid-column: span 2; }
+    .kpi-card:first-child { grid-column: span 6; }
+    .kpi-card:nth-child(2), .kpi-card:nth-child(3) { grid-column: span 3; }
 }
 @media (max-width: 680px) {
     .kpi-grid { grid-template-columns: 1fr; }
-    .kpi-card:first-child { grid-column: span 1; }
-    .kpi-card:first-child .kpi-value { font-size: 30px; }
+    .kpi-card,
+    .kpi-card:first-child,
+    .kpi-card:nth-child(2),
+    .kpi-card:nth-child(3) { grid-column: span 1; }
+    .kpi-card:first-child .kpi-value { font-size: 32px; }
 }
 
 .kpi-card {
@@ -1088,13 +1103,17 @@ textarea.form-control {
     font-variant-numeric: tabular-nums;   /* digits stay aligned across tiles */
 }
 .kpi-value small { font-size: 15px; font-weight: 700; color: var(--text-muted); margin-left: 3px; }
+/* Sized to inform, not to alarm. A quiet month puts a down-arrow on three tiles
+   at once, and in a loud red beside a large 0 that reads as a system fault
+   rather than as trade being slow. */
 .kpi-growth {
-    font-size: 11.5px; font-weight: 700; margin-left: 7px;
-    padding: 2px 6px; border-radius: 6px; vertical-align: middle;
-    letter-spacing: 0;
+    font-family: 'Onest', sans-serif;
+    font-size: 11px; font-weight: 600; margin-left: 8px;
+    padding: 2px 7px; border-radius: 20px; vertical-align: middle;
+    letter-spacing: 0; white-space: nowrap;
 }
-.kpi-growth.is-up { color: #00875a; background: rgba(0, 184, 124, 0.13); }
-.kpi-growth.is-down { color: #c81e4a; background: rgba(225, 29, 72, 0.11); }
+.kpi-growth.is-up { color: var(--accent-green); background: rgba(4, 120, 87, 0.09); }
+.kpi-growth.is-down { color: var(--accent-danger); background: rgba(190, 18, 60, 0.07); }
 
 /* Reporting-period switch above the KPI grid */
 .period-picker { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
