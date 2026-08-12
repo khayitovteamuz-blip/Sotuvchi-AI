@@ -524,7 +524,7 @@ function renderRows() {
                     <span class="biz-av">${esc(initials(t.business_name))}</span>
                     <div>
                         <div class="biz-name">${esc(t.business_name)}</div>
-                        <div class="biz-mail">${esc(t.owner_email || '—')}</div>
+                        <div class="biz-mail">${esc(t.phone || t.owner_email || '—')}</div>
                     </div>
                 </div>
             </td>
@@ -619,6 +619,27 @@ async function openTenant(id) {
 
     $('drawer-body').innerHTML = `
         <div class="block">
+            <div class="block-t">Egasining kontakti</div>
+            <label class="field"><span>Ism</span>
+                <input type="text" id="dr-owner" value="${esc(d.contact.owner_name || '')}"></label>
+            <label class="field"><span>Telefon</span>
+                <input type="tel" id="dr-phone" value="${esc(d.contact.phone || '')}" placeholder="+998 90 123 45 67"></label>
+            <label class="field"><span>Telegram</span>
+                <input type="text" id="dr-tgc" value="${esc(d.contact.telegram_contact || '')}" placeholder="@username"></label>
+            <label class="field"><span>Manzil</span>
+                <input type="text" id="dr-addr" value="${esc(d.contact.address || '')}"></label>
+            <label class="field"><span>Izoh</span>
+                <input type="text" id="dr-cnote" value="${esc(d.contact.contact_note || '')}"></label>
+            <div class="kv"><span>Panel emaili</span><b>${esc((d.users[0] || {}).email || '—')}</b></div>
+            <div class="acts">
+                <button class="btn btn-green" id="dr-save-contact">Kontaktni saqlash</button>
+                ${d.contact.phone ? `<a class="btn" href="tel:${esc(d.contact.phone)}">Qo'ng'iroq</a>` : ''}
+                ${d.contact.telegram_contact ? `<a class="btn" target="_blank" rel="noopener"
+                    href="https://t.me/${esc(String(d.contact.telegram_contact).replace(/^@/, ''))}">Telegram</a>` : ''}
+            </div>
+        </div>
+
+        <div class="block">
             <div class="block-t">Tarif va sarf</div>
             <label class="field"><span>Tarif</span><select id="dr-plan">${opts}</select></label>
             <div class="kv"><span>Mahsulot</span><b>${fmt(u.products.used)} / ${cap(u.products.limit)}</b></div>
@@ -704,6 +725,24 @@ async function openTenant(id) {
         </div>
 
         <div class="block">
+            <div class="block-t">To'lovlar va tarif tarixi</div>
+            ${d.payments.length ? `<div class="paylog">${d.payments.map((p) => `
+                <div class="paylog-row">
+                    <div class="paylog-when">${esc(p.created_at)}</div>
+                    <div class="paylog-what">
+                        ${esc(PAY_KIND[p.kind] || p.kind)}${p.plan_name ? ` · ${esc(p.plan_name)}` : ''}
+                        ${p.note ? `<span class="paylog-note">${esc(p.note)}</span>` : ''}
+                    </div>
+                    <div class="paylog-sum ${p.amount >= 0 ? 'in' : 'out'}">
+                        ${p.amount >= 0 ? '+' : ''}${fmt(p.amount)}
+                    </div>
+                    <span class="state ${(PAY_STATE[p.status] || ['idle'])[0]}">${
+                        (PAY_STATE[p.status] || ['', p.status])[1]}</span>
+                </div>`).join('')}</div>`
+              : '<p class="empty">Hali to\'lov yo\'q.</p>'}
+        </div>
+
+        <div class="block">
             <div class="block-t">Xavfli hudud</div>
             <p style="font-size:12.5px;color:var(--fg-3);line-height:1.6">
                 Biznes va unga tegishli barcha narsa — mahsulotlar, buyurtmalar, suhbatlar —
@@ -729,6 +768,23 @@ async function openTenant(id) {
     }));
 
     $('dr-bot').addEventListener('click', () => patchAi(id, { bot_enabled: !d.ai.bot_enabled }));
+
+    $('dr-save-contact').addEventListener('click', async () => {
+        try {
+            const r = await api(`/api/platform/tenants/${id}/contact`, {
+                method: 'PATCH',
+                body: JSON.stringify({
+                    owner_name: $('dr-owner').value,
+                    phone: $('dr-phone').value,
+                    telegram_contact: $('dr-tgc').value,
+                    address: $('dr-addr').value,
+                    contact_note: $('dr-cnote').value,
+                }),
+            });
+            toast(r.status === 'unchanged' ? 'O\'zgarish yo\'q' : 'Kontakt saqlandi');
+            await loadTenants();
+        } catch (e) { toast(e.message, 'err'); }
+    });
 
     $('dr-balance').addEventListener('click', () => openModal({
         title: 'Balansni tuzatish',

@@ -335,6 +335,8 @@ async def list_tenants(session: AsyncSession = Depends(get_session)):
             "id": t.id,
             "business_name": t.business_name,
             "owner_email": owners.get(t.id),
+            "owner_name": t.owner_name,
+            "phone": t.phone,
             "plan": t.plan,
             "plan_title": plan.title if plan else t.plan,
             "is_active": t.is_active,
@@ -378,6 +380,17 @@ async def tenant_detail(tenant_id: str, session: AsyncSession = Depends(get_sess
         "created_at": tenant.created_at.strftime("%Y-%m-%d %H:%M") if tenant.created_at else None,
         "usage": await quota_service.usage(session, tenant),
         "billing": await billing_service.summary(session, tenant),
+        "contact": {
+            "owner_name": tenant.owner_name,
+            "phone": tenant.phone,
+            "telegram_contact": tenant.telegram_contact,
+            "address": tenant.address,
+            "contact_note": tenant.contact_note,
+        },
+        # Every top-up and every tariff activation, with its timestamp. The
+        # question "when did this business last pay, and for what" has to be
+        # answerable from the profile itself, not from a separate page.
+        "payments": await billing_service.history(session, tenant_id, limit=50),
         "telegram": {
             "connected": bool(tenant.telegram_bot_token),
             "username": tenant.telegram_bot_username,
@@ -461,6 +474,36 @@ async def update_tenant(
     await session.commit()
     await audit_service.log(session, admin, "tenant_update", tenant_id, changes, request)
     return {"status": "success", "changes": changes}
+
+
+class ContactPatch(BaseModel):
+    owner_name: Optional[str] = None
+    phone: Optional[str] = None
+    telegram_contact: Optional[str] = None
+    address: Optional[str] = None
+    contact_note: Optional[str] = None
+
+
+@router.patch("/tenants/{tenant_id}/contact")
+async def update_contact(
+    tenant_id: str,
+    patch: ContactPatch,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    tenant = await _get_tenant_or_404(session, tenant_id)
+    changed = []
+    for field, value in patch.model_dump(exclude_unset=True).items():
+        clean = (value or "").strip() or None
+        if clean != getattr(tenant, field):
+            setattr(tenant, field, clean)
+            changed.append(field)
+    if not changed:
+        return {"status": "unchanged"}
+    await session.commit()
+    await audit_service.log(session, admin, "contact_update", tenant_id, {"fields": changed}, request)
+    return {"status": "success", "changed": changed}
 
 
 class AiPatch(BaseModel):

@@ -561,3 +561,28 @@ tr.sig-off { opacity: 0.55; }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ═══ To'lov tarixi ═══
+   One line per movement: when, what, how much, and whether it counted. Reads
+   as a statement, which is what a disputed balance needs. */
+.paylog { display: flex; flex-direction: column; }
+.paylog-row {
+    display: grid; grid-template-columns: 108px 1fr auto auto;
+    gap: 12px; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid var(--line);
+    font-size: 12.5px;
+}
+.paylog-row:last-child { border-bottom: none; }
+.paylog-when { font-family: var(--mono); font-size: 11.5px; color: var(--fg-3); }
+.paylog-what { color: var(--fg); min-width: 0; }
+.paylog-note {
+    display: block; font-size: 11.5px; color: var(--fg-3);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.paylog-sum { font-family: var(--mono); font-weight: 600; text-align: right; white-space: nowrap; }
+.paylog-sum.in { color: var(--green-lt); }
+.paylog-sum.out { color: var(--fg-2); }
+@media (max-width: 560px) {
+    .paylog-row { grid-template-columns: 1fr auto; row-gap: 4px; }
+    .paylog-when { grid-column: 1 / -1; }
+}

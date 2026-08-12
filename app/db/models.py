@@ -142,6 +142,15 @@ class Tenant(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     plan: Mapped[str] = mapped_column(String(32), default="start")  # start | business | pro
 
+    # ── Owner contact ──
+    # Kept on the tenant, not only on the login user: support calls the person
+    # who runs the shop, and that is often not whoever holds the panel account.
+    owner_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    telegram_contact: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    contact_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # ── Billing ──
     # Balance in UZS. Top-ups land here only after an admin confirms the
     # transfer actually arrived; a business cannot credit itself.
