@@ -473,16 +473,25 @@ tr.sig-off { opacity: 0.55; }
 .drawer-body {
     padding: 26px 32px 60px; overflow-y: auto; overflow-x: hidden; flex: 1;
     max-width: 1500px; margin: 0 auto; width: 100%;
-    /* Grid, not `columns`: multi-column overflows sideways when the content is
-       taller than the box, which turned the profile into a horizontally
-       scrolling page. Grid keeps the overflow vertical. */
-    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0 28px; align-content: start; align-items: start;
 }
-@media (max-width: 1080px) { .drawer-body { grid-template-columns: minmax(0, 1fr); } }
+
+/* Two columns that stack independently.
+   Putting the blocks straight into a grid tied them to shared rows: each row
+   grew to its tallest block, so a short card left a hole beneath it. Each
+   column now flows on its own, and the only gap is the one set here.
+
+   The split is by meaning, not by height — left is the commercial relationship
+   (who they are, what they pay, what they owe), right is the technical setup
+   (channel, AI, knowledge). Sections that concern both run full width below. */
+.prof {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 22px; align-items: start;
+}
+.prof-col { display: flex; flex-direction: column; min-width: 0; }
+@media (max-width: 1080px) { .prof { grid-template-columns: minmax(0, 1fr); } }
 
 .block {
-    margin-bottom: 28px; min-width: 0;
+    margin-bottom: 22px; min-width: 0;
     background: var(--panel); border: 1px solid var(--line);
     border-radius: var(--r-lg); padding: 20px 22px;
 }

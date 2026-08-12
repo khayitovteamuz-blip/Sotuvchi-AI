@@ -637,6 +637,8 @@ async function openTenant(id) {
         `<option value="${esc(p.name)}" ${p.name === d.plan ? 'selected' : ''}>${esc(p.title)}</option>`).join('');
 
     $('drawer-body').innerHTML = `
+      <div class="prof">
+        <div class="prof-col">
         <div class="block">
             <div class="block-t">Egasining kontakti</div>
             <label class="field"><span>Ism</span>
@@ -686,6 +688,9 @@ async function openTenant(id) {
             </div>
         </div>
 
+        </div>
+
+        <div class="prof-col">
         <div class="block">
             <div class="block-t">Telegram</div>
             <div class="kv"><span>Bot</span><b>${d.telegram.connected ? '@' + esc(d.telegram.username || '') : 'ulanmagan'}</b></div>
@@ -724,6 +729,9 @@ async function openTenant(id) {
                 <input type="text" id="dr-return" value="${esc(d.knowledge_base.return_policy || '')}"></label>
             <div class="acts"><button class="btn btn-green" id="dr-save-kb">Bilimlar bazasini saqlash</button></div>
         </div>
+
+        </div>
+      </div>
 
         <div class="block">
             <div class="block-t">Foydalanuvchilar</div>
