@@ -979,18 +979,28 @@ async function saveProductForm() {
     }
 
     try {
-        if (editMode === 'edit') {
-            await fetch(`/api/admin/products/${productId}`, {
+        // fetch only rejects on a network failure, so a 402 from the tariff
+        // limit used to sail through here: the modal closed and the list
+        // reloaded, which looked exactly like a save. The product was never
+        // created and nothing said why.
+        const resp = editMode === 'edit'
+            ? await fetch(`/api/admin/products/${productId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(productData)
-            });
-        } else {
-            await fetch('/api/admin/products', {
+            })
+            : await fetch('/api/admin/products', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(productData)
             });
+
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            // 402 means the tariff is the obstacle, not the form — the modal
+            // stays open so nothing the owner typed is lost.
+            alert(err.detail || `Saqlab bo'lmadi (${resp.status})`);
+            return;
         }
 
         closeProductModal();
@@ -998,6 +1008,7 @@ async function saveProductForm() {
         await loadCategories();
     } catch (e) {
         console.error('Mahsulotni saqlashda xatolik:', e);
+        alert('Tarmoqda muammo. Qaytadan urinib ko\'ring.');
     }
 }
 
