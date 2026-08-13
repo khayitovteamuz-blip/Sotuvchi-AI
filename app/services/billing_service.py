@@ -31,6 +31,18 @@ logger = logging.getLogger("billing")
 # plan "free" in code meant that raising its price left it exempt from expiry —
 # a paid tariff that never had to be renewed.
 
+# How long a new business gets to reach its first sale before paying. Long
+# enough to connect a bot, import a catalogue and watch the AI close an order;
+# short enough that it is a trial and not a free tier.
+TRIAL_DAYS = 14
+
+# After the period ends the bot keeps answering for a few days. A shop whose
+# customers hit silence on the day a card failed does not renew — it leaves.
+GRACE_DAYS = 3
+
+# Warnings are sent this many days before the end, then once at expiry.
+DUNNING_STAGES = (7, 3, 1, 0)
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -49,8 +61,26 @@ def days_left(tenant: Tenant) -> Optional[float]:
     return max(0.0, (tenant.subscription_expires_at - reference).total_seconds() / 86400)
 
 
+def due_stage(left: float) -> Optional[int]:
+    """Which reminder `left` days of runway calls for, or None if it is too early.
+
+    The most urgent applicable one, not the first: with three days left both the
+    7-day and the 3-day thresholds match, and the customer needs to be told
+    three — being told seven would also mark the ladder as sent that far and
+    swallow every warning after it.
+    """
+    applicable = [s for s in DUNNING_STAGES if left <= s]
+    return min(applicable) if applicable else None
+
+
+def grace_ends_at(tenant: Tenant) -> Optional[datetime]:
+    if tenant.subscription_expires_at is None:
+        return None
+    return tenant.subscription_expires_at + timedelta(days=GRACE_DAYS)
+
+
 def status_of(tenant: Tenant, plan: Optional[Plan] = None) -> str:
-    """frozen | expired | active | free — what the panels label the account.
+    """frozen | trial | active | grace | expired | free — the account's label.
 
     `plan` is optional because some callers already hold it; without it a
     tariff is assumed to be paid, which is the safe default now that every
@@ -62,8 +92,15 @@ def status_of(tenant: Tenant, plan: Optional[Plan] = None) -> str:
         return "free"
     left = days_left(tenant)
     if left is None:
-        return "free"
-    return "active" if left > 0 else "expired"
+        # No period at all. This used to read as "free" and was the hole every
+        # self-registered business fell through; it is now an unpaid account.
+        return "expired"
+    if left > 0:
+        return "trial" if tenant.is_trial else "active"
+    # Period over, but the bot keeps working for a few days before it stops.
+    reference = tenant.frozen_at or _now()
+    end = grace_ends_at(tenant)
+    return "grace" if end is not None and reference < end else "expired"
 
 
 def freeze(tenant: Tenant) -> None:
@@ -82,24 +119,119 @@ def unfreeze(tenant: Tenant) -> None:
 
 
 async def enforce_expiry(session: AsyncSession, tenant: Tenant) -> bool:
-    """Deactivate a business whose paid period has run out.
+    """Renew, warn, or switch off — whatever the calendar now calls for.
 
     Returns True if this call changed anything. Checked wherever the tenant is
-    already being loaded, so it costs no extra query.
+    already being loaded, so it costs no extra query. The order matters: paying
+    from the balance comes first, because a business with money on account
+    should never see a grace banner at all.
     """
-    if tenant.frozen_at is not None or not tenant.is_active:
+    if tenant.frozen_at is not None:
+        return False
+    plan = await session.get(Plan, tenant.plan)
+    if is_free(plan):
         return False
     if tenant.subscription_expires_at is None:
-        return False
-    if is_free(await session.get(Plan, tenant.plan)):
-        return False
-    if tenant.subscription_expires_at > _now():
+        # An account with no period at all — every pre-trial registration. Give
+        # it the trial it should have had rather than cutting it off today.
+        tenant.subscription_expires_at = _now() + timedelta(days=TRIAL_DAYS)
+        tenant.is_trial = True
+        await session.commit()
+        logger.info(f"Tenant {tenant.id} had no period — trial granted")
+        return True
+
+    now = _now()
+    if tenant.subscription_expires_at > now:
+        await _maybe_warn(session, tenant, plan)
         return False
 
+    # The period is over. Money on the balance renews it before anything else.
+    if tenant.auto_renew and not tenant.is_trial and plan is not None:
+        if float(tenant.balance or 0) >= float(plan.price_uzs or 0):
+            await buy_plan(session, tenant, plan)
+            logger.info(f"Tenant {tenant.id} renewed automatically ({plan.name})")
+            return True
+
+    end = grace_ends_at(tenant)
+    if end is not None and now < end:
+        # Still inside grace: keep serving customers, but make sure the owner
+        # has been told. A silent bot is how a renewal turns into a churn.
+        await _maybe_warn(session, tenant, plan)
+        return False
+
+    if not tenant.is_active:
+        return False
     tenant.is_active = False
     await session.commit()
     logger.warning(f"Tenant {tenant.id} subscription expired — deactivated")
     return True
+
+
+async def _maybe_warn(session: AsyncSession, tenant: Tenant, plan: Optional[Plan]) -> None:
+    """Send the next expiry reminder, once.
+
+    There is no scheduler in this system — expiry is evaluated lazily, on panel
+    access and on every AI turn. `dunning_stage` is what stops that from
+    becoming a reminder on every request.
+    """
+    left = days_left(tenant)
+    if left is None:
+        return
+    stage = due_stage(left)
+    if stage is None:
+        return
+    # Stages count down, so a smaller number is a later warning. Anything at or
+    # above what we already sent has been covered.
+    if tenant.dunning_stage is not None and stage >= tenant.dunning_stage:
+        return
+
+    tenant.dunning_stage = stage
+    await session.commit()
+
+    # Imported here: notify_service reaches Telegram through bot_service, which
+    # imports the AI agent — importing it at module level would form a cycle.
+    from app.services import notify_service
+    try:
+        await notify_service.notify_subscription(session, tenant, plan, stage)
+    except Exception as e:
+        logger.error(f"Dunning notice failed for {tenant.id}: {e}")
+
+
+async def start_trial(tenant: Tenant) -> None:
+    """Give a brand-new business its trial period."""
+    tenant.subscription_expires_at = _now() + timedelta(days=TRIAL_DAYS)
+    tenant.is_trial = True
+    tenant.dunning_stage = None
+
+
+async def extend(session: AsyncSession, tenant: Tenant, days: int, note: str,
+                 admin_email: str) -> None:
+    """Add days by hand — goodwill after an outage, or a deal closed offline.
+
+    Recorded in the ledger like everything else, at zero, so the extension is
+    visible next to the payments rather than being an unexplained date change.
+    """
+    base = tenant.subscription_expires_at
+    now = _now()
+    if base is None or base < now:
+        base = now
+    tenant.subscription_expires_at = base + timedelta(days=days)
+    tenant.dunning_stage = None
+    if not tenant.is_active and tenant.frozen_at is None:
+        tenant.is_active = True
+    session.add(
+        Payment(
+            id=f"pay-{uuid.uuid4().hex[:12]}",
+            tenant_id=tenant.id,
+            amount=0.0,
+            kind="adjustment",
+            status="confirmed",
+            note=f"Muddat {days} kunga uzaytirildi — {note}".strip(" —"),
+            confirmed_at=now,
+            confirmed_by=admin_email,
+        )
+    )
+    await session.commit()
 
 
 async def summary(session: AsyncSession, tenant: Tenant) -> dict:
@@ -119,6 +251,12 @@ async def summary(session: AsyncSession, tenant: Tenant) -> dict:
         ),
         "days_left": round(left, 1) if left is not None else None,
         "frozen_at": tenant.frozen_at.strftime("%Y-%m-%d %H:%M") if tenant.frozen_at else None,
+        "is_trial": bool(tenant.is_trial),
+        "auto_renew": bool(tenant.auto_renew),
+        "grace_days": GRACE_DAYS,
+        "can_auto_renew": bool(
+            tenant.auto_renew and plan and float(tenant.balance or 0) >= float(plan.price_uzs or 0)
+        ),
     }
 
 
@@ -211,6 +349,9 @@ async def buy_plan(session: AsyncSession, tenant: Tenant, plan: Plan) -> dict:
     tenant.subscription_expires_at = base + timedelta(days=plan.duration_days)
     tenant.plan = plan.name
     tenant.balance = float(tenant.balance or 0) - price
+    # Paying ends the trial and clears the reminder ladder for the new period.
+    tenant.is_trial = False
+    tenant.dunning_stage = None
 
     session.add(
         Payment(

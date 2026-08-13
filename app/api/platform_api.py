@@ -1282,6 +1282,37 @@ async def adjust_tenant_balance(
     return {"status": "success", "balance": tenant.balance}
 
 
+class ExtendPatch(BaseModel):
+    days: int
+    note: str = ""
+
+
+@router.post("/tenants/{tenant_id}/extend")
+async def extend_subscription(
+    tenant_id: str,
+    patch: ExtendPatch,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    """Add days to a subscription by hand.
+
+    Support needs this constantly — goodwill after an outage, a deal closed
+    offline, a transfer that arrived late. Flipping `is_active` back on did not
+    work: the very next request re-evaluated the expired date and switched the
+    business off again.
+    """
+    if not 1 <= patch.days <= 365:
+        raise HTTPException(status_code=400, detail="Kun soni 1 dan 365 gacha bo'lsin.")
+    tenant = await _get_tenant_or_404(session, tenant_id)
+    await billing_service.extend(session, tenant, patch.days, patch.note, admin.email)
+    await audit_service.log(
+        session, admin, "subscription_extend", tenant_id,
+        {"days": patch.days, "note": patch.note}, request,
+    )
+    return await billing_service.summary(session, tenant)
+
+
 @router.get("/tenants/{tenant_id}/payments")
 async def tenant_payments(tenant_id: str, session: AsyncSession = Depends(get_session)):
     await _get_tenant_or_404(session, tenant_id)

@@ -14,6 +14,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -164,6 +165,17 @@ class Tenant(Base):
     frozen_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # A new business starts on a trial that expires like any other period. Before
+    # this existed `subscription_expires_at` was simply left empty, which made
+    # every expiry check pass — a paid tariff running free for ever.
+    is_trial: Mapped[bool] = mapped_column(Boolean, default=True, server_default="false")
+    # Renew from the balance the day the period ends, so a shop that keeps money
+    # on account never goes dark over a date it forgot.
+    auto_renew: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # Which expiry warning has already gone out (days before expiry: 7, 3, 1,
+    # then 0 for "it has ended"). Kept so a reminder is sent once, not on every
+    # request — expiry is evaluated lazily, many times a day.
+    dunning_stage: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Per-tenant Telegram channel (each business connects its OWN bot)
     telegram_bot_token: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
@@ -422,6 +434,12 @@ class Conversation(Base):
 
 class Message(Base):
     __tablename__ = "messages"
+    __table_args__ = (
+        # Every dashboard figure is "this tenant, this period". Declared here as
+        # well as in migration b3f7a91c204e so autogenerate stops proposing to
+        # drop an index the queries depend on.
+        Index("ix_messages_tenant_created", "tenant_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     conversation_id: Mapped[str] = mapped_column(

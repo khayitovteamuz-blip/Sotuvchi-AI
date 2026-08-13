@@ -12,6 +12,7 @@ from app.core import security
 from app.core.auth import hash_password
 from app.core.config import settings
 from app.db.models import Tenant, TenantSettings, User
+from app.services import billing_service
 
 
 async def get_user_by_email(session: AsyncSession, email: str) -> Optional[User]:
@@ -29,6 +30,9 @@ async def register(
 
     tenant_id = f"tenant-{uuid.uuid4().hex[:10]}"
     tenant = Tenant(id=tenant_id, business_name=business_name.strip())
+    # Without this the account has no period at all, every expiry check passes,
+    # and the business runs on a paid tariff for ever without paying.
+    await billing_service.start_trial(tenant)
     session.add(tenant)
     await session.flush()  # ensure tenant row exists before FKs
 

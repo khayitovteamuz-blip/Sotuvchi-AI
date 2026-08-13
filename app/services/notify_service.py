@@ -115,6 +115,52 @@ async def notify_new_order(
     return ok
 
 
+async def notify_subscription(
+    session: AsyncSession, tenant: Tenant, plan, stage: int
+) -> bool:
+    """Tell the owner their period is ending — or has.
+
+    Sent to whichever Telegram destination the business has already paired, so
+    it lands as a phone notification rather than a banner nobody opens the
+    panel to see. There is deliberately no email path: this product's customers
+    live in Telegram and an email channel does not exist yet.
+    """
+    chat_id = None
+    if tenant.telegram_bot_token:
+        cfg = await session.get(TenantSettings, tenant.id)
+        chat_id = (cfg.operator_chat_id if cfg else None) or tenant.orders_group_id
+    if not chat_id:
+        return False
+
+    price = f"{float(plan.price_uzs):,.0f} so'm".replace(",", " ") if plan else ""
+    title = plan.title if plan else tenant.plan
+
+    if stage == 0:
+        text = (
+            "🔴 *Tarif muddati tugadi*\n\n"
+            f"*{tenant.business_name}* — {title}\n"
+            "Bot hozircha ishlayapti, lekin bir necha kundan keyin javob berishni "
+            "to'xtatadi.\n\n"
+            f"Panelda *Hisobim* bo'limidan hisobni to'ldiring va tarifni yangilang."
+            + (f"\nTarif narxi: {price}" if price else "")
+        )
+    else:
+        kun = {7: "7 kun", 3: "3 kun", 1: "1 kun"}.get(stage, f"{stage} kun")
+        text = (
+            "🟡 *Tarif muddati tugayapti*\n\n"
+            f"*{tenant.business_name}* — {title}\n"
+            f"Yana *{kun}* qoldi.\n\n"
+            "Hisobda mablag' bo'lsa tarif avtomatik yangilanadi. "
+            "Bo'lmasa — panelda *Hisobim* bo'limidan to'ldiring."
+            + (f"\nTarif narxi: {price}" if price else "")
+        )
+
+    ok = await bot_service.send_message(tenant.telegram_bot_token, chat_id, text)
+    if not ok:
+        logger.warning(f"Subscription notice failed for tenant {tenant.id}")
+    return ok
+
+
 async def try_pair_operator(
     session: AsyncSession, tenant: Tenant, cfg: TenantSettings, chat_id: str, code: str, name: str
 ) -> Optional[str]:

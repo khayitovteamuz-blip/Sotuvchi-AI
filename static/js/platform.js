@@ -174,6 +174,10 @@ function goto(view) {
 
 // ═══ TO'LOVLAR ═══
 const PAY_KIND = { topup: 'To\'ldirish', subscription: 'Tarif', adjustment: 'Tuzatish' };
+const SUB_STATE = {
+    active: 'Faol', trial: 'Sinov davri', grace: 'Muddat tugadi (imtiyoz)',
+    frozen: 'Muzlatilgan', expired: 'To\'xtatilgan', free: 'Bepul tarif',
+};
 const PAY_STATE = { pending: ['warn', 'Kutilmoqda'], confirmed: ['ok', 'Tasdiqlangan'], rejected: ['bad', 'Rad etilgan'] };
 
 /** Pending count on the sidebar, so money waiting to be confirmed is visible
@@ -719,14 +723,14 @@ async function openTenant(id) {
         <div class="block">
             <div class="block-t">Hisob va obuna</div>
             <div class="kv"><span>Balans</span><b>${fmt(d.billing.balance)} so'm</b></div>
-            <div class="kv"><span>Holat</span><b>${esc({
-                active: 'Faol', frozen: 'Muzlatilgan', expired: 'Muddati tugagan', free: 'Bepul tarif',
-            }[d.billing.status] || d.billing.status)}</b></div>
+            <div class="kv"><span>Holat</span><b>${esc(SUB_STATE[d.billing.status] || d.billing.status)}</b></div>
             <div class="kv"><span>Tugaydi</span><b>${esc(d.billing.expires_at || '—')}</b></div>
             <div class="kv"><span>Qolgan kun</span><b>${
                 d.billing.days_left != null ? d.billing.days_left : '—'}</b></div>
+            <div class="kv"><span>Avtomatik yangilash</span><b>${d.billing.auto_renew ? 'yoqilgan' : 'o\'chirilgan'}</b></div>
             <div class="acts">
                 <button class="btn" id="dr-balance">Balansni tuzatish</button>
+                <button class="btn" id="dr-extend">Muddatni uzaytirish</button>
             </div>
         </div>
 
@@ -885,6 +889,26 @@ async function openTenant(id) {
                 body: JSON.stringify({ amount: Number(v.amount), note: v.note }),
             });
             toast('Balans yangilandi');
+            await loadTenants();
+            openTenant(id);
+        },
+    }));
+
+    // Support's most common request. Flipping is_active back on did not work:
+    // the next request re-read the expired date and switched the shop off again.
+    $('dr-extend').addEventListener('click', () => openModal({
+        title: 'Muddatni uzaytirish',
+        submitLabel: 'Uzaytirish',
+        fields: [
+            { name: 'days', label: 'Necha kunga', type: 'number', value: '7' },
+            { name: 'note', label: 'Sabab (audit uchun)', required: false },
+        ],
+        onSubmit: async (v) => {
+            await api(`/api/platform/tenants/${id}/extend`, {
+                method: 'POST',
+                body: JSON.stringify({ days: parseInt(v.days, 10), note: v.note || '' }),
+            });
+            toast(`Muddat ${v.days} kunga uzaytirildi`);
             await loadTenants();
             openTenant(id);
         },

@@ -1918,7 +1918,8 @@ const BILL_STATE = {
     pending: ['⏳', 'Tasdiqlanmoqda'], confirmed: ['✅', 'Tasdiqlangan'], rejected: ['❌', 'Rad etilgan'],
 };
 const SUB_STATE = {
-    active: 'Faol', frozen: 'Muzlatilgan', expired: 'Muddati tugagan', free: 'Bepul tarif',
+    active: 'Faol', trial: 'Sinov davri', grace: 'Muddat tugadi',
+    frozen: 'Muzlatilgan', expired: 'To\'xtatilgan', free: 'Bepul tarif',
 };
 
 async function loadBilling() {
@@ -1935,15 +1936,43 @@ async function loadBilling() {
             note = 'Bepul tarifda muddat yo\'q. Limitlar past — kengaytirish uchun tarif tanlang.';
         } else if (d.status === 'frozen') {
             note = `Hisob to'xtatilgan. Qolgan ${Math.round(left)} kun saqlanib turibdi.`;
+        } else if (d.status === 'grace') {
+            note = `Muddat ${d.expires_at} da tugadi. Bot yana ${d.grace_days} kun ishlaydi — `
+                 + 'shundan keyin javob bermay qo\'yadi.';
         } else if (d.status === 'expired') {
-            note = 'Muddat tugagan. Tarifni yangilamaguningizcha bot javob bermaydi.';
+            note = 'Muddat tugadi va bot to\'xtadi. Tarifni yangilasangiz darhol qayta ishlaydi.';
+        } else if (d.status === 'trial') {
+            note = `Sinov davri ${d.expires_at} gacha — ${Math.round(left)} kun qoldi. `
+                 + 'Tugagunga qadar tarif tanlang, aks holda bot to\'xtaydi.';
         } else {
-            note = `${d.expires_at} gacha — ${Math.round(left)} kun qoldi.`;
+            note = `${d.expires_at} gacha — ${Math.round(left)} kun qoldi.`
+                 + (d.can_auto_renew ? ' Hisobda mablag\' bor, tarif avtomatik yangilanadi.' : '');
         }
         document.getElementById('bill-sub').innerHTML = `
             <div class="bill-sub-plan">${escapeHtml(d.plan_title)}</div>
             <div class="bill-sub-state bill-${d.status}">${SUB_STATE[d.status] || d.status}</div>
-            <p class="bill-sub-note">${escapeHtml(note)}</p>`;
+            <p class="bill-sub-note">${escapeHtml(note)}</p>
+            ${d.status === 'free' ? '' : `
+            <label class="bill-renew">
+                <input type="checkbox" id="bill-auto" ${d.auto_renew ? 'checked' : ''}>
+                <span>Muddat tugaganda hisobdagi mablag'dan avtomatik yangilansin</span>
+            </label>`}`;
+
+        const auto = document.getElementById('bill-auto');
+        if (auto) auto.addEventListener('change', async () => {
+            try {
+                const r = await fetch('/api/admin/billing/auto-renew', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: auto.checked }),
+                });
+                if (!r.ok) throw new Error((await r.json()).detail || 'Saqlanmadi');
+                toast(auto.checked ? 'Avtomatik yangilash yoqildi' : 'Avtomatik yangilash o\'chirildi');
+            } catch (e) {
+                auto.checked = !auto.checked;   // put the switch back where it was
+                toast(e.message, true);
+            }
+        });
 
         document.getElementById('bill-plans').innerHTML = d.plans.map((p) => `
             <div class="bill-plan ${p.current ? 'is-current' : ''}">

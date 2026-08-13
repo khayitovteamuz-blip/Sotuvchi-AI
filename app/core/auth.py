@@ -112,11 +112,14 @@ async def destroy_all_sessions(db: AsyncSession, user_id: str) -> None:
     await db.commit()
 
 
-async def require_auth(
-    request: Request,
-    db: AsyncSession = Depends(get_session),
-) -> User:
-    """FastAPI dependency — returns the current User or raises 401."""
+async def _authenticate(request: Request, db: AsyncSession, allow_unpaid: bool) -> User:
+    """Shared body of the two auth dependencies.
+
+    `allow_unpaid` lets a business whose period ran out reach the pages it needs
+    to fix that. Without it the panel locks the owner out of the very screen
+    where they would pay — which turns a late renewal into a lost customer.
+    A suspension an admin applied by hand is never waved through.
+    """
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
         raise HTTPException(
@@ -162,11 +165,15 @@ async def require_auth(
     tenant = await db.get(Tenant, user.tenant_id)
     if tenant is not None:
         await billing_service.enforce_expiry(db, tenant)
-        if not tenant.is_active:
+        suspended_by_admin = tenant.frozen_at is not None
+        if not tenant.is_active and not (allow_unpaid and not suspended_by_admin):
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail="Obuna muddati tugagan yoki hisob to'xtatilgan. "
-                       "Tarifni yangilash uchun qo'llab-quvvatlashga murojaat qiling.",
+                detail=(
+                    "Hisob to'xtatilgan. Qo'llab-quvvatlashga murojaat qiling."
+                    if suspended_by_admin else
+                    "Obuna muddati tugagan. Panelda «Hisobim» bo'limidan tarifni yangilang."
+                ),
             )
 
     # Sliding expiry: someone working all week should not be logged out mid-task.
@@ -176,3 +183,19 @@ async def require_auth(
         await db.commit()
 
     return user
+
+
+async def require_auth(
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> User:
+    """The current User, or 401 — and 402 once the subscription has run out."""
+    return await _authenticate(request, db, allow_unpaid=False)
+
+
+async def require_auth_unpaid_ok(
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> User:
+    """For the billing screens only: reachable while the subscription is unpaid."""
+    return await _authenticate(request, db, allow_unpaid=True)
