@@ -29,10 +29,16 @@ logger = logging.getLogger("routing")
 # panel refuses to route those there rather than letting a shop discover it when
 # an order sits unconfirmed.
 EVENTS: Dict[str, dict] = {
-    "order": {
-        "title": "Yangi buyurtma",
-        "hint": "AI buyurtmani yopganda — mijoz, mahsulot, summa.",
-        "needs_group": False,
+    "receipt": {
+        "title": "Yangi buyurtma — to'lov kutilmoqda",
+        "hint": "Mijoz, mahsulot, summa, to'lov cheki va «Tasdiqlash» tugmasi. "
+                "Tugmani bosgan odamning ismi yozib olinadi.",
+        "needs_group": True,
+    },
+    "delivery": {
+        "title": "Yetkazishga tayyor",
+        "hint": "To'lovi tasdiqlangan buyurtma: manzil va xarita nuqtasi bilan.",
+        "needs_group": True,
     },
     "handoff": {
         "title": "Operator kerak",
@@ -49,18 +55,12 @@ EVENTS: Dict[str, dict] = {
         "hint": "Muddat tugashidan 7/3/1 kun oldin va tugaganda.",
         "needs_group": False,
     },
-    "receipt": {
-        "title": "Chek va tasdiqlash",
-        "hint": "To'lov cheki va «Tasdiqlash» tugmasi. Guruh bo'lishi shart — "
-                "kim tasdiqlaganini yozib olamiz.",
-        "needs_group": True,
-    },
-    "delivery": {
-        "title": "Yetkazishga tayyor",
-        "hint": "Tasdiqlangan buyurtma, manzil va xarita nuqtasi.",
-        "needs_group": True,
-    },
 }
+#
+# There used to be a sixth, "Yangi buyurtma", sent the moment the AI closed a
+# sale. It fired one line before the receipt for the same order, so every sale
+# produced two notifications seconds apart — and the receipt already carries
+# everything the first one did, plus the button. One order, one message.
 
 KINDS = {"private": "Shaxsiy chat", "group": "Guruh", "channel": "Kanal"}
 
@@ -186,16 +186,19 @@ def default_routes(tenant: Tenant, cfg: TenantSettings) -> Dict[str, List[str]]:
     operators = str(tenant.operators_group_id) if tenant.operators_group_id else None
 
     routes = {
-        "order": [operator],
+        # The receipt is the new-order notification. Where no orders group was
+        # paired it falls back to the owner's chat, which is where the old
+        # separate "new order" ping used to land — so a shop without groups
+        # still hears about a sale.
+        "receipt": [orders or operator],
+        # Delivery fell back to the orders group when no work group existed
+        "delivery": [work or orders],
         # An escalation went to the owner AND the operators' group
         "handoff": [operator, operators],
         "customer_waiting": [operator],
         # Subscription notices fell back to the orders group when no operator
         # chat was paired
         "billing": [operator or orders],
-        "receipt": [orders],
-        # Delivery fell back to the orders group when no work group existed
-        "delivery": [work or orders],
     }
     return {event: [c for c in targets if c] for event, targets in routes.items()
             if [c for c in targets if c]}

@@ -14,7 +14,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Conversation, Order, Tenant, TenantSettings
+from app.db.models import Conversation, Tenant, TenantSettings
 from app.services import routing_service
 
 logger = logging.getLogger("notify_service")
@@ -36,9 +36,6 @@ async def notify_handoff(
     last_customer_message: str = "",
 ) -> bool:
     """Ping whoever is on duty that a customer is waiting for a human."""
-    if not cfg.notify_on_handoff:
-        return False
-
     customer = conversation.customer_name or "Mijoz"
     channel = CHANNEL_LABEL.get(conversation.channel, conversation.channel)
     text = (
@@ -62,8 +59,6 @@ async def notify_customer_waiting(
     text: str,
 ) -> bool:
     """Customer wrote while a human owns the chat — the operator must know."""
-    if not cfg.notify_on_handoff:
-        return False
     # Don't ping a destination about its own chat: the owner's personal chat is
     # both a destination and, if they ever message the bot, a conversation.
     if str(conversation.external_id) in routing_service.targets_for(cfg, "customer_waiting"):
@@ -76,29 +71,6 @@ async def notify_customer_waiting(
         "➡️ Panelda *Inbox* dan javob bering."
     )
     return await routing_service.send(session, tenant, cfg, "customer_waiting", body)
-
-
-async def notify_new_order(
-    session: AsyncSession, tenant: Tenant, cfg: TenantSettings, order: Order
-) -> bool:
-    """Ping whoever watches sales that a new order came in."""
-    if not cfg.notify_on_order:
-        return False
-
-    items = "\n".join(f"• {i.product_name} × {i.quantity}" for i in order.items)
-    text = (
-        "🎉 *Yangi buyurtma!*\n\n"
-        f"🆔 `{order.id}`\n"
-        f"👤 {order.customer_name}\n"
-        f"📞 {order.customer_phone}\n"
-        f"{items}\n"
-        f"💰 *{order.total_amount:,.0f} UZS*\n"
-    )
-    if order.delivery_address:
-        text += f"📍 {order.delivery_address}\n"
-    text += "\n➡️ Panelda *Buyurtmalar* bo'limida ko'ring."
-
-    return await routing_service.send(session, tenant, cfg, "order", text)
 
 
 async def notify_subscription(

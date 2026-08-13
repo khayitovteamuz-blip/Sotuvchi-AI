@@ -52,13 +52,31 @@ def test_defaults_reproduce_the_previous_destinations():
     cfg = FakeCfg(operator_chat_id="777")
 
     routes = r.default_routes(tenant, cfg)
-    assert routes["order"] == ["777"]
     assert routes["customer_waiting"] == ["777"]
     assert routes["billing"] == ["777"]
     assert routes["receipt"] == ["-100orders"]
     assert routes["delivery"] == ["-100work"]
     # An escalation went to the owner AND the operators' group
     assert routes["handoff"] == ["777", "-100ops"]
+
+
+def test_there_is_no_separate_new_order_alert():
+    """It fired one line before the receipt on the same order — two messages,
+    seconds apart, saying the same thing."""
+    assert "order" not in r.EVENTS
+    tenant = FakeTenant()
+    tenant.orders_group_id = "-100orders"
+    tenant.work_group_id = tenant.operators_group_id = None
+    assert "order" not in r.default_routes(tenant, FakeCfg(operator_chat_id="777"))
+
+
+def test_a_shop_without_groups_still_hears_about_a_sale():
+    """No orders group: the receipt goes to the owner's chat, which is where
+    the old separate ping used to land."""
+    tenant = FakeTenant()
+    tenant.orders_group_id = tenant.work_group_id = tenant.operators_group_id = None
+    routes = r.default_routes(tenant, FakeCfg(operator_chat_id="777"))
+    assert routes["receipt"] == ["777"]
 
 
 def test_delivery_falls_back_to_the_orders_group():
@@ -92,7 +110,7 @@ def test_only_the_button_events_require_a_group():
     """A Telegram channel has nobody to tap 'confirmed' and no name to record."""
     assert r.EVENTS["receipt"]["needs_group"] is True
     assert r.EVENTS["delivery"]["needs_group"] is True
-    for key in ("order", "handoff", "customer_waiting", "billing"):
+    for key in ("handoff", "customer_waiting", "billing"):
         assert r.EVENTS[key]["needs_group"] is False, key
 
 

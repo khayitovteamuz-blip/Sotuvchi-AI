@@ -562,7 +562,9 @@ async def _create_order(session, tenant_id: str, conversation, args: Dict[str, A
         conversation.customer_name = name
     await session.commit()
 
-    await _alert_operator_order(session, tenant_id, order)
+    # One notification per order: the receipt carries the customer, the
+    # items, the total AND the confirm button. A separate "new order"
+    # ping fired one line above this and said the same thing.
     await _post_order_receipt(session, tenant_id, order)
 
     return {
@@ -605,20 +607,6 @@ async def _post_order_receipt(session, tenant_id: str, order) -> bool:
         return await group_service.send_order_receipt(session, tenant, order)
     except Exception as e:
         logger.error(f"Order receipt failed: {e}")
-        return False
-
-
-async def _alert_operator_order(session, tenant_id: str, order) -> bool:
-    """Push a new-order alert. Never let a notification failure break the sale."""
-    try:
-        from app.db.models import Tenant
-        from app.services import notify_service
-
-        tenant = await session.get(Tenant, tenant_id)
-        cfg = await repo.get_settings(session, tenant_id)
-        return await notify_service.notify_new_order(session, tenant, cfg, order)
-    except Exception as e:
-        logger.error(f"Order notification failed: {e}")
         return False
 
 

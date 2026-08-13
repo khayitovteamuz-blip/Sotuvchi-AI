@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.db import repo
 from app.db.base import get_session
 from app.db.models import Tenant, User
-from app.services import group_service, notify_service, routing_service
+from app.services import routing_service
 from app.services.bot_service import bot_service
 from app.services.telegram_poller import telegram_poller
 
@@ -65,100 +65,6 @@ async def telegram_connect(token: str = Body(..., embed=True), user: User = Depe
     return {"status": "success", "username": info.get("username"), "webhook_set": webhook_set, "note": note}
 
 
-# ─── Operator alerts (pairing) ────────────────────────────────────────────────
-@router.get("/operator")
-async def operator_status(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
-    tenant = await session.get(Tenant, user.tenant_id)
-    cfg = await repo.get_settings(session, user.tenant_id)
-    return {
-        "paired": bool(cfg.operator_chat_id),
-        "operator_name": cfg.operator_name,
-        "pairing_code": cfg.pairing_code,
-        "bot_username": tenant.telegram_bot_username,
-        "bot_connected": bool(tenant.telegram_bot_token),
-        "notify_on_handoff": cfg.notify_on_handoff,
-        "notify_on_order": cfg.notify_on_order,
-    }
-
-
-@router.post("/operator/pair-code")
-async def create_pairing_code(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
-    """Issue a fresh pairing code; the owner sends it to the bot as /operator CODE."""
-    tenant = await session.get(Tenant, user.tenant_id)
-    if not tenant.telegram_bot_token:
-        raise HTTPException(status_code=400, detail="Avval Telegram botni ulang.")
-    cfg = await repo.get_settings(session, user.tenant_id)
-    cfg.pairing_code = notify_service.generate_pairing_code()
-    await session.commit()
-    return {
-        "pairing_code": cfg.pairing_code,
-        "bot_username": tenant.telegram_bot_username,
-        "instruction": f"Telegram'da @{tenant.telegram_bot_username} botiga yozing: /operator {cfg.pairing_code}",
-    }
-
-
-@router.post("/operator/unpair")
-async def unpair_operator(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
-    cfg = await repo.get_settings(session, user.tenant_id)
-    cfg.operator_chat_id = None
-    cfg.operator_name = None
-    await session.commit()
-    return {"status": "success"}
-
-
-@router.post("/operator/notifications")
-async def set_notifications(
-    notify_on_handoff: bool = Body(True, embed=True),
-    notify_on_order: bool = Body(True, embed=True),
-    user: User = Depends(require_auth),
-    session: AsyncSession = Depends(get_session),
-):
-    cfg = await repo.get_settings(session, user.tenant_id)
-    cfg.notify_on_handoff = notify_on_handoff
-    cfg.notify_on_order = notify_on_order
-    await session.commit()
-    return {"status": "success"}
-
-
-# ─── Team groups ──────────────────────────────────────────────────────────────
-@router.get("/groups")
-async def groups_status(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
-    tenant = await session.get(Tenant, user.tenant_id)
-    return {
-        "bot_connected": bool(tenant.telegram_bot_token),
-        "bot_username": tenant.telegram_bot_username,
-        "pairing_code": tenant.group_pairing_code,
-        "groups": {
-            "buyurtmalar": {"id": tenant.orders_group_id, "title": tenant.orders_group_title},
-            "ishchi": {"id": tenant.work_group_id, "title": tenant.work_group_title},
-            "operatorlar": {"id": tenant.operators_group_id, "title": tenant.operators_group_title},
-        },
-    }
-
-
-@router.post("/groups/pair-code")
-async def create_group_code(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
-    """Issue a code the owner sends inside the group as '/guruh <tur> <kod>'."""
-    tenant = await session.get(Tenant, user.tenant_id)
-    if not tenant.telegram_bot_token:
-        raise HTTPException(status_code=400, detail="Avval Telegram botni ulang.")
-    tenant.group_pairing_code = group_service.generate_pairing_code()
-    await session.commit()
-    return {"pairing_code": tenant.group_pairing_code, "bot_username": tenant.telegram_bot_username}
-
-
-@router.post("/groups/{kind}/disconnect")
-async def disconnect_group(kind: str, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
-    if kind not in group_service.GROUP_KINDS:
-        raise HTTPException(status_code=400, detail="Noma'lum guruh turi.")
-    tenant = await session.get(Tenant, user.tenant_id)
-    id_col, title_col, _ = group_service.GROUP_KINDS[kind]
-    setattr(tenant, id_col, None)
-    setattr(tenant, title_col, None)
-    await session.commit()
-    return {"status": "success"}
-
-
 # ─── Notification routing ─────────────────────────────────────────────────────
 @router.get("/notifications")
 async def notification_routes(
@@ -185,8 +91,6 @@ async def notification_routes(
             {"key": key, **spec, "targets": routing_service.targets_for(cfg, key)}
             for key, spec in routing_service.EVENTS.items()
         ],
-        "notify_on_handoff": cfg.notify_on_handoff,
-        "notify_on_order": cfg.notify_on_order,
     }
 
 
