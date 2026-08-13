@@ -152,6 +152,7 @@ function bootApp() {
     loadCategories();     // needed by the product modal's category select
     loadProducts();
     loadSettings();
+    loadSidebarPlan();
     startInboxPolling();
     restoreActiveTab();
 }
@@ -1159,9 +1160,6 @@ async function loadSettings() {
         setVal('kb-hours', data.working_hours);
         setVal('kb-faq', data.faq);
         renderKbStatus(data);
-
-        const badge = document.getElementById('ai-provider-badge');
-        if (badge) badge.textContent = 'Model: ' + hiddenSettings.model_name;
     } catch (e) {
         console.error('Sozlamalarni yuklashda xatolik:', e);
     }
@@ -2050,6 +2048,68 @@ async function loadAccountSettings() {
 }
 
 // ════════════════════════════════════════════════════════
+// YON PANEL — tarif, balans, yangilanish sanasi
+// ════════════════════════════════════════════════════════
+const UZ_MONTHS = ['yan', 'fev', 'mar', 'apr', 'may', 'iyn',
+                   'iyl', 'avg', 'sen', 'okt', 'noy', 'dek'];
+
+/** "2026-09-11" -> "11-sen". Short enough for the sidebar's width. */
+function fmtDateShort(iso) {
+    if (!iso) return '—';
+    const [y, m, d] = iso.split('-').map(Number);
+    if (!y || !m || !d) return iso;
+    return `${d}-${UZ_MONTHS[m - 1]}`;
+}
+
+/**
+ * The three things an owner checks without opening a screen: which tariff,
+ * how much is on the account, and the date it renews. The model name used to
+ * sit here — that is the platform's business, not the shop's.
+ */
+async function loadSidebarPlan() {
+    const box = document.getElementById('side-plan');
+    if (!box) return;
+    try {
+        const resp = await fetch('/api/admin/billing');
+        if (!resp.ok) throw new Error('billing');
+        const d = await resp.json();
+
+        const days = d.days_left === null || d.days_left === undefined
+            ? null : Math.max(0, Math.round(d.days_left));
+
+        // Say what happens next, not just what is true today.
+        let when, tone = '';
+        if (d.status === 'free') {
+            when = 'Muddatsiz';
+        } else if (d.status === 'frozen') {
+            when = `To'xtatilgan · ${days} kun saqlanmoqda`;
+            tone = ' is-warn';
+        } else if (d.status === 'grace') {
+            when = `Muddat tugadi · bot ${d.grace_days} kun ishlaydi`;
+            tone = ' is-warn';
+        } else if (d.status === 'expired') {
+            when = 'Muddat tugadi — bot to\'xtadi';
+            tone = ' is-danger';
+        } else {
+            // Trial and paid alike: the date is what matters, and whether the
+            // balance will actually cover the renewal when it arrives.
+            const verb = d.can_auto_renew ? 'Yangilanadi' : 'Tugaydi';
+            when = `${verb}: ${fmtDateShort(d.expires_at)} · ${days} kun`;
+            if (days !== null && days <= 3) tone = ' is-warn';
+        }
+
+        box.innerHTML = `
+            <div class="side-plan-row">
+                <span>${escapeHtml(d.plan_title || d.plan)}${d.status === 'trial' ? ' · sinov' : ''}</span>
+                <b>${fmtNum(d.balance)} <small>so'm</small></b>
+            </div>
+            <div class="side-plan-when${tone}">${escapeHtml(when)}</div>`;
+    } catch (e) {
+        box.innerHTML = '<div class="side-plan-when">Tarif ma\'lumoti yuklanmadi</div>';
+    }
+}
+
+// ════════════════════════════════════════════════════════
 // XODIMLAR — the seats the tariff has always been selling
 // ════════════════════════════════════════════════════════
 const ROLE_LABEL = { owner: 'Egasi', operator: 'Operator' };
@@ -2290,6 +2350,7 @@ document.getElementById('bill-topup-btn')?.addEventListener('click', async () =>
         if (!r.ok) throw new Error(d.detail || 'Xatolik');
         alert(d.message);
         loadBilling();
+        loadSidebarPlan();
     } catch (e) { alert(e.message); }
 });
 
@@ -2305,5 +2366,6 @@ async function buyPlan(plan, balance) {
         if (!r.ok) throw new Error(d.detail || 'Xatolik');
         alert(`Tarif faollashtirildi: ${d.plan_title}. ${Math.round(d.days_left)} kun.`);
         loadBilling();
+        loadSidebarPlan();
     } catch (e) { alert(e.message); }
 }

@@ -177,6 +177,44 @@ h1, h2, h3, .brand-text h1, .header-title h2, .kpi-value, .stat-bar-val {
     animation: pulse 2s infinite;
 }
 
+/* Tariff, balance and renewal date — the three things an owner checks without
+   opening a screen. Sits under the status dot, sharing its card. */
+.side-plan {
+    margin-top: 9px;
+    padding-top: 9px;
+    border-top: 1px solid var(--card-border);
+}
+.side-plan-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+}
+.side-plan-row span {
+    font-weight: 600;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.side-plan-row b {
+    font-weight: 700;
+    color: var(--text-main);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.side-plan-row small { font-weight: 500; color: var(--text-muted); }
+.side-plan-when {
+    margin-top: 3px;
+    font-size: 10.5px;
+    line-height: 1.45;
+    color: var(--text-dim);
+}
+.side-plan-when.is-warn { color: var(--accent-warning); font-weight: 600; }
+.side-plan-when.is-danger { color: var(--accent-danger); font-weight: 600; }
+
 @keyframes pulse {
     0% { transform: scale(0.95); opacity: 0.8; }
     50% { transform: scale(1.2); opacity: 1; }
