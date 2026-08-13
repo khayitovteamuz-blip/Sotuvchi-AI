@@ -148,7 +148,7 @@ let currentTenant = null;
 
 /** Boot everything after auth: nav + the data the default screen (Inbox) needs. */
 function bootApp() {
-    if (!navReady) { initNavigation(); navReady = true; }
+    if (!navReady) { initNavigation(); navReady = true; initCustomerSearch(); }
     loadCategories();     // needed by the product modal's category select
     loadProducts();
     loadSettings();
@@ -191,6 +191,7 @@ const TAB_META = {
     'tab-ai-agent':     { title: 'AI Agent', sub: 'Xarakter, qoidalar va sinov', btn: false, load: loadSettings },
     'tab-products':     { title: 'Katalog', sub: 'Mahsulotlar, narx va ombor qoldig\'i', btn: true, load: loadCatalog },
     'tab-orders':       { title: 'Buyurtmalar', sub: 'Barcha buyurtmalar va status workflow', btn: false, load: loadOrders },
+    'tab-customers':    { title: 'Mijozlar', sub: 'Kim nima olgan va qachon yozgan', btn: false, load: loadCustomers },
     'tab-integrations': { title: 'Integratsiyalar', sub: 'Telegram bot va operator bildirishnomasi', btn: false, load: loadIntegrations },
     'tab-billing':      { title: 'Hisobim', sub: 'Balans, tarif va to\'lovlar', btn: false, load: loadBilling },
     'tab-settings':     { title: 'Sozlamalar', sub: 'Biznes profili, xodimlar va tarif', btn: false, load: loadAccountSettings }
@@ -1686,6 +1687,141 @@ async function autoCategorize(onlyUncategorized = true) {
 // ════════════════════════════════════════════════════════
 // MIJOZLAR
 // ════════════════════════════════════════════════════════
+const CH_LABEL = { telegram: 'Telegram', web: 'Sayt', instagram: 'Instagram', manual: 'Qo\'lda' };
+let custSearchTimer = null;
+
+async function loadCustomers(q = '') {
+    const tbody = document.getElementById('customers-tbody');
+    if (!tbody) return;
+    try {
+        const resp = await fetch(`/api/admin/customers?q=${encodeURIComponent(q)}`);
+        if (!resp.ok) throw new Error('yuklanmadi');
+        const list = await resp.json();
+
+        document.getElementById('cust-count').textContent =
+            list.length ? `${list.length} ta mijoz` : '';
+
+        if (!list.length) {
+            tbody.innerHTML = `<tr><td colspan="6" class="table-empty">${
+                q ? 'Bunday mijoz topilmadi.'
+                  : 'Hali mijoz yo\'q. Birinchi suhbat boshlanishi bilan shu yerda paydo bo\'ladi.'
+            }</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = list.map((c) => `
+            <tr class="row-click" data-cust="${escapeHtml(c.id)}">
+                <td><strong>${escapeHtml(c.customer_name)}</strong>${
+                    c.telegram_username ? `<span class="cell-sub">@${escapeHtml(c.telegram_username)}</span>` : ''}</td>
+                <td class="cell-nowrap">${escapeHtml(c.customer_phone) || '<span class="cell-dim">—</span>'}</td>
+                <td>${c.channels.map((ch) =>
+                    `<span class="chip">${escapeHtml(CH_LABEL[ch] || ch)}</span>`).join(' ')}</td>
+                <td class="cell-num">${fmtNum(c.order_count)}</td>
+                <td class="cell-num">${c.ltv ? fmtNum(c.ltv) + ' <small>so\'m</small>' : '<span class="cell-dim">—</span>'}</td>
+                <td class="cell-nowrap cell-date">${escapeHtml(c.last_seen_at || '—')}</td>
+            </tr>`).join('');
+
+        tbody.querySelectorAll('[data-cust]').forEach((tr) =>
+            tr.addEventListener('click', () => openCustomer(tr.dataset.cust)));
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="6" class="table-empty">Mijozlarni yuklab bo\'lmadi.</td></tr>';
+        console.error('Mijozlarni yuklashda xatolik:', e);
+    }
+}
+
+function initCustomerSearch() {
+    const box = document.getElementById('cust-search');
+    if (!box) return;
+    // Debounced: every keystroke would otherwise be a query against a table
+    // that grows with the shop.
+    box.addEventListener('input', () => {
+        clearTimeout(custSearchTimer);
+        custSearchTimer = setTimeout(() => loadCustomers(box.value.trim()), 250);
+    });
+}
+
+function closeCustomerModal() {
+    document.getElementById('customer-modal').style.display = 'none';
+}
+
+async function openCustomer(id) {
+    const modal = document.getElementById('customer-modal');
+    const body = document.getElementById('cust-body');
+    modal.style.display = 'flex';
+    body.innerHTML = '<p class="table-empty">Yuklanmoqda…</p>';
+
+    let d;
+    try {
+        const resp = await fetch(`/api/admin/customers/${encodeURIComponent(id)}`);
+        if (!resp.ok) throw new Error('topilmadi');
+        d = await resp.json();
+    } catch (e) {
+        body.innerHTML = '<p class="table-empty">Mijoz ma\'lumotini ochib bo\'lmadi.</p>';
+        return;
+    }
+
+    document.getElementById('cust-name').textContent = d.name;
+    document.getElementById('cust-sub').textContent =
+        [d.phone, d.telegram_username ? '@' + d.telegram_username : '',
+         d.channels.map((c) => CH_LABEL[c] || c).join(', ')].filter(Boolean).join(' · ');
+
+    body.innerHTML = `
+        <div class="cust-stats">
+            <div><b>${fmtNum(d.orders_count)}</b><span>buyurtma</span></div>
+            <div><b>${fmtNum(d.total_spent)}</b><span>jami xarid, so'm</span></div>
+            <div><b>${escapeHtml(d.first_seen_at || '—')}</b><span>birinchi murojaat</span></div>
+        </div>
+
+        <label class="form-group">
+            <span class="form-label">Izoh — sizga kerakli har qanday narsa</span>
+            <textarea id="cust-note" class="form-control" rows="2"
+                      placeholder="Masalan: kechqurun yetkazib berish qulay">${escapeHtml(d.note || '')}</textarea>
+        </label>
+        <button class="btn-secondary" id="cust-note-save">Izohni saqlash</button>
+
+        <h4 class="cust-h">Buyurtmalar</h4>
+        ${d.orders.length ? `<div class="cust-list">${d.orders.map((o) => `
+            <div class="cust-order">
+                <div class="cust-order-top">
+                    <code>${escapeHtml(o.id)}</code>
+                    <span class="badge badge-${o.status.toLowerCase().replace(/[^a-z]/g, '')}">${escapeHtml(o.status)}</span>
+                    <span class="cust-order-sum">${fmtNum(o.total_amount)} so'm</span>
+                </div>
+                <div class="cust-order-items">${o.items.map((i) =>
+                    `${escapeHtml(i.product_name)} × ${i.quantity}`).join(', ') || '—'}</div>
+                <div class="cell-dim">${escapeHtml(o.created_at || '')}</div>
+            </div>`).join('')}</div>`
+          : '<p class="cell-dim">Hali buyurtma bermagan.</p>'}
+
+        <h4 class="cust-h">Suhbatlar</h4>
+        ${d.conversations.length ? `<div class="cust-list">${d.conversations.map((c) => `
+            <div class="cust-conv" data-conv="${escapeHtml(c.id)}">
+                <span class="chip">${escapeHtml(CH_LABEL[c.channel] || c.channel)}</span>
+                <span>${escapeHtml(c.last_message_at || '')}</span>
+                <span class="cell-dim">${escapeHtml(c.status)}</span>
+            </div>`).join('')}</div>`
+          : '<p class="cell-dim">Suhbat yo\'q.</p>'}`;
+
+    document.getElementById('cust-note-save').addEventListener('click', async () => {
+        try {
+            const r = await fetch(`/api/admin/customers/${encodeURIComponent(id)}/note`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ note: document.getElementById('cust-note').value }),
+            });
+            if (!r.ok) throw new Error((await r.json()).detail || 'Saqlanmadi');
+            toast('Izoh saqlandi');
+        } catch (e) { toast(e.message, true); }
+    });
+
+    // Jumping straight into the chat is the whole point of seeing the history
+    body.querySelectorAll('[data-conv]').forEach((el) =>
+        el.addEventListener('click', () => {
+            closeCustomerModal();
+            document.querySelector('[data-tab="tab-inbox"]').click();
+            setTimeout(() => openConversation(el.dataset.conv), 300);
+        }));
+}
 
 // ════════════════════════════════════════════════════════
 // INTEGRATSIYALAR — Telegram

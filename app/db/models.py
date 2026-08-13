@@ -20,6 +20,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -351,12 +352,86 @@ class Product(Base):
     )
 
 
+# ─── Customer (the person, not the conversation) ──────────────────────────────
+class Customer(Base):
+    """One human being, however many chats and orders they leave behind.
+
+    Before this existed the customer lived denormalised in three places — on the
+    conversation, on the order, and in a GROUP BY that ran at report time — so
+    the same person writing from two channels was two different "customers" and
+    nobody could answer "what has this one bought before?".
+
+    Identity is resolved two ways, which is why `CustomerIdentity` is separate:
+    by channel handle (a Telegram chat id is known from the first hello) and by
+    phone number (known only once they order). The phone is the stronger key and
+    is what links a Telegram chat to a web chat from the same person.
+    """
+
+    __tablename__ = "customers"
+    __table_args__ = (
+        # Partial: a lead who has not given a phone yet must not collide with
+        # every other phone-less lead on a single empty-string key.
+        Index("uq_customer_tenant_phone", "tenant_id", "phone",
+              unique=True, postgresql_where=text("phone IS NOT NULL")),
+        Index("ix_customers_tenant_seen", "tenant_id", "last_seen_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Stored normalised (+998XXXXXXXXX) so "+998 90 123 45 67", "998901234567"
+    # and "901234567" are one customer rather than three.
+    phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    telegram_username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # Kept as columns rather than counted on every read: the customer list is
+    # sorted by them, and a sort over a live aggregate of every order does not
+    # survive a catalogue that grows.
+    orders_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    total_spent: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+
+    # What the shop knows that the system does not: "prefers evening delivery".
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    identities: Mapped[List["CustomerIdentity"]] = relationship(
+        back_populates="customer", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class CustomerIdentity(Base):
+    """One handle a customer is reachable by — a Telegram chat, a web session."""
+
+    __tablename__ = "customer_identities"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "channel", "external_id", name="uq_identity_tenant_channel_ext"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    customer_id: Mapped[str] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), index=True
+    )
+    channel: Mapped[str] = mapped_column(String(16))
+    external_id: Mapped[str] = mapped_column(String(128))
+
+    customer: Mapped["Customer"] = relationship(back_populates="identities")
+
+
 # ─── Orders ───────────────────────────────────────────────────────────────────
 class Order(Base):
     __tablename__ = "orders"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    # Denormalised on purpose: an order is a record of what was agreed that
+    # day, so it keeps the name and number given then even if the customer
+    # later changes theirs. customer_id is the link for "what else did they buy".
+    customer_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     customer_name: Mapped[str] = mapped_column(String(255))
     customer_phone: Mapped[str] = mapped_column(String(64))
     telegram_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -409,6 +484,9 @@ class Conversation(Base):
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     channel: Mapped[str] = mapped_column(String(16), default="web")  # web | telegram | instagram
     external_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    customer_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     customer_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     customer_phone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     # Last map pin the customer shared — copied onto the order when one is placed

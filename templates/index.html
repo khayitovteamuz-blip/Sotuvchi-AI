@@ -91,6 +91,7 @@
                 <div class="nav-item" data-tab="tab-ai-agent"><span>🤖</span> AI Agent</div>
                 <div class="nav-item" data-tab="tab-products"><span>📦</span> Katalog</div>
                 <div class="nav-item" data-tab="tab-orders"><span>🧾</span> Buyurtmalar</div>
+                <div class="nav-item" data-tab="tab-customers"><span>👥</span> Mijozlar</div>
                 <div class="nav-item" data-tab="tab-integrations"><span>🔌</span> Integratsiyalar</div>
                 <div class="nav-item" data-tab="tab-billing"><span>💳</span> Hisobim</div>
                 <div class="nav-item" data-tab="tab-settings"><span>⚙️</span> Sozlamalar</div>
@@ -367,6 +368,44 @@
             </section>
 
             <!-- ═══ MIJOZLAR ═══ -->
+            <section id="tab-customers" class="tab-view">
+                <div class="orders-filter-bar" style="display:flex; align-items:center; gap:12px;">
+                    <div style="flex-shrink:0; min-width:260px;">
+                        <input type="search" id="cust-search" class="form-control"
+                               placeholder="🔍 Ism yoki telefon bo'yicha qidiruv..." style="margin:0;">
+                    </div>
+                    <span id="cust-count" style="font-size:12.5px; color:var(--text-muted);"></span>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Mijoz</th>
+                                <th>Telefon</th>
+                                <th>Kanal</th>
+                                <th>Buyurtma</th>
+                                <th>Jami xarid</th>
+                                <th>Oxirgi faollik</th>
+                            </tr>
+                        </thead>
+                        <tbody id="customers-tbody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Mijoz kartochkasi -->
+            <div class="modal-overlay" id="customer-modal">
+                <div class="modal-card" style="max-width:640px;">
+                    <div class="modal-head">
+                        <div>
+                            <h3 id="cust-name">—</h3>
+                            <p id="cust-sub" style="font-size:12.5px; color:var(--text-muted); margin-top:2px;"></p>
+                        </div>
+                        <button class="modal-close" onclick="closeCustomerModal()" aria-label="Yopish">✕</button>
+                    </div>
+                    <div id="cust-body"></div>
+                </div>
+            </div>
 
             <!-- ═══ INTEGRATSIYALAR ═══ -->
             <section id="tab-integrations" class="tab-view">

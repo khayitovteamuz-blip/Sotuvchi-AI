@@ -365,8 +365,38 @@ async def get_analytics(
 
 
 @router.get("/customers")
-async def get_customers(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
-    return await repo.list_customers(session, user.tenant_id)
+async def get_customers(
+    q: str = Query("", description="Ism yoki telefon bo'yicha qidiruv"),
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+):
+    return await repo.list_customers(session, user.tenant_id, q=q)
+
+
+@router.get("/customers/{customer_id}")
+async def get_customer(
+    customer_id: str,
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+):
+    """One customer with every order and chat they have ever had here."""
+    detail = await repo.customer_detail(session, user.tenant_id, customer_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Mijoz topilmadi.")
+    return detail
+
+
+@router.put("/customers/{customer_id}/note")
+async def set_customer_note(
+    customer_id: str,
+    note: str = Body("", embed=True),
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+):
+    """What the shop knows that the system does not — "prefers evening delivery"."""
+    if not await repo.set_customer_note(session, user.tenant_id, customer_id, note):
+        raise HTTPException(status_code=404, detail="Mijoz topilmadi.")
+    return {"status": "success"}
 
 
 # ─── Integrations ─────────────────────────────────────────────────────────────

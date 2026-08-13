@@ -5,11 +5,13 @@ This is the single place that talks to Postgres for business data. API routes,
 the AI agent and the bot all go through here, so tenant isolation is enforced
 in one spot instead of scattered across the app.
 """
+import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import and_, case, func, select, text
+from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy import false as sa_false
 from sqlalchemy import true as sa_true
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +21,7 @@ from app.core.config import settings
 from app.db.models import (
     Category,
     Conversation,
+    Customer,
     Message,
     Order,
     OrderItem,
@@ -262,6 +265,9 @@ async def delete_product(session: AsyncSession, tenant_id: str, product_id: str)
     return True
 
 
+logger = logging.getLogger("repo")
+
+
 # ─── Categories ───────────────────────────────────────────────────────────────
 async def list_categories(session: AsyncSession, tenant_id: str) -> List[dict]:
     res = await session.execute(select(Category).where(Category.tenant_id == tenant_id))
@@ -374,6 +380,16 @@ async def create_order(
             unit_price=float(i["unit_price"]),
         ))
     session.add(order)
+    await session.flush()
+
+    # An order is where a phone number first appears, so it is where a
+    # Telegram-only record becomes a person the shop can recognise anywhere.
+    from app.services import customer_service
+    try:
+        await customer_service.record_order(session, tenant_id, order)
+    except Exception as e:
+        logger.warning(f"Customer link failed for order {order.id}: {e}")
+
     await session.commit()
     return order
 
@@ -446,6 +462,10 @@ async def get_or_create_conversation(
             conv.customer_name = customer_name
         if customer_phone and not conv.customer_phone:
             conv.customer_phone = customer_phone
+        if conv.customer_id is None:
+            # An older conversation, from before customers were a table.
+            await _link_customer(session, conv)
+            await session.commit()
         return conv
 
     conv = Conversation(
@@ -458,8 +478,28 @@ async def get_or_create_conversation(
         status="ai",
     )
     session.add(conv)
+    await _link_customer(session, conv)
     await session.commit()
     return conv
+
+
+async def _link_customer(session: AsyncSession, conv: Conversation) -> None:
+    """Point a conversation at the person having it.
+
+    Never allowed to break the conversation: identity is a convenience for the
+    panel, and a customer we failed to resolve must not cost the shop a message.
+    """
+    from app.services import customer_service
+    try:
+        customer = await customer_service.resolve(
+            session, conv.tenant_id, conv.channel, conv.external_id,
+            name=conv.customer_name, phone=conv.customer_phone,
+            telegram_username=conv.customer_username,
+        )
+        if customer is not None:
+            conv.customer_id = customer.id
+    except Exception as e:
+        logger.warning(f"Customer link failed for conversation {conv.id}: {e}")
 
 
 async def add_message(
@@ -760,27 +800,115 @@ async def analytics(session: AsyncSession, tenant_id: str, period: str = periods
 
 
 # ─── Customers (aggregated from orders) ───────────────────────────────────────
-async def list_customers(session: AsyncSession, tenant_id: str) -> List[dict]:
-    res = await session.execute(
-        select(
-            Order.customer_phone,
-            func.max(Order.customer_name),
-            func.count(),
-            func.coalesce(func.sum(Order.total_amount), 0),
-            func.max(Order.created_at),
+async def list_customers(
+    session: AsyncSession, tenant_id: str, q: str = "", limit: int = 200
+) -> List[dict]:
+    """The shop's customer list.
+
+    Read from the customers table rather than grouped out of orders at read
+    time, so a lead who has chatted but not yet bought is a customer too —
+    which is the half of the list a shop most wants to call back.
+    """
+    where = [Customer.tenant_id == tenant_id]
+    term = (q or "").strip()
+    if term:
+        digits = re.sub(r"\D", "", term)
+        like = f"%{term.lower()}%"
+        conds = [func.lower(Customer.name).like(like)]
+        if digits:
+            conds.append(Customer.phone.like(f"%{digits}%"))
+        where.append(or_(*conds))
+
+    rows = (
+        await session.execute(
+            select(Customer).where(*where)
+            .order_by(Customer.total_spent.desc(), Customer.last_seen_at.desc())
+            .limit(limit)
         )
-        .where(Order.tenant_id == tenant_id)
-        .group_by(Order.customer_phone)
-        .order_by(func.coalesce(func.sum(Order.total_amount), 0).desc())
-    )
-    out = []
-    for phone, name, cnt, ltv, last in res.all():
-        out.append({
-            "customer_phone": phone, "customer_name": name or "Mijoz",
-            "order_count": cnt, "ltv": float(ltv or 0),
-            "last_order_at": last.strftime("%Y-%m-%d %H:%M") if last else None,
-        })
-    return out
+    ).scalars().all()
+
+    return [
+        {
+            "id": c.id,
+            "customer_name": c.name or "Mijoz",
+            "customer_phone": c.phone or "",
+            "telegram_username": c.telegram_username,
+            "order_count": c.orders_count,
+            "ltv": float(c.total_spent or 0),
+            "channels": sorted({i.channel for i in c.identities}),
+            "first_seen_at": c.first_seen_at.strftime("%Y-%m-%d") if c.first_seen_at else None,
+            "last_seen_at": c.last_seen_at.strftime("%Y-%m-%d %H:%M") if c.last_seen_at else None,
+            "note": c.note,
+        }
+        for c in rows
+    ]
+
+
+async def customer_detail(session: AsyncSession, tenant_id: str, customer_id: str) -> Optional[dict]:
+    """One customer with everything they have ever done here."""
+    customer = await session.get(Customer, customer_id)
+    if customer is None or customer.tenant_id != tenant_id:
+        return None
+
+    orders = (
+        await session.execute(
+            select(Order).where(Order.customer_id == customer_id)
+            .order_by(Order.created_at.desc()).limit(50)
+        )
+    ).scalars().all()
+    convs = (
+        await session.execute(
+            select(Conversation).where(Conversation.customer_id == customer_id)
+            .order_by(Conversation.last_message_at.desc()).limit(20)
+        )
+    ).scalars().all()
+
+    return {
+        "id": customer.id,
+        "name": customer.name or "Mijoz",
+        "phone": customer.phone or "",
+        "telegram_username": customer.telegram_username,
+        "note": customer.note,
+        "orders_count": customer.orders_count,
+        "total_spent": float(customer.total_spent or 0),
+        "first_seen_at": customer.first_seen_at.strftime("%Y-%m-%d %H:%M") if customer.first_seen_at else None,
+        "last_seen_at": customer.last_seen_at.strftime("%Y-%m-%d %H:%M") if customer.last_seen_at else None,
+        "channels": sorted({i.channel for i in customer.identities}),
+        "orders": [
+            {
+                "id": o.id,
+                "created_at": o.created_at.strftime("%Y-%m-%d %H:%M") if o.created_at else None,
+                "total_amount": float(o.total_amount or 0),
+                "status": o.status,
+                "items": [
+                    {"product_name": i.product_name, "quantity": i.quantity,
+                     "unit_price": float(i.unit_price or 0)}
+                    for i in o.items
+                ],
+            }
+            for o in orders
+        ],
+        "conversations": [
+            {
+                "id": c.id,
+                "channel": c.channel,
+                "status": c.status,
+                "last_message_at": c.last_message_at.strftime("%Y-%m-%d %H:%M") if c.last_message_at else None,
+            }
+            for c in convs
+        ],
+    }
+
+
+async def set_customer_note(
+    session: AsyncSession, tenant_id: str, customer_id: str, note: str
+) -> bool:
+    customer = await session.get(Customer, customer_id)
+    if customer is None or customer.tenant_id != tenant_id:
+        return False
+    customer.note = note.strip() or None
+    await session.commit()
+    return True
 
 
 # ─── Dashboard stats ──────────────────────────────────────────────────────────
