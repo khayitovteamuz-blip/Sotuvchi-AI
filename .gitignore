@@ -23,3 +23,6 @@ service_account.json
 # Uploaded product images (user content, not source)
 static/uploads/*
 !static/uploads/.gitkeep
+
+# Baza zaxira nusxalari (scripts/backup.sh)
+backups/

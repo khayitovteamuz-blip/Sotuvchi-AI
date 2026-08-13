@@ -6,16 +6,15 @@ at /api/bot/webhook/{tenant_id}; replies are sent with that tenant's token.
 """
 import json
 import logging
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import BASE_DIR
 from app.db import repo
 from app.db.models import Tenant
 from app.services.ai_agent import ai_agent
+from app.services.storage_service import local_path as _local_photo
 
 logger = logging.getLogger("bot_service")
 TELEGRAM_API = "https://api.telegram.org/bot{token}"
@@ -23,26 +22,6 @@ TELEGRAM_API = "https://api.telegram.org/bot{token}"
 # Inline media must fit in the model request; Telegram voice/photos are far
 # smaller than this in practice, so the cap only guards against odd uploads.
 MAX_MEDIA_BYTES = 15 * 1024 * 1024
-
-UPLOADS_ROOT = (BASE_DIR / "static" / "uploads").resolve()
-
-
-def _local_photo(photo: str) -> Optional[Path]:
-    """The file on our disk this reference points at, or None if it is remote.
-
-    The resolved path is checked against the uploads folder before anything is
-    read: `photo` originates in a database row, and a row that ever held
-    '/static/uploads/../../.env' must not turn into a file we hand to Telegram.
-    """
-    if not photo or not photo.startswith("/static/uploads/"):
-        return None
-    try:
-        path = (BASE_DIR / photo.lstrip("/")).resolve()
-    except OSError:
-        return None
-    if not path.is_relative_to(UPLOADS_ROOT) or not path.is_file():
-        return None
-    return path
 
 
 def _is_markup_error(data: dict) -> bool:

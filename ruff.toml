@@ -1,0 +1,25 @@
+# Lint rules for CI.
+#
+# Deliberately narrow: syntax errors, undefined names, unused imports, and the
+# bug-shaped patterns (mutable default arguments, `except` that swallows
+# everything by mistake). Style is not enforced — a CI job that fails over
+# import order gets switched off within a week, and then the rules that catch
+# real bugs go with it.
+line-length = 120
+
+[lint]
+select = [
+    "E9",   # syntax / runtime errors
+    "F",    # pyflakes: undefined names, unused imports and variables
+    "B",    # bugbear: mutable defaults, loop-variable capture, and friends
+]
+ignore = [
+    "B008",  # FastAPI's whole dependency syntax is a call in a default argument
+    "B904",  # `raise ... from err` inside except — noisy in API translation code
+]
+
+[lint.per-file-ignores]
+# Alembic writes these; the shape is the tool's, not ours.
+"alembic/versions/*" = ["F401", "E402"]
+# Tests reach into private helpers on purpose to force a specific state.
+"tests/*" = ["B011"]

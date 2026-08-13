@@ -7,6 +7,7 @@ convenience only; the container CMD drives the server directly, which is what
 makes multiple workers possible.
 """
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -36,6 +37,38 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("main")
+
+
+def _init_error_tracking() -> bool:
+    """Report crashes somewhere a person will see them.
+
+    Without this the only record of a production failure is a line on stdout,
+    and the first anyone hears of an outage is a customer saying the bot has
+    gone quiet. Off unless SENTRY_DSN is set, so nothing is sent by default.
+    """
+    if not settings.SENTRY_DSN:
+        return False
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=settings.SENTRY_DSN,
+            environment=settings.ENVIRONMENT,
+            release="sotuvchi-ai@2.1.0",
+            # Traces cost money and this is a small service; errors are the
+            # point. Raise deliberately if latency ever needs investigating.
+            traces_sample_rate=0.0,
+            # Bot tokens, phone numbers and chat text all travel through these
+            # requests. None of it belongs in an error report.
+            send_default_pii=False,
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Sentry init failed: {e}")
+        return False
+
+
+SENTRY_ON = _init_error_tracking()
 
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
@@ -97,6 +130,24 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type"],
 )
+
+
+@app.middleware("http")
+async def request_id(request: Request, call_next):
+    """Tie every log line of one request together.
+
+    When a shop reports "it broke around three o'clock", this is what turns a
+    wall of interleaved worker output into one readable trace.
+    """
+    rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+    request.state.request_id = rid
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception(f"[{rid}] {request.method} {request.url.path} failed")
+        raise
+    response.headers["X-Request-ID"] = rid
+    return response
 
 
 @app.middleware("http")
@@ -190,12 +241,24 @@ async def readiness_check():
     try:
         async with AsyncSessionLocal() as session:
             await session.execute(text("SELECT 1"))
-        return {"status": "ready", "database": "ok"}
     except Exception as e:
         logger.error(f"Readiness check failed: {e}")
         return JSONResponse(
             status_code=503, content={"status": "not_ready", "database": "unreachable"}
         )
+
+    from app.services import storage_service
+
+    # Ready means "can serve", so a non-durable file store is not a failure —
+    # but an uptime monitor pointed here should still be able to see it.
+    return {
+        "status": "ready",
+        "database": "ok",
+        "storage": storage_service.status()["backend"],
+        "durable_storage": storage_service.status()["durable"],
+        "error_tracking": "sentry" if SENTRY_ON else "logs-only",
+        "environment": settings.ENVIRONMENT,
+    }
 
 
 @app.exception_handler(RequestValidationError)

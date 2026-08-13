@@ -12,13 +12,12 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import security
 from app.core.auth import hash_password, require_owner
 from app.db.base import get_session
 from app.db.models import LoginAttempt, User, UserSession

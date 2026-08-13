@@ -22,6 +22,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.types import TypeDecorator
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -32,6 +33,27 @@ from app.db.base import Base
 
 def _now() -> datetime:
     return datetime.utcnow()
+
+
+class EncryptedStr(TypeDecorator):
+    """A column whose value is encrypted at rest.
+
+    Applied at the type level on purpose: every read and write goes through it,
+    so no call site can forget. Values written before encryption existed are
+    returned unchanged, which is what makes the rollout gradual rather than a
+    flag day — see app/core/crypto.py.
+    """
+
+    impl = String
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        from app.core import crypto
+        return crypto.encrypt(value)
+
+    def process_result_value(self, value, dialect):
+        from app.core import crypto
+        return crypto.decrypt(value)
 
 
 # ─── Platform side (the operator of the service, not a customer) ──────────────
@@ -179,9 +201,11 @@ class Tenant(Base):
     dunning_stage: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Per-tenant Telegram channel (each business connects its OWN bot)
-    telegram_bot_token: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # Encrypted at rest: a bot token is the shop's whole channel to its
+    # customers, and one database dump used to hand over every business.
+    telegram_bot_token: Mapped[Optional[str]] = mapped_column(EncryptedStr(512), nullable=True)
     telegram_bot_username: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    telegram_webhook_secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    telegram_webhook_secret: Mapped[Optional[str]] = mapped_column(EncryptedStr(512), nullable=True)
 
     # ── Team groups ──
     # Chat ids, not invite links: an invite link (t.me/+hash) carries no chat_id,

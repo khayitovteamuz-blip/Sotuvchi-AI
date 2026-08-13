@@ -76,6 +76,31 @@ class Settings:
     # Fill this only for a separate front-end or an embedded chat widget.
     EXTRA_CORS_ORIGINS: str = os.getenv("EXTRA_CORS_ORIGINS", "")
 
+    # ─── Object storage ───────────────────────────────────────────────────────
+    # Uploaded product photos. Left unset, files go to the container's disk —
+    # which managed hosts replace on every deploy, so the shop's pictures are
+    # gone the next time we ship. Any S3-compatible service works: AWS S3,
+    # Cloudflare R2, Backblaze B2, Supabase Storage.
+    S3_BUCKET: str = os.getenv("S3_BUCKET", "")
+    S3_ENDPOINT_URL: str = os.getenv("S3_ENDPOINT_URL", "")
+    S3_ACCESS_KEY: str = os.getenv("S3_ACCESS_KEY", "")
+    S3_SECRET_KEY: str = os.getenv("S3_SECRET_KEY", "")
+    S3_REGION: str = os.getenv("S3_REGION", "auto")
+    # The public base a browser fetches from — a CDN domain or the bucket's own
+    # public URL. Without it the endpoint URL is used, which works but is slower.
+    S3_PUBLIC_URL: str = os.getenv("S3_PUBLIC_URL", "")
+
+    # Error tracking. Empty means "log to stdout and hope someone is watching",
+    # which is how an outage gets reported by the customer instead of by us.
+    SENTRY_DSN: str = os.getenv("SENTRY_DSN", "")
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+
+    # Encrypts the Telegram bot tokens at rest. Generate with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Unset, tokens are stored as they always were (readable) and a warning is
+    # logged — losing the key would lock every business out of its own bot.
+    ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "")
+
     # Google Sheets
     GOOGLE_SHEETS_SPREADSHEET_ID: str = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
     GOOGLE_SHEETS_CREDENTIALS_FILE: str = os.getenv("GOOGLE_SHEETS_CREDENTIALS_FILE", "service_account.json")

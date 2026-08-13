@@ -1,0 +1,33 @@
+name: CI
+
+# Runs on every push and pull request. The suite is deliberately fast and
+# database-free: the rules worth guarding — the subscription clock, quotas,
+# encryption, upload validation — are pure functions of a few fields, so they
+# need no credentials and no Postgres to check.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: O'rnatish
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio ruff
+
+      - name: Lint
+        run: ruff check app main.py tests
+
+      - name: Testlar
+        run: pytest

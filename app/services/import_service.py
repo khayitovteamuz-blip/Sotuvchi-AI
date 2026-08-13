@@ -133,7 +133,9 @@ def _read_csv(content: bytes) -> Tuple[List[str], List[List[Any]]]:
         dialect.delimiter = ";" if sample.count(";") > sample.count(",") else ","
 
     reader = csv.reader(io.StringIO(text), dialect)
-    rows = [r for _, r in zip(range(MAX_ROWS + 1), reader)]
+    # strict=False on purpose: the range IS the cap — a file with more
+    # rows than MAX_ROWS must stop, not raise.
+    rows = [r for _, r in zip(range(MAX_ROWS + 1), reader, strict=False)]
     if not rows:
         raise ValueError("Fayl bo'sh.")
     return rows[0], rows[1:]
