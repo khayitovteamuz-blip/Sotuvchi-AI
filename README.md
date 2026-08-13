@@ -54,7 +54,29 @@ TELEGRAM_POLLING=false
 DEBUG=False
 ```
 
-Ixtiyoriy, lekin tavsiya etiladi:
+**Ishlab chiqarishda deyarli majburiy** — bularsiz ma'lumot yo'qoladi:
+
+```bash
+# Obyekt xotirasi. Busiz mahsulot rasmlari konteyner diskiga yoziladi va
+# HAR QAYTA DEPLOYDA YO'QOLADI. S3, Cloudflare R2, Backblaze B2, Supabase —
+# har qanday S3-mos xizmat.
+S3_BUCKET=sotuvchi-media
+S3_ENDPOINT_URL=https://xxx.r2.cloudflarestorage.com
+S3_ACCESS_KEY=...
+S3_SECRET_KEY=...
+S3_PUBLIC_URL=https://media.sizning-domeningiz.uz
+
+# Telegram bot tokenlarini bazada shifrlaydi. Busiz bitta baza dumpi
+# barcha bizneslarning botini begonaga beradi.
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+ENCRYPTION_KEY=...
+
+# Xatolar. Busiz prodda nimadir buzilganini birinchi bo'lib mijoz aytadi.
+SENTRY_DSN=https://...@sentry.io/...
+ENVIRONMENT=production
+```
+
+Ixtiyoriy:
 
 ```bash
 AI_PRICE_INPUT_PER_1M=      # provayder narx sahifasidan, USD
@@ -62,10 +84,17 @@ AI_PRICE_OUTPUT_PER_1M=
 USD_TO_UZS=                 # busiz xarajat faqat tokenda ko'rinadi
 TIMEZONE_OFFSET_HOURS=5     # O'zbekiston, yozgi vaqt yo'q
 WEB_CONCURRENCY=2           # worker soni
+ANTHROPIC_API_KEY=          # Claude modellarini tanlash imkoniyati uchun
+OPENAI_API_KEY=             # ChatGPT modellari uchun
+FORWARDED_ALLOW_IPS=*       # proksi manzili ma'lum bo'lsa aniq yozing
 ```
 
 `PUBLIC_BASE_URL` ikki ish qiladi: cookie'ga `secure` bayrog'ini qo'yadi va
 Telegram webhook manzilini yasaydi. HTTPS bilan yozilishi shart.
+
+`ENCRYPTION_KEY` yo'qolsa tokenlarni ochib bo'lmaydi — har bir biznes botini
+qaytadan ulashiga to'g'ri keladi. Baza parolini qayerda saqlasangiz, bu kalitni
+**boshqa** joyda saqlang.
 
 ### 3. Deploy
 
@@ -102,6 +131,51 @@ curl https://sizning-domeningiz.uz/api/health   # jarayon tirikmi
 curl https://sizning-domeningiz.uz/api/ready    # bazaga ulanadimi
 ```
 
+`/api/ready` javobida `"durable_storage": false` chiqsa — rasmlar konteyner
+diskida va keyingi deployda yo'qoladi. `S3_BUCKET` ni sozlang.
+
+---
+
+## Zaxira nusxa
+
+Migratsiya har deployda avtomatik bajariladi, ya'ni bitta xato migratsiya
+bazani qaytarib bo'lmaydigan holga soladi. Supabase'ning o'z zaxirasi bor,
+lekin u boshqa birovning sozlamasi — bu bizning nazoratimizdagi nusxa.
+
+```bash
+./scripts/backup.sh                 # ./backups/ ichiga, gzip, butunlik tekshiruvi bilan
+BACKUP_DIR=/mnt/vol ./scripts/backup.sh
+```
+
+Kunlik cron:
+
+```
+0 3 * * * cd /app && ./scripts/backup.sh >> /var/log/sotuvchi-backup.log 2>&1
+```
+
+**Oyiga bir marta tiklashni sinab ko'ring.** Sinab ko'rilmagan zaxira — zaxira
+emas. Skript oxirgi nusxani alohida vaqtinchalik bazaga tiklaydi, qatorlarni
+sanaydi va o'sha bazani o'chiradi — ishlaydigan bazaga tegmaydi:
+
+```bash
+./scripts/restore-test.sh
+```
+
+---
+
+## Testlar
+
+```bash
+pytest              # 61 test, bazasiz — CI'da ham shunday ishlaydi
+ruff check app main.py tests
+```
+
+Testlar ataylab bazaga bog'lanmaydi: qo'riqlanishi kerak bo'lgan qoidalar —
+obuna soati, tarif limitlari, shifrlash, rasm yuklash tekshiruvi — bir necha
+maydonning sof funksiyasi, ularni tekshirish uchun Postgres kerak emas.
+
+CI (`.github/workflows/ci.yml`) har push va PR'da ruff + pytest ishga tushiradi.
+
 ---
 
 ## Mahalliy ishga tushirish
@@ -131,13 +205,18 @@ docker run --rm -p 8080:8080 --env-file .env sotuvchi-ai
 ```
 app/
   api/         HTTP endpointlar (biznes paneli + platforma paneli alohida)
-  core/        sozlama, autentifikatsiya, xavfsizlik, davrlar
+  core/        sozlama, autentifikatsiya, rollar, shifrlash, davrlar
   db/          modellar va ma'lumotga kirish qatlami
-  services/    AI agent, Telegram bot, kvota, audit
+  services/    AI agent, Telegram bot, billing, kvota, mijoz, xotira, audit
 alembic/       migratsiyalar
+tests/         avtomatik testlar (bazasiz)
 static/, templates/
-scripts/       bir martalik va xizmat skriptlari
+scripts/       zaxira, tiklash mashqi va xizmat skriptlari
 ```
+
+Rollar: `owner` — pul, bot tokeni, xodimlar, ya'ni hamma narsa. `operator` —
+Inbox va katalog. Tekshiruv `app/core/auth.py` dagi `require_owner` orqali,
+endpoint darajasida.
 
 Tenant izolyatsiyasi: biznesga tegishli har bir qator `tenant_id` bilan
 bog'langan va `app/db/repo.py` dagi barcha funksiyalar shu bo'yicha filtrlaydi.
