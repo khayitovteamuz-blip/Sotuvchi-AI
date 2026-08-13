@@ -102,6 +102,27 @@ async def check_products(db: AsyncSession, tenant: Tenant, adding: int = 1) -> N
         )
 
 
+async def check_operators(db: AsyncSession, tenant: Tenant, adding: int = 1) -> None:
+    """Raise QuotaExceeded if adding a person would cross the seat limit.
+
+    `max_operators` sat in the tariff table and on the pricing page for a long
+    time without anything enforcing it — because there was no way to add a
+    second person at all. It is enforced from the moment that became possible.
+    """
+    plan = await get_plan(db, tenant)
+    if plan is None or plan.max_operators is None:
+        return
+    used = await count_operators(db, tenant.id)
+    if used + adding > plan.max_operators:
+        raise QuotaExceeded(
+            f"'{plan.title}' tarifida {plan.max_operators} tagacha foydalanuvchi mumkin "
+            f"(hozir {used} ta). Yuqoriroq tarifga o'ting.",
+            limit=plan.max_operators,
+            used=used,
+            resource="operators",
+        )
+
+
 async def ai_allowed(db: AsyncSession, tenant: Tenant) -> bool:
     """Whether the AI may answer another message this month.
 

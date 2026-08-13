@@ -26,6 +26,7 @@ from app.api.inbox_api import router as inbox_router
 from app.api.integrations_api import router as integrations_router
 from app.api.platform_api import auth_router as platform_auth_router
 from app.api.platform_api import router as platform_router
+from app.api.users_api import router as users_router
 from app.core.config import settings
 from app.db.base import AsyncSessionLocal, engine
 from app.services.telegram_poller import telegram_poller
@@ -139,6 +140,7 @@ app.include_router(inbox_router)
 app.include_router(integrations_router)
 app.include_router(platform_auth_router)
 app.include_router(platform_router)
+app.include_router(users_router)
 
 
 def _asset_version() -> str:

@@ -6,7 +6,7 @@ import secrets
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import require_auth
+from app.core.auth import require_auth, require_owner
 from app.core.config import settings
 from app.db import repo
 from app.db.base import get_session
@@ -31,7 +31,7 @@ async def telegram_status(user: User = Depends(require_auth), session: AsyncSess
 
 
 @router.post("/telegram/connect")
-async def telegram_connect(token: str = Body(..., embed=True), user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+async def telegram_connect(token: str = Body(..., embed=True), user: User = Depends(require_owner), session: AsyncSession = Depends(get_session)):
     token = token.strip()
     if not token:
         raise HTTPException(status_code=400, detail="Token bo'sh.")
@@ -160,7 +160,7 @@ async def disconnect_group(kind: str, user: User = Depends(require_auth), sessio
 
 
 @router.post("/telegram/disconnect")
-async def telegram_disconnect(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+async def telegram_disconnect(user: User = Depends(require_owner), session: AsyncSession = Depends(get_session)):
     tenant = await session.get(Tenant, user.tenant_id)
     if tenant.telegram_bot_token:
         await bot_service.delete_webhook(tenant.telegram_bot_token)

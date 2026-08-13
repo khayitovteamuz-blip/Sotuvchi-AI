@@ -148,7 +148,7 @@ let currentTenant = null;
 
 /** Boot everything after auth: nav + the data the default screen (Inbox) needs. */
 function bootApp() {
-    if (!navReady) { initNavigation(); navReady = true; initCustomerSearch(); }
+    if (!navReady) { initNavigation(); initCustomerSearch(); initStaff(); navReady = true; }
     loadCategories();     // needed by the product modal's category select
     loadProducts();
     loadSettings();
@@ -2043,9 +2043,139 @@ async function loadAccountSettings() {
         setVal('set-biz-name', currentTenant.business_name);
         setVal('set-email', currentTenant.email);
         setVal('set-plan', PLAN_LABEL[currentTenant.plan] || currentTenant.plan || 'Start');
+        await loadStaff();
     } catch (e) {
         console.error('Hisob sozlamalarini yuklashda xatolik:', e);
     }
+}
+
+// ════════════════════════════════════════════════════════
+// XODIMLAR — the seats the tariff has always been selling
+// ════════════════════════════════════════════════════════
+const ROLE_LABEL = { owner: 'Egasi', operator: 'Operator' };
+
+async function loadStaff() {
+    const card = document.getElementById('staff-card');
+    const list = document.getElementById('staff-list');
+    if (!list) return;
+
+    const resp = await fetch('/api/admin/users');
+    if (resp.status === 403) {
+        // Operators do not manage colleagues — hide the whole card rather than
+        // show a section every action inside it would refuse.
+        card.style.display = 'none';
+        return;
+    }
+    card.style.display = '';
+    if (!resp.ok) {
+        list.innerHTML = '<p class="settings-note">Xodimlar ro\'yxatini yuklab bo\'lmadi.</p>';
+        return;
+    }
+
+    const d = await resp.json();
+    const lim = d.limit;
+    document.getElementById('staff-limit').textContent =
+        `${lim.used} / ${lim.limit === null ? '∞' : lim.limit} o'rin band`
+        + (lim.limit !== null && lim.used >= lim.limit
+            ? ' — yangi xodim uchun yuqoriroq tarif kerak.' : '');
+
+    list.innerHTML = d.users.map((u) => `
+        <div class="staff-row">
+            <div class="staff-who">
+                <b>${escapeHtml(u.full_name || u.email)}</b>
+                <span>${escapeHtml(u.email)}</span>
+            </div>
+            <span class="chip">${escapeHtml(ROLE_LABEL[u.role] || u.role)}</span>
+            ${u.is_active ? '' : '<span class="chip">o\'chirilgan</span>'}
+            <div class="staff-acts">
+                <button class="btn-mini" data-edit="${escapeHtml(u.id)}">Tahrirlash</button>
+                <button class="btn-mini danger" data-del="${escapeHtml(u.id)}"
+                        data-name="${escapeHtml(u.full_name || u.email)}">O'chirish</button>
+            </div>
+        </div>`).join('');
+
+    list.querySelectorAll('[data-edit]').forEach((b) =>
+        b.addEventListener('click', () => {
+            const u = d.users.find((x) => x.id === b.dataset.edit);
+            openStaffModal(u);
+        }));
+
+    list.querySelectorAll('[data-del]').forEach((b) =>
+        b.addEventListener('click', async () => {
+            if (!confirm(`"${b.dataset.name}" o'chirilsinmi? U endi panelga kira olmaydi.`)) return;
+            try {
+                const r = await fetch(`/api/admin/users/${b.dataset.del}`, { method: 'DELETE' });
+                if (!r.ok) throw new Error((await r.json()).detail || 'O\'chirilmadi');
+                toast('Xodim o\'chirildi');
+                await loadStaff();
+            } catch (e) { toast(e.message, true); }
+        }));
+}
+
+function openStaffModal(u = null) {
+    document.getElementById('staff-modal-title').textContent =
+        u ? 'Xodimni tahrirlash' : 'Xodim qo\'shish';
+    document.getElementById('staff-id').value = u ? u.id : '';
+    setVal('staff-name', u ? u.full_name : '');
+    setVal('staff-email', u ? u.email : '');
+    setVal('staff-password', '');
+    setVal('staff-role', u ? u.role : 'operator');
+    document.getElementById('staff-email').disabled = !!u;   // the login is the identity
+    document.getElementById('staff-pass-label').textContent =
+        u ? 'Yangi parol — bo\'sh qoldirsangiz o\'zgarmaydi' : 'Parol';
+    const err = document.getElementById('staff-err');
+    err.style.display = 'none';
+    document.getElementById('staff-modal').style.display = 'flex';
+}
+
+function closeStaffModal() {
+    document.getElementById('staff-modal').style.display = 'none';
+}
+
+async function saveStaff() {
+    const id = document.getElementById('staff-id').value;
+    const err = document.getElementById('staff-err');
+    const body = {
+        full_name: gv('staff-name'),
+        role: gv('staff-role'),
+    };
+    const password = gv('staff-password');
+    if (password) body.password = password;
+
+    let url = '/api/admin/users', method = 'POST';
+    if (id) {
+        url += `/${id}`;
+        method = 'PATCH';
+    } else {
+        body.email = gv('staff-email');
+        if (!password) {
+            err.textContent = 'Yangi xodim uchun parol majburiy.';
+            err.style.display = 'block';
+            return;
+        }
+    }
+
+    try {
+        const r = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!r.ok) throw new Error((await r.json()).detail || 'Saqlanmadi');
+        closeStaffModal();
+        toast(id ? 'Xodim yangilandi' : 'Xodim qo\'shildi');
+        await loadStaff();
+    } catch (e) {
+        err.textContent = e.message;
+        err.style.display = 'block';
+    }
+}
+
+function initStaff() {
+    const add = document.getElementById('staff-add-btn');
+    const save = document.getElementById('staff-save');
+    if (add) add.addEventListener('click', () => openStaffModal(null));
+    if (save) save.addEventListener('click', saveStaff);
 }
 
 // ═══════════════ HISOBIM ═══════════════

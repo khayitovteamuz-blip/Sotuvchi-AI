@@ -10,7 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import periods
-from app.core.auth import require_auth, require_auth_unpaid_ok
+from app.core.auth import (require_auth, require_auth_unpaid_ok,
+                           require_owner_unpaid_ok)
 from app.core.config import BASE_DIR
 from app.db import repo
 from app.db.base import get_session
@@ -116,7 +117,7 @@ async def get_billing(user: User = Depends(require_auth_unpaid_ok), session: Asy
 async def request_topup(
     amount: float = Body(..., embed=True),
     note: str = Body("", embed=True),
-    user: User = Depends(require_auth_unpaid_ok),
+    user: User = Depends(require_owner_unpaid_ok),
     session: AsyncSession = Depends(get_session),
 ):
     """File a transfer claim. It sits pending until an operator confirms the
@@ -135,7 +136,7 @@ async def request_topup(
 @router.post("/billing/auto-renew")
 async def set_auto_renew(
     enabled: bool = Body(..., embed=True),
-    user: User = Depends(require_auth_unpaid_ok),
+    user: User = Depends(require_owner_unpaid_ok),
     session: AsyncSession = Depends(get_session),
 ):
     """Renew from the balance on the day the period ends, or don't."""
@@ -148,7 +149,7 @@ async def set_auto_renew(
 @router.post("/billing/subscribe")
 async def subscribe(
     plan: str = Body(..., embed=True),
-    user: User = Depends(require_auth_unpaid_ok),
+    user: User = Depends(require_owner_unpaid_ok),
     session: AsyncSession = Depends(get_session),
 ):
     """Buy or renew a tariff from the balance."""

@@ -1890,3 +1890,14 @@ textarea.form-control {
     border-radius: var(--radius-lg); padding: 34px 24px; text-align: center;
 }
 .load-fail p { font-size: 14px; color: var(--text-muted); margin-bottom: 14px; }
+
+/* ═══ Xodimlar ═══ */
+.staff-row {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px 0; border-bottom: 1px solid var(--card-border);
+}
+.staff-row:last-child { border-bottom: none; }
+.staff-who { min-width: 0; flex: 1; }
+.staff-who b { display: block; font-size: 14px; }
+.staff-who span { font-size: 12px; color: var(--text-muted); }
+.staff-acts { display: flex; gap: 6px; margin-left: auto; }

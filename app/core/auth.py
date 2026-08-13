@@ -199,3 +199,30 @@ async def require_auth_unpaid_ok(
 ) -> User:
     """For the billing screens only: reachable while the subscription is unpaid."""
     return await _authenticate(request, db, allow_unpaid=True)
+
+
+async def require_owner(user: User = Depends(require_auth)) -> User:
+    """Owner-only actions: money, the bot token, staff, the catalogue's life.
+
+    The `role` column existed from the start but nothing ever read it, so an
+    operator hired to answer messages could buy a tariff, spend the balance,
+    replace the Telegram token or delete the whole catalogue. A role that is
+    never checked is not a role.
+    """
+    if user.role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu amalni faqat biznes egasi bajara oladi.",
+        )
+    return user
+
+
+async def require_owner_unpaid_ok(user: User = Depends(require_auth_unpaid_ok)) -> User:
+    """Owner-only, and still reachable while the subscription is unpaid —
+    paying is exactly what an owner needs to do in that state."""
+    if user.role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu amalni faqat biznes egasi bajara oladi.",
+        )
+    return user
