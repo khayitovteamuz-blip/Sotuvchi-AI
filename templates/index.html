@@ -423,54 +423,51 @@
                             <button class="btn-primary" style="margin-top:10px;" onclick="connectTelegram()">Ulash</button>
                         </div>
                     </div>
-                    <div class="integration-card">
-                        <div class="integration-head"><span class="integration-icon">🔔</span><div><h3>Operator bildirishnomasi</h3><p id="op-status-text">Ulanmagan</p></div></div>
-                        <div id="op-paired" style="display:none;">
-                            <div class="tg-badge">✅ Ulangan: <b id="op-name">—</b></div>
-                            <p style="font-size:12px; color:var(--text-muted); margin:10px 0;">AI operatorga uzatganda va yangi buyurtma tushganda Telegram'ingizga xabar keladi.</p>
-                            <label class="switch-row"><input type="checkbox" id="op-notify-handoff" onchange="saveOperatorNotifications()"> Operatorga uzatilganda xabar</label>
-                            <label class="switch-row"><input type="checkbox" id="op-notify-order" onchange="saveOperatorNotifications()"> Yangi buyurtmada xabar</label>
-                            <button class="btn-danger-soft" style="margin-top:12px;" onclick="unpairOperator()">Uzish</button>
-                        </div>
-                        <div id="op-unpaired">
-                            <p style="font-size:13px; color:var(--text-muted); margin:8px 0 12px;">AI operatorni chaqirganda telefoningizga xabar kelishi uchun o'z Telegram'ingizni ulang.</p>
-                            <div id="op-code-box" style="display:none;">
-                                <div class="pair-code" id="op-code">——————</div>
-                                <p style="font-size:12px; color:var(--text-muted); margin:10px 0;">Telegram'da <b id="op-bot-name">botga</b> shu xabarni yuboring:</p>
-                                <code class="pair-cmd" id="op-cmd">/operator ——————</code>
-                                <p style="font-size:11px; color:var(--text-dim); margin-top:8px;">Yuborgandan so'ng "Yangilash" ni bosing.</p>
-                                <button class="btn-mini" style="margin-top:8px;" onclick="loadOperatorPairing()">🔄 Yangilash</button>
-                            </div>
-                            <button class="btn-primary" id="op-get-code-btn" onclick="getPairingCode()">Kod olish</button>
-                        </div>
-                    </div>
                     <div class="integration-card" style="grid-column: 1 / -1;">
-                        <div class="integration-head"><span class="integration-icon">👥</span><div><h3>Jamoa guruhlari</h3><p>Buyurtma cheklari, tasdiqlash va yetkazish</p></div></div>
-
-                        <div class="group-flow">
-                            <span>🧾 Buyurtmalar</span> <b>→</b>
-                            <span>✅ Tasdiqlash</span> <b>→</b>
-                            <span>📦 Ishchi guruh</span>
+                        <div class="integration-head">
+                            <span class="integration-icon">🔔</span>
+                            <div>
+                                <h3>Bildirishnomalar</h3>
+                                <p>Qaysi xabar qayerga borishini o'zingiz tanlaysiz</p>
+                            </div>
                         </div>
 
-                        <div id="groups-list"></div>
+                        <div id="notif-empty" style="display:none;">
+                            <p class="field-hint" style="margin:8px 0 14px;">
+                                Hali bironta manzil ulanmagan. Shaxsiy chat, guruh yoki
+                                Telegram kanalini ulashingiz mumkin — har bir xabar turini
+                                alohida joyga yo'naltirasiz.
+                            </p>
+                        </div>
 
-                        <div id="group-pair-box" style="display:none;">
-                            <div class="pair-code" id="group-code">——————</div>
+                        <div class="table-container" id="notif-table-wrap" style="display:none;">
+                            <table class="notif-table">
+                                <thead><tr><th>Xabar turi</th><th>Qayerga boradi</th></tr></thead>
+                                <tbody id="notif-rows"></tbody>
+                            </table>
+                        </div>
+
+                        <div id="notif-channels" style="margin-top:16px;"></div>
+
+                        <div id="notif-pair-box" style="display:none; margin-top:14px;">
+                            <div class="pair-code" id="notif-code">——————</div>
                             <ol class="group-steps">
-                                <li>Botni guruhga qo'shing: <b id="group-bot-name">@bot</b></li>
-                                <li>Guruhda shu xabarni yuboring:
-                                    <code class="pair-cmd" id="group-cmd">/guruh buyurtmalar ——————</code>
-                                </li>
-                                <li>Turini almashtiring: <code>buyurtmalar</code> · <code>ishchi</code> · <code>operatorlar</code></li>
+                                <li><b>Shaxsiy chat:</b> <span id="notif-bot-name">@bot</span> ga yozing:
+                                    <code class="pair-cmd" id="notif-cmd">/ulash ——————</code></li>
+                                <li><b>Guruh:</b> botni guruhga qo'shing va o'sha buyruqni guruhda yuboring</li>
+                                <li><b>Kanal:</b> botni kanalga admin qiling va buyruqni kanalga post qiling</li>
                             </ol>
-                            <button class="btn-mini" onclick="loadGroups()">🔄 Yangilash</button>
+                            <button class="btn-mini" onclick="loadNotifications()">🔄 Yangilash</button>
                         </div>
 
-                        <button class="btn-primary" id="group-code-btn" onclick="getGroupCode()" style="margin-top:12px;">Guruh ulash uchun kod olish</button>
-                        <p class="field-hint" style="margin-top:10px;">
-                            ⚠️ Taklif havolasi (t.me/+...) orqali ulab bo'lmaydi — Telegram botga
-                            guruh raqamini faqat guruh ichidan beradi.
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;">
+                            <button class="btn-primary" id="notif-code-btn" onclick="getNotifyCode()">+ Manzil ulash</button>
+                            <button class="btn-secondary" id="notif-save-btn" onclick="saveNotifyRoutes()" style="display:none;">Saqlash</button>
+                        </div>
+
+                        <p class="field-hint" style="margin-top:12px;">
+                            ⚠️ Guruh yoki kanalni taklif havolasi (t.me/+...) orqali ulab bo'lmaydi —
+                            Telegram bot uning raqamini faqat ichkaridan yuborilgan buyruqdan biladi.
                         </p>
                     </div>
 

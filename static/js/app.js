@@ -1825,8 +1825,7 @@ async function openCustomer(id) {
 // INTEGRATSIYALAR — Telegram
 // ════════════════════════════════════════════════════════
 async function loadIntegrations() {
-    loadOperatorPairing();
-    loadGroups();
+    loadNotifications();
     loadSheetsStatus();
     try {
         const resp = await fetch('/api/integrations/telegram');
@@ -1852,144 +1851,115 @@ async function loadIntegrations() {
     }
 }
 
-// ── Team groups ──
-const GROUP_META = {
-    buyurtmalar: { icon: '🧾', label: 'Buyurtmalar guruhi', hint: 'Yangi buyurtma cheki + tasdiqlash tugmasi' },
-    ishchi:      { icon: '📦', label: 'Ishchi guruh',       hint: 'Tasdiqlangan buyurtma yetkazish uchun' },
-    operatorlar: { icon: '🙋', label: 'Operatorlar guruhi', hint: 'Mijoz operator so\'raganda xabar' },
-};
+// ── Bildirishnomalar: qaysi xabar qayerga ──
+const CH_ICON = { private: '👤', group: '👥', channel: '📢' };
+let NOTIF = { channels: [], events: [] };
 
-async function loadGroups() {
+async function loadNotifications() {
+    const rows = document.getElementById('notif-rows');
+    if (!rows) return;
+    let d;
     try {
-        const d = await (await fetch('/api/integrations/groups')).json();
-        const box = document.getElementById('groups-list');
-        if (!box) return;
+        const resp = await fetch('/api/integrations/notifications');
+        if (!resp.ok) throw new Error('yuklanmadi');
+        d = await resp.json();
+    } catch (e) {
+        rows.innerHTML = '<tr><td colspan="2" class="table-empty">Yuklab bo\'lmadi.</td></tr>';
+        return;
+    }
+    NOTIF = d;
 
-        box.innerHTML = Object.entries(GROUP_META).map(([key, m]) => {
-            const g = (d.groups || {})[key] || {};
-            return `<div class="group-row ${g.id ? 'connected' : ''}">
-                <span class="group-icon">${m.icon}</span>
-                <div class="group-body">
-                    <div class="group-name">${m.label}</div>
-                    <div class="group-sub">${g.id ? escapeHtml(g.title || 'Guruh') : m.hint}</div>
+    const hasChannels = d.channels.length > 0;
+    document.getElementById('notif-empty').style.display = hasChannels ? 'none' : '';
+    document.getElementById('notif-table-wrap').style.display = hasChannels ? '' : 'none';
+    document.getElementById('notif-save-btn').style.display = hasChannels ? '' : 'none';
+    document.getElementById('notif-code-btn').textContent =
+        hasChannels ? '+ Yana manzil ulash' : '+ Manzil ulash';
+
+    // Paired destinations, each removable
+    document.getElementById('notif-channels').innerHTML = !hasChannels ? '' : `
+        <div class="notif-chan-head">Ulangan manzillar</div>
+        ${d.channels.map((c) => `
+            <div class="notif-chan">
+                <span>${CH_ICON[c.kind] || '•'}</span>
+                <div class="notif-chan-txt">
+                    <b>${escapeHtml(c.title || c.kind_label)}</b>
+                    <span>${escapeHtml(c.kind_label)} · <code>${escapeHtml(c.chat_id)}</code></span>
                 </div>
-                ${g.id
-                    ? `<button class="btn-mini danger" onclick="disconnectGroup('${key}')">Uzish</button>`
-                    : '<span class="group-pending">ulanmagan</span>'}
-            </div>`;
-        }).join('');
+                <button class="btn-mini danger" data-unpair="${escapeHtml(c.chat_id)}"
+                        data-title="${escapeHtml(c.title || c.kind_label)}">Uzish</button>
+            </div>`).join('')}`;
 
-        const btn = document.getElementById('group-code-btn');
-        const pair = document.getElementById('group-pair-box');
-        if (!d.bot_connected) {
-            btn.style.display = 'none';
-            pair.style.display = 'none';
-            box.insertAdjacentHTML('beforeend',
-                '<p class="field-hint">Avval Telegram botni ulang — guruhlar shu bot orqali ishlaydi.</p>');
-        } else if (d.pairing_code) {
-            showGroupCode(d.pairing_code, d.bot_username);
-        } else {
-            pair.style.display = 'none';
-            btn.style.display = 'inline-flex';
-        }
-    } catch (e) {
-        console.error('Guruhlarni yuklashda xatolik:', e);
-    }
+    // One row per message type; a type with nothing ticked is switched off
+    rows.innerHTML = d.events.map((ev) => `
+        <tr>
+            <td>
+                <b>${escapeHtml(ev.title)}</b>
+                <span class="cell-sub">${escapeHtml(ev.hint)}</span>
+            </td>
+            <td>
+                <div class="notif-picks">
+                    ${d.channels.map((c) => {
+                        // A channel has nobody to press a confirm button, so the
+                        // two button-carrying events cannot be sent there.
+                        const blocked = ev.needs_group && c.kind === 'channel';
+                        return `<label class="notif-pick${blocked ? ' is-blocked' : ''}"
+                                       title="${blocked ? 'Kanalda tugmani bosadigan odam yo\'q' : ''}">
+                            <input type="checkbox" data-ev="${escapeHtml(ev.key)}"
+                                   value="${escapeHtml(c.chat_id)}"
+                                   ${ev.targets.includes(c.chat_id) ? 'checked' : ''}
+                                   ${blocked ? 'disabled' : ''}>
+                            <span>${CH_ICON[c.kind] || '•'} ${escapeHtml(c.title || c.kind_label)}</span>
+                        </label>`;
+                    }).join('')}
+                </div>
+                ${ev.targets.length ? '' : '<span class="notif-off">o\'chirilgan</span>'}
+            </td>
+        </tr>`).join('');
+
+    document.getElementById('notif-channels').querySelectorAll('[data-unpair]').forEach((b) =>
+        b.addEventListener('click', () => unpairChannel(b.dataset.unpair, b.dataset.title)));
 }
 
-function showGroupCode(code, botUsername) {
-    document.getElementById('group-code').textContent = code;
-    document.getElementById('group-cmd').textContent = `/guruh buyurtmalar ${code}`;
-    document.getElementById('group-bot-name').textContent = botUsername ? '@' + botUsername : 'botingiz';
-    document.getElementById('group-pair-box').style.display = 'block';
-    document.getElementById('group-code-btn').style.display = 'none';
-}
-
-async function getGroupCode() {
-    try {
-        const r = await fetch('/api/integrations/groups/pair-code', { method: 'POST' });
-        const d = await r.json();
-        if (!r.ok) { toast(d.detail || 'Xatolik', true); return; }
-        showGroupCode(d.pairing_code, d.bot_username);
-    } catch (e) {
-        toast('Kod olishda xatolik', true);
-    }
-}
-
-async function disconnectGroup(kind) {
-    if (!confirm('Bu guruhni uzmoqchimisiz?')) return;
-    await fetch(`/api/integrations/groups/${kind}/disconnect`, { method: 'POST' });
-    toast('Uzildi');
-    loadGroups();
-}
-
-// ── Operator alert pairing ──
-async function loadOperatorPairing() {
-    try {
-        const d = await (await fetch('/api/integrations/operator')).json();
-        document.getElementById('op-status-text').textContent = d.paired ? 'Ulangan' : 'Ulanmagan';
-        document.getElementById('op-paired').style.display = d.paired ? 'block' : 'none';
-        document.getElementById('op-unpaired').style.display = d.paired ? 'none' : 'block';
-
-        if (d.paired) {
-            document.getElementById('op-name').textContent = d.operator_name || 'Operator';
-            document.getElementById('op-notify-handoff').checked = !!d.notify_on_handoff;
-            document.getElementById('op-notify-order').checked = !!d.notify_on_order;
-        } else {
-            const btn = document.getElementById('op-get-code-btn');
-            const box = document.getElementById('op-code-box');
-            if (d.pairing_code) {
-                showPairCode(d.pairing_code, d.bot_username);
-            } else {
-                box.style.display = 'none';
-                btn.style.display = d.bot_connected ? 'inline-flex' : 'none';
-                if (!d.bot_connected) {
-                    document.getElementById('op-unpaired').querySelector('p').textContent =
-                        'Avval Telegram botni ulang — bildirishnomalar shu bot orqali yuboriladi.';
-                }
-            }
-        }
-    } catch (e) {
-        console.error('Operator holatini yuklashda xatolik:', e);
-    }
-}
-
-function showPairCode(code, botUsername) {
-    document.getElementById('op-code').textContent = code;
-    document.getElementById('op-cmd').textContent = '/operator ' + code;
-    document.getElementById('op-bot-name').textContent = botUsername ? '@' + botUsername : 'botga';
-    document.getElementById('op-code-box').style.display = 'block';
-    document.getElementById('op-get-code-btn').style.display = 'none';
-}
-
-async function getPairingCode() {
-    try {
-        const r = await fetch('/api/integrations/operator/pair-code', { method: 'POST' });
-        const d = await r.json();
-        if (!r.ok) { toast(d.detail || 'Xatolik', true); return; }
-        showPairCode(d.pairing_code, d.bot_username);
-    } catch (e) {
-        toast('Kod olishda xatolik', true);
-    }
-}
-
-async function unpairOperator() {
-    if (!confirm('Operator bildirishnomasini uzmoqchimisiz?')) return;
-    await fetch('/api/integrations/operator/unpair', { method: 'POST' });
-    toast('Uzildi');
-    loadOperatorPairing();
-}
-
-async function saveOperatorNotifications() {
-    await fetch('/api/integrations/operator/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            notify_on_handoff: document.getElementById('op-notify-handoff').checked,
-            notify_on_order: document.getElementById('op-notify-order').checked
-        })
+async function saveNotifyRoutes() {
+    const routes = {};
+    NOTIF.events.forEach((ev) => { routes[ev.key] = []; });
+    document.querySelectorAll('#notif-rows input[type=checkbox]:checked').forEach((cb) => {
+        routes[cb.dataset.ev].push(cb.value);
     });
-    toast('Saqlandi');
+    try {
+        const r = await fetch('/api/integrations/notifications', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ routes }),
+        });
+        if (!r.ok) throw new Error((await r.json()).detail || 'Saqlanmadi');
+        toast('Bildirishnomalar saqlandi');
+        loadNotifications();
+    } catch (e) { toast(e.message, true); }
+}
+
+async function getNotifyCode() {
+    try {
+        const r = await fetch('/api/integrations/notifications/code', { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || 'Xatolik');
+        document.getElementById('notif-code').textContent = d.pairing_code;
+        document.getElementById('notif-cmd').textContent = `/ulash ${d.pairing_code}`;
+        document.getElementById('notif-bot-name').textContent = '@' + (d.bot_username || 'bot');
+        document.getElementById('notif-pair-box').style.display = '';
+    } catch (e) { toast(e.message, true); }
+}
+
+async function unpairChannel(chatId, title) {
+    if (!confirm(`"${title}" uzilsinmi? Unga hech qanday xabar bormay qo'yadi.`)) return;
+    try {
+        const r = await fetch(`/api/integrations/notifications/channels/${encodeURIComponent(chatId)}`,
+                              { method: 'DELETE' });
+        if (!r.ok) throw new Error((await r.json()).detail || 'Uzilmadi');
+        toast('Manzil uzildi');
+        loadNotifications();
+    } catch (e) { toast(e.message, true); }
 }
 
 async function connectTelegram() {

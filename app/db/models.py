@@ -329,6 +329,12 @@ class TenantSettings(Base):
     notify_on_handoff: Mapped[bool] = mapped_column(Boolean, default=True)
     notify_on_order: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Which alerts go where: {"order": ["-1001234"], "handoff": ["555", "-100999"]}
+    # A list because one event can legitimately reach two places — an escalation
+    # should ping the owner *and* the operators' group. An event missing from the
+    # map is not sent at all, which is how a shop switches one off.
+    notify_routes: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
 
 # ─── Catalog ──────────────────────────────────────────────────────────────────
 class Category(Base):
@@ -374,6 +380,35 @@ class Product(Base):
         ),
         nullable=True,
     )
+
+
+# ─── Notification routing ─────────────────────────────────────────────────────
+class NotifyChannel(Base):
+    """One Telegram destination this business has connected.
+
+    Before this table there were four fixed columns on the tenant — an operator
+    chat and three named groups — so every alert the owner cared about landed in
+    the same personal chat: orders, escalations and subscription warnings all
+    mixed together. A destination is now just a paired chat; which alerts reach
+    it is a separate question, answered by `TenantSettings.notify_routes`.
+
+    A Telegram *channel* is a valid destination and often the right one: it is
+    one-way, so a stream of order alerts never turns into a conversation.
+    """
+
+    __tablename__ = "notify_channels"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "chat_id", name="uq_notify_channel_tenant_chat"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    chat_id: Mapped[str] = mapped_column(String(64))
+    # private | group | channel — shown in the panel, and used to keep the
+    # order-confirmation buttons out of places where nobody can press them.
+    kind: Mapped[str] = mapped_column(String(16), default="private")
+    title: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 # ─── Customer (the person, not the conversation) ──────────────────────────────
@@ -478,6 +513,10 @@ class Order(Base):
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     confirmed_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     receipt_message_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Which chat the receipt was posted to. Once destinations became routable
+    # this stopped being derivable from a fixed column — editing the message
+    # after confirmation needs the chat it actually went to.
+    receipt_chat_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     items: Mapped[List["OrderItem"]] = relationship(
         back_populates="order", cascade="all, delete-orphan", lazy="selectin"

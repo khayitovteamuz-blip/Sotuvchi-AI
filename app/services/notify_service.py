@@ -15,7 +15,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Conversation, Order, Tenant, TenantSettings
-from app.services.bot_service import bot_service
+from app.services import routing_service
 
 logger = logging.getLogger("notify_service")
 
@@ -35,11 +35,8 @@ async def notify_handoff(
     reason: str,
     last_customer_message: str = "",
 ) -> bool:
-    """Ping the operator that a customer is waiting for a human."""
-    # A paired operator chat OR a team group is enough — either can be on duty
-    if not cfg.notify_on_handoff or not tenant.telegram_bot_token:
-        return False
-    if not cfg.operator_chat_id and not tenant.operators_group_id:
+    """Ping whoever is on duty that a customer is waiting for a human."""
+    if not cfg.notify_on_handoff:
         return False
 
     customer = conversation.customer_name or "Mijoz"
@@ -54,16 +51,7 @@ async def notify_handoff(
         text += f"\n💬 Oxirgi xabar:\n_{last_customer_message[:200]}_\n"
     text += "\n➡️ Panelda *Inbox* bo'limini oching va javob yozing."
 
-    # Reaches whoever is on duty: the paired operator chat and/or the team group
-    targets = [t for t in (cfg.operator_chat_id, tenant.operators_group_id) if t]
-    if not targets:
-        return False
-    ok = False
-    for target in targets:
-        ok = await bot_service.send_message(tenant.telegram_bot_token, target, text) or ok
-    if not ok:
-        logger.warning(f"Handoff alert failed for tenant {tenant.id}")
-    return ok
+    return await routing_service.send(session, tenant, cfg, "handoff", text)
 
 
 async def notify_customer_waiting(
@@ -74,10 +62,11 @@ async def notify_customer_waiting(
     text: str,
 ) -> bool:
     """Customer wrote while a human owns the chat — the operator must know."""
-    if not cfg.notify_on_handoff or not cfg.operator_chat_id or not tenant.telegram_bot_token:
+    if not cfg.notify_on_handoff:
         return False
-    # Don't ping the operator about their own chat
-    if str(conversation.external_id) == str(cfg.operator_chat_id):
+    # Don't ping a destination about its own chat: the owner's personal chat is
+    # both a destination and, if they ever message the bot, a conversation.
+    if str(conversation.external_id) in routing_service.targets_for(cfg, "customer_waiting"):
         return False
 
     customer = conversation.customer_name or "Mijoz"
@@ -86,14 +75,14 @@ async def notify_customer_waiting(
         f"_{text[:250]}_\n\n"
         "➡️ Panelda *Inbox* dan javob bering."
     )
-    return await bot_service.send_message(tenant.telegram_bot_token, cfg.operator_chat_id, body)
+    return await routing_service.send(session, tenant, cfg, "customer_waiting", body)
 
 
 async def notify_new_order(
     session: AsyncSession, tenant: Tenant, cfg: TenantSettings, order: Order
 ) -> bool:
-    """Ping the operator that a new order came in."""
-    if not cfg.notify_on_order or not cfg.operator_chat_id or not tenant.telegram_bot_token:
+    """Ping whoever watches sales that a new order came in."""
+    if not cfg.notify_on_order:
         return False
 
     items = "\n".join(f"• {i.product_name} × {i.quantity}" for i in order.items)
@@ -109,10 +98,7 @@ async def notify_new_order(
         text += f"📍 {order.delivery_address}\n"
     text += "\n➡️ Panelda *Buyurtmalar* bo'limida ko'ring."
 
-    ok = await bot_service.send_message(tenant.telegram_bot_token, cfg.operator_chat_id, text)
-    if not ok:
-        logger.warning(f"Order alert failed for tenant {tenant.id}")
-    return ok
+    return await routing_service.send(session, tenant, cfg, "order", text)
 
 
 async def notify_subscription(
@@ -125,12 +111,7 @@ async def notify_subscription(
     panel to see. There is deliberately no email path: this product's customers
     live in Telegram and an email channel does not exist yet.
     """
-    chat_id = None
-    if tenant.telegram_bot_token:
-        cfg = await session.get(TenantSettings, tenant.id)
-        chat_id = (cfg.operator_chat_id if cfg else None) or tenant.orders_group_id
-    if not chat_id:
-        return False
+    cfg = await session.get(TenantSettings, tenant.id)
 
     price = f"{float(plan.price_uzs):,.0f} so'm".replace(",", " ") if plan else ""
     title = plan.title if plan else tenant.plan
@@ -155,10 +136,7 @@ async def notify_subscription(
             + (f"\nTarif narxi: {price}" if price else "")
         )
 
-    ok = await bot_service.send_message(tenant.telegram_bot_token, chat_id, text)
-    if not ok:
-        logger.warning(f"Subscription notice failed for tenant {tenant.id}")
-    return ok
+    return await routing_service.send(session, tenant, cfg, "billing", text)
 
 
 async def try_pair_operator(

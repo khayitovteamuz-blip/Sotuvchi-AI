@@ -17,7 +17,9 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import repo
 from app.db.models import Order, Tenant
+from app.services import routing_service
 from app.services.bot_service import bot_service
 
 logger = logging.getLogger("group_service")
@@ -53,7 +55,9 @@ def _fmt_items(order: Order) -> str:
 # ─── Receipt into the orders group ────────────────────────────────────────────
 async def send_order_receipt(session: AsyncSession, tenant: Tenant, order: Order) -> bool:
     """Post the order with a confirm button. Returns False if not configured."""
-    if not tenant.telegram_bot_token or not tenant.orders_group_id:
+    cfg = await repo.get_settings(session, tenant.id)
+    targets = routing_service.targets_for(cfg, "receipt")
+    if not tenant.telegram_bot_token or not targets:
         return False
 
     text = (
@@ -77,23 +81,33 @@ async def send_order_receipt(session: AsyncSession, tenant: Tenant, order: Order
 
     # The team confirms payment against the slip, so it has to travel with the
     # receipt. Telegram re-sends by file_id, so nothing is re-uploaded.
-    if order.payment_photo_file_id:
-        msg = await bot_service.send_photo_full(
-            tenant.telegram_bot_token, tenant.orders_group_id,
-            order.payment_photo_file_id, caption=text, reply_markup=keyboard,
-        )
-        if msg and msg.get("message_id"):
-            order.receipt_message_id = str(msg["message_id"])
-            await session.commit()
-            return True
-        # Photo failed (bad id, too large) — still deliver the order as text
-        logger.warning("Payment slip could not be sent; falling back to text")
+    # The confirm button is a single-use action, so only the FIRST destination
+    # keeps the button and has its message id recorded — the rest get the same
+    # receipt without one. Two live buttons would let the same order be
+    # confirmed twice by two different people.
+    sent = False
+    for i, target in enumerate(targets):
+        markup = keyboard if i == 0 else None
+        if order.payment_photo_file_id:
+            msg = await bot_service.send_photo_full(
+                tenant.telegram_bot_token, target,
+                order.payment_photo_file_id, caption=text, reply_markup=markup,
+            )
+            if not msg:
+                # Photo failed (bad id, too large) — still deliver it as text
+                logger.warning("Payment slip could not be sent; falling back to text")
+                msg = await bot_service.send_message_full(
+                    tenant.telegram_bot_token, target, text, reply_markup=markup)
+        else:
+            msg = await bot_service.send_message_full(
+                tenant.telegram_bot_token, target, text, reply_markup=markup)
 
-    msg = await bot_service.send_message_full(
-        tenant.telegram_bot_token, tenant.orders_group_id, text, reply_markup=keyboard
-    )
-    if msg and msg.get("message_id"):
-        order.receipt_message_id = str(msg["message_id"])
+        if msg and msg.get("message_id"):
+            sent = True
+            if i == 0:
+                order.receipt_message_id = str(msg["message_id"])
+                order.receipt_chat_id = str(target)
+    if sent:
         await session.commit()
         return True
 
@@ -130,9 +144,10 @@ async def attach_payment_slip(
     await session.commit()
 
     # Retire the old button so only the slip version is actionable
-    if order.receipt_message_id and tenant.orders_group_id:
+    old_chat = order.receipt_chat_id or tenant.orders_group_id
+    if order.receipt_message_id and old_chat:
         await bot_service.edit_message(
-            tenant.telegram_bot_token, tenant.orders_group_id,
+            tenant.telegram_bot_token, old_chat,
             order.receipt_message_id,
             f"🧾 `{order.id}` — _chek rasmi keldi, quyida_",
             reply_markup={"inline_keyboard": []},
@@ -184,16 +199,22 @@ async def _mark_receipt_confirmed(tenant: Tenant, order: Order) -> None:
     text += f"\n✅ *To'lov tasdiqlandi — {order.confirmed_by}*"
 
     # Photo receipts carry a caption; text receipts carry text
+    # Where the receipt actually went — the routed destination, not a fixed
+    # column, which could now be a different chat entirely.
+    chat_id = order.receipt_chat_id or tenant.orders_group_id
+    if not chat_id:
+        return
+
     if order.payment_photo_file_id:
         ok = await bot_service.edit_caption(
-            tenant.telegram_bot_token, tenant.orders_group_id,
+            tenant.telegram_bot_token, chat_id,
             order.receipt_message_id, text, reply_markup={"inline_keyboard": []},
         )
         if ok:
             return
 
     await bot_service.edit_message(
-        tenant.telegram_bot_token, tenant.orders_group_id,
+        tenant.telegram_bot_token, chat_id,
         order.receipt_message_id, text, reply_markup={"inline_keyboard": []},
     )
 
@@ -201,8 +222,9 @@ async def _mark_receipt_confirmed(tenant: Tenant, order: Order) -> None:
 # ─── Handoff to the fulfilment group ──────────────────────────────────────────
 async def send_to_work_group(session: AsyncSession, tenant: Tenant, order: Order) -> bool:
     """Everything the courier needs, plus the map pin as a real location."""
-    target = tenant.work_group_id or tenant.orders_group_id
-    if not tenant.telegram_bot_token or not target:
+    cfg = await repo.get_settings(session, tenant.id)
+    targets = routing_service.targets_for(cfg, "delivery")
+    if not tenant.telegram_bot_token or not targets:
         return False
 
     text = (
@@ -216,21 +238,22 @@ async def send_to_work_group(session: AsyncSession, tenant: Tenant, order: Order
         f"💰 *Jami: {order.total_amount:,.0f} UZS*\n"
         f"✅ To'lovni tasdiqladi: {order.confirmed_by}"
     )
-    if order.payment_photo_file_id:
-        msg = await bot_service.send_photo_full(
-            tenant.telegram_bot_token, target, order.payment_photo_file_id, caption=text
-        )
-        ok = bool(msg)
-        if not ok:
-            ok = await bot_service.send_message(tenant.telegram_bot_token, target, text)
-    else:
-        ok = await bot_service.send_message(tenant.telegram_bot_token, target, text)
+    ok = False
+    for target in targets:
+        if order.payment_photo_file_id:
+            sent = bool(await bot_service.send_photo_full(
+                tenant.telegram_bot_token, target, order.payment_photo_file_id, caption=text))
+            if not sent:
+                sent = await bot_service.send_message(tenant.telegram_bot_token, target, text)
+        else:
+            sent = await bot_service.send_message(tenant.telegram_bot_token, target, text)
+        ok = sent or ok
 
-    # A pinned location is far more useful to a courier than a text address
-    if order.latitude and order.longitude:
-        await bot_service.send_location(
-            tenant.telegram_bot_token, target, order.latitude, order.longitude
-        )
+        # A pinned location is far more useful to a courier than a text address
+        if sent and order.latitude and order.longitude:
+            await bot_service.send_location(
+                tenant.telegram_bot_token, target, order.latitude, order.longitude
+            )
     return ok
 
 

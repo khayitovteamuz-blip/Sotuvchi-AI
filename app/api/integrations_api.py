@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.db import repo
 from app.db.base import get_session
 from app.db.models import Tenant, User
-from app.services import group_service, notify_service
+from app.services import group_service, notify_service, routing_service
 from app.services.bot_service import bot_service
 from app.services.telegram_poller import telegram_poller
 
@@ -155,6 +155,105 @@ async def disconnect_group(kind: str, user: User = Depends(require_auth), sessio
     id_col, title_col, _ = group_service.GROUP_KINDS[kind]
     setattr(tenant, id_col, None)
     setattr(tenant, title_col, None)
+    await session.commit()
+    return {"status": "success"}
+
+
+# ─── Notification routing ─────────────────────────────────────────────────────
+@router.get("/notifications")
+async def notification_routes(
+    user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)
+):
+    """Which alert goes where, and which destinations are available."""
+    tenant = await session.get(Tenant, user.tenant_id)
+    cfg = await repo.get_settings(session, user.tenant_id)
+    # A shop that connected its groups before routing existed has an empty map;
+    # filling it from the old columns is what keeps its alerts flowing.
+    await routing_service.ensure_routes(session, tenant, cfg)
+    channels = await routing_service.channels(session, user.tenant_id)
+
+    return {
+        "bot_connected": bool(tenant.telegram_bot_token),
+        "bot_username": tenant.telegram_bot_username,
+        "pairing_code": cfg.pairing_code or tenant.group_pairing_code,
+        "channels": [
+            {"chat_id": c.chat_id, "kind": c.kind,
+             "kind_label": routing_service.KINDS.get(c.kind, c.kind), "title": c.title}
+            for c in channels
+        ],
+        "events": [
+            {"key": key, **spec, "targets": routing_service.targets_for(cfg, key)}
+            for key, spec in routing_service.EVENTS.items()
+        ],
+        "notify_on_handoff": cfg.notify_on_handoff,
+        "notify_on_order": cfg.notify_on_order,
+    }
+
+
+@router.put("/notifications")
+async def save_notification_routes(
+    routes: dict = Body(..., embed=True),
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+):
+    """Save the routing table: {event: [chat_id, ...]}."""
+    cfg = await repo.get_settings(session, user.tenant_id)
+    known = {c.chat_id for c in await routing_service.channels(session, user.tenant_id)}
+
+    clean: dict = {}
+    for event, targets in routes.items():
+        if event not in routing_service.EVENTS:
+            raise HTTPException(status_code=400, detail=f"Noma'lum xabar turi: {event}")
+        if isinstance(targets, str):
+            targets = [targets]
+        picked = [str(t) for t in (targets or []) if str(t) in known]
+        if routing_service.EVENTS[event]["needs_group"]:
+            # The confirm button needs someone able to press it and a name to
+            # record. A channel has neither, so this is refused rather than
+            # discovered later by an order nobody could confirm.
+            channels = {c.chat_id: c.kind
+                        for c in await routing_service.channels(session, user.tenant_id)}
+            bad = [t for t in picked if channels.get(t) == "channel"]
+            if bad:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"«{routing_service.EVENTS[event]['title']}» kanalga yuborilmaydi — "
+                           "tugmani bosadigan odam kerak. Guruh yoki shaxsiy chat tanlang.",
+                )
+        if picked:
+            clean[event] = picked
+
+    cfg.notify_routes = clean
+    await session.commit()
+    return {"status": "success", "routes": clean}
+
+
+@router.post("/notifications/code")
+async def notification_pair_code(
+    user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)
+):
+    """One code for every kind of destination — private chat, group or channel."""
+    tenant = await session.get(Tenant, user.tenant_id)
+    if not tenant.telegram_bot_token:
+        raise HTTPException(status_code=400, detail="Avval Telegram botni ulang.")
+    cfg = await repo.get_settings(session, user.tenant_id)
+    code = routing_service.new_code()
+    cfg.pairing_code = code
+    tenant.group_pairing_code = code
+    await session.commit()
+    return {"pairing_code": code, "bot_username": tenant.telegram_bot_username}
+
+
+@router.delete("/notifications/channels/{chat_id}")
+async def unpair_channel(
+    chat_id: str, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)
+):
+    if not await routing_service.remove_channel(session, user.tenant_id, chat_id):
+        raise HTTPException(status_code=404, detail="Bunday manzil yo'q.")
+    cfg = await repo.get_settings(session, user.tenant_id)
+    if cfg.operator_chat_id == str(chat_id):
+        cfg.operator_chat_id = None
+        cfg.operator_name = None
     await session.commit()
     return {"status": "success"}
 

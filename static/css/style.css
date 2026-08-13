@@ -1939,3 +1939,39 @@ textarea.form-control {
 .staff-who b { display: block; font-size: 14px; }
 .staff-who span { font-size: 12px; color: var(--text-muted); }
 .staff-acts { display: flex; gap: 6px; margin-left: auto; }
+
+/* ═══ Bildirishnoma marshruti ═══ */
+.notif-table { width: 100%; }
+.notif-table td { vertical-align: top; padding: 12px 14px; }
+.notif-table td:first-child { width: 40%; }
+.notif-picks { display: flex; flex-wrap: wrap; gap: 8px; }
+.notif-pick {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px; border: 1px solid var(--card-border); border-radius: 999px;
+    font-size: 12.5px; cursor: pointer; background: #fff;
+}
+.notif-pick:has(input:checked) {
+    border-color: var(--primary);
+    background: rgba(0, 184, 124, 0.07);
+    color: var(--primary-text);
+    font-weight: 600;
+}
+/* Blocked, not hidden: seeing why a channel cannot take order confirmations
+   is more useful than the option quietly not being there. */
+.notif-pick.is-blocked { opacity: 0.4; cursor: not-allowed; }
+.notif-pick input { accent-color: var(--primary); margin: 0; }
+.notif-off { font-size: 11.5px; color: var(--text-dim); font-style: italic; }
+
+.notif-chan-head {
+    font-size: 11.5px; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px;
+}
+.notif-chan {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 0; border-bottom: 1px solid var(--card-border); font-size: 13px;
+}
+.notif-chan:last-child { border-bottom: none; }
+.notif-chan-txt { flex: 1; min-width: 0; }
+.notif-chan-txt b { display: block; }
+.notif-chan-txt span { font-size: 11.5px; color: var(--text-muted); }
+.notif-chan-txt code { font-size: 11px; }

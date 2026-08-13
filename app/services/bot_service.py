@@ -30,6 +30,16 @@ def _is_markup_error(data: dict) -> bool:
     return "parse" in desc and "entit" in desc
 
 
+# `/ulash` is the command now. The two older ones stay: an owner may be reading
+# instructions written before this change, and a command that quietly stops
+# working looks like a broken bot.
+PAIR_COMMANDS = ("/ulash", "/operator", "/guruh")
+
+
+def _is_pair_command(text: str) -> bool:
+    return bool(text) and text.split(" ", 1)[0].split("@")[0] in PAIR_COMMANDS
+
+
 class TelegramBotService:
     async def _post_message(
         self, token: str, chat_id: str, text: str,
@@ -276,7 +286,7 @@ class TelegramBotService:
         try:
             payload = {
                 "url": url,
-                "allowed_updates": ["message", "callback_query", "my_chat_member"],
+                "allowed_updates": ["message", "channel_post", "callback_query", "my_chat_member"],
             }
             if secret:
                 # Telegram sends this back on every update as the
@@ -306,8 +316,37 @@ class TelegramBotService:
         token = tenant.telegram_bot_token
         if "message" in update:
             await self._handle_message(session, tenant, token, update["message"])
+        elif "channel_post" in update:
+            # A channel is a one-way destination: the only thing worth reading
+            # from one is the pairing command an admin posts there.
+            await self._handle_channel_post(session, tenant, token, update["channel_post"])
         elif "callback_query" in update:
             await self._handle_callback(session, tenant, token, update["callback_query"])
+
+    async def _handle_channel_post(self, session, tenant, token, post):
+        """A channel is a destination, not a conversation.
+
+        The only thing worth reading from one is the pairing command an admin
+        posts there; everything else is the bot's own output echoing back.
+        """
+        text = post.get("text") or post.get("caption") or ""
+        if not _is_pair_command(text):
+            return
+        chat_id = str(post["chat"]["id"])
+        title = post["chat"].get("title", "Kanal")
+        reply = await self._try_pair(session, tenant, chat_id, "channel", title, text)
+        if reply:
+            await self.send_message(token, chat_id, reply)
+
+    async def _try_pair(self, session, tenant, chat_id, kind, title, text):
+        """Shared by private chats, groups and channels — one command, one path."""
+        from app.services import routing_service
+        cfg = await repo.get_settings(session, tenant.id)
+        parts = text.split()
+        code = parts[-1] if len(parts) > 1 else ""
+        return await routing_service.try_pair(
+            session, tenant, cfg, chat_id, kind, title, code
+        )
 
     async def _handle_message(self, session, tenant, token, msg):
         chat_id = str(msg["chat"]["id"])
@@ -320,23 +359,18 @@ class TelegramBotService:
             await self._handle_group_message(session, tenant, token, msg, chat_id, text)
             return
 
-        # Operator pairing: "/operator ABC123" registers this chat for alerts.
-        # Handled before any conversation is created — the owner is not a lead.
-        if text.startswith("/operator"):
-            from app.services import notify_service
-            cfg = await repo.get_settings(session, tenant.id)
-            parts = text.split(maxsplit=1)
-            code = parts[1] if len(parts) > 1 else ""
-            reply = await notify_service.try_pair_operator(
-                session, tenant, cfg, chat_id, code, user_name
+        # Pairing: "/ulash ABC123" registers this chat as a notification
+        # destination. Handled before any conversation is created — the owner is
+        # not a lead. `/operator` still works: an owner may have the old
+        # instructions open, and a command that silently stops working reads as
+        # a broken product.
+        if _is_pair_command(text):
+            reply = await self._try_pair(session, tenant, chat_id, "private", user_name, text)
+            await self.send_message(
+                token, chat_id,
+                reply or "❌ Kod noto'g'ri yoki eskirgan.\n"
+                         "Paneldagi *Integratsiyalar* bo'limidan yangi kod oling."
             )
-            if reply:
-                await self.send_message(token, chat_id, reply)
-            else:
-                await self.send_message(
-                    token, chat_id,
-                    "❌ Kod noto'g'ri yoki eskirgan.\nPaneldagi *Integratsiyalar* bo'limidan yangi kod oling."
-                )
             return
 
         # An operator's own chat is not a customer conversation
@@ -415,26 +449,25 @@ class TelegramBotService:
 
     async def _handle_group_message(self, session, tenant, token, msg, chat_id, text):
         """Only the pairing command matters in a group; the AI stays out."""
-        from app.services import group_service
-
-        if not text.startswith("/guruh"):
+        if not _is_pair_command(text):
             return
 
         parts = text.split()
-        if len(parts) < 3:
+        if len(parts) < 2:
             await self.send_message(
                 token, chat_id,
-                "Foydalanish: `/guruh <tur> <kod>`\n"
-                "Turlari: `buyurtmalar`, `ishchi`, `operatorlar`\n"
+                "Foydalanish: `/ulash <kod>`\n"
                 "Kodni paneldagi *Integratsiyalar* bo'limidan oling."
             )
             return
 
-        reply = await group_service.try_pair_group(
-            session, tenant, parts[1], parts[2], chat_id, msg["chat"].get("title", ""),
+        title = msg["chat"].get("title", "Guruh")
+        reply = await self._try_pair(session, tenant, chat_id, "group", title, text)
+        await self.send_message(
+            token, chat_id,
+            reply or "❌ Kod noto'g'ri yoki eskirgan.\n"
+                     "Paneldagi *Integratsiyalar* bo'limidan yangi kod oling."
         )
-        if reply:
-            await self.send_message(token, chat_id, reply)
 
     async def _extract_media(self, token: str, msg: dict):
         """Download a photo or voice note. Returns (parts, human label)."""
