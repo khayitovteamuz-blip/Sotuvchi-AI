@@ -9,7 +9,7 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Respon
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import periods
+from app.core import periods, rate_limit
 from app.core.auth import (require_auth, require_auth_unpaid_ok,
                            require_owner_unpaid_ok)
 from app.core.config import BASE_DIR
@@ -276,6 +276,11 @@ async def import_products(
     session: AsyncSession = Depends(get_session),
 ):
     """Bulk-load a catalog from the price list the business already keeps."""
+    # Each call can run an AI column-mapping pass (import_service) on top of
+    # parsing an arbitrary file — cheap to script, not cheap to serve.
+    if not rate_limit.allow(f"import:{user.tenant_id}", max_calls=10, window_seconds=300):
+        raise HTTPException(status_code=429, detail="Juda ko'p import so'rovi. Bir necha daqiqadan so'ng urinib ko'ring.")
+
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Fayl bo'sh.")
@@ -327,6 +332,8 @@ async def auto_categorize(
     session: AsyncSession = Depends(get_session),
 ):
     """Let the AI group the catalog — an imported price list has no categories."""
+    if not rate_limit.allow(f"categorize:{user.tenant_id}", max_calls=10, window_seconds=300):
+        raise HTTPException(status_code=429, detail="Juda ko'p so'rov. Bir necha daqiqadan so'ng urinib ko'ring.")
     return await categorize_service.auto_categorize(
         session, user.tenant_id, only_uncategorized=only_uncategorized
     )

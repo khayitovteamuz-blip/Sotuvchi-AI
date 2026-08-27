@@ -406,6 +406,16 @@ class TelegramBotService:
             )
             return
 
+        # Flood guard: one chat sending messages faster than a person can type
+        # is either a script or a bug on the customer's side, and every one of
+        # these messages would otherwise reach the AI call further down.
+        # Silently dropped, not replied to — replying "siz juda tez yozyapsiz"
+        # to a flood just gives it something to react to.
+        from app.core import rate_limit
+        if not rate_limit.allow(f"chat:{tenant.id}:{chat_id}", max_calls=12, window_seconds=10):
+            logger.warning("Xabar chastotasi chegarasi: tenant=%s chat=%s", tenant.id, chat_id)
+            return
+
         conv = await repo.get_or_create_conversation(
             session, tenant.id, "telegram", chat_id, customer_name=user_name
         )
