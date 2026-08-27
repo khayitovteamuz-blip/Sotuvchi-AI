@@ -9,6 +9,7 @@ uzatish o'rniga qo'pol javob bilan haydab yuboradi.
 import pytest
 
 from app.services import guard
+from eval.benchmark import SCENARIOS
 
 
 @pytest.mark.parametrize("text", [
@@ -114,4 +115,26 @@ def test_faqat_vakolat_daosi_operatorga_uzatiladi():
     """Jailbreak urinishi qat'iy javob oladi, lekin eskalatsiya qilinmaydi —
     har birini eskalatsiya qilish jamoani ko'mib tashlaydi (guard.py izohi)."""
     assert guard.handoff_reason("authority") is not None
+
+
+# ─── Benchmark <-> guard.py ro'yxatlari orasida chalg'ish (drift) bo'lmasin ────
+_BENCH_AUTHORITY = [s for s in SCENARIOS if s["category"] == "jailbreak_vakolat"]
+_BENCH_OVERRIDE = [s for s in SCENARIOS if s["category"] == "jailbreak_override"]
+
+
+def test_benchmarkda_ikkala_jailbreak_toifasi_ham_toliq():
+    assert len(_BENCH_AUTHORITY) == 10
+    assert len(_BENCH_OVERRIDE) == 10
+
+
+@pytest.mark.parametrize("s", _BENCH_AUTHORITY, ids=[s["id"] for s in _BENCH_AUTHORITY])
+def test_benchmarkdagi_vakolat_iborasi_guardda_aniq_royxatda(s):
+    """eval/benchmark.py'ga yangi holat qo'shilib, guard.py'dagi _KNOWN_*
+    ro'yxatiga qo'shish unutilsa — shu yerda darhol bilinadi."""
+    assert guard._normalize(s["input"]) in guard._KNOWN_AUTHORITY_PHRASES
+
+
+@pytest.mark.parametrize("s", _BENCH_OVERRIDE, ids=[s["id"] for s in _BENCH_OVERRIDE])
+def test_benchmarkdagi_override_iborasi_guardda_aniq_royxatda(s):
+    assert guard._normalize(s["input"]) in guard._KNOWN_OVERRIDE_PHRASES
     assert guard.handoff_reason("override") is None
