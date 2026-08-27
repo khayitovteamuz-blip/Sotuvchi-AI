@@ -2284,6 +2284,23 @@ textarea.form-control {
 .ai-acc[open] summary { border-bottom: 1px solid var(--border); }
 .ai-acc-body { padding: 18px; }
 
+/* ── Bilimlar bazasi hujjatlari (RAG) ────────────────────────────────────── */
+.kb-doc-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.kb-doc-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: var(--r-md);
+    background: var(--surface); border: 1px solid var(--border);
+}
+.kb-doc-item-title { font-weight: 600; font-size: 13px; color: var(--text-main); }
+.kb-doc-item-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.kb-doc-item .chat-icon-btn { margin-left: auto; width: 30px; height: 30px; flex-shrink: 0; }
+.kb-doc-empty { font-size: 13px; color: var(--text-dim); padding: 4px 0 10px; }
+.kb-doc-form { display: flex; flex-direction: column; gap: 10px; }
+.kb-doc-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.kb-doc-file-btn {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+}
+
 /* ── Ijodkorlik slayderi ─────────────────────────────────────────────────── */
 .ai-temp-value { font-family: var(--font-mono); font-size: 13px; color: var(--primary-text); }
 .ai-range {

@@ -1672,8 +1672,86 @@ async function loadSettings() {
         setVal('kb-hours', data.working_hours);
         setVal('kb-faq', data.faq);
         renderKbStatus(data);
+        loadKbDocuments();
     } catch (e) {
         console.error('Sozlamalarni yuklashda xatolik:', e);
+    }
+}
+
+// ─── Bilimlar bazasi hujjatlari (RAG) ──────────────────────────────────────
+async function loadKbDocuments() {
+    const list = document.getElementById('kb-doc-list');
+    if (!list) return;
+    try {
+        const docs = await (await fetch('/api/admin/kb/documents')).json();
+        if (!docs.length) {
+            list.innerHTML = '<p class="kb-doc-empty">Hali hujjat yuklanmagan.</p>';
+            return;
+        }
+        list.innerHTML = docs.map((d) => `
+            <div class="kb-doc-item">
+                <div>
+                    <div class="kb-doc-item-title">${escapeHtml(d.title)}</div>
+                    <div class="kb-doc-item-meta">${d.chunks} bo'lak · ${d.chars.toLocaleString('ru-RU')} belgi · ${d.created_at || ''}</div>
+                </div>
+                <button class="chat-icon-btn is-danger" title="O'chirish" onclick="deleteKbDocument('${d.id}')">
+                    <span class="ico ico-x"></span>
+                </button>
+            </div>`).join('');
+    } catch (e) {
+        console.error('Hujjatlarni yuklashda xatolik:', e);
+    }
+}
+
+document.getElementById('kb-doc-file')?.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+        document.getElementById('kb-doc-content').value = reader.result;
+        if (!document.getElementById('kb-doc-title').value.trim()) {
+            document.getElementById('kb-doc-title').value = file.name.replace(/\.(txt|md)$/i, '');
+        }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+});
+
+async function uploadKbDocument() {
+    const title = document.getElementById('kb-doc-title').value.trim();
+    const content = document.getElementById('kb-doc-content').value.trim();
+    if (!content) { toast('Hujjat matni bo\'sh', true); return; }
+
+    const btn = document.getElementById('kb-doc-upload-btn');
+    btn.disabled = true;
+    btn.textContent = 'Yuklanmoqda...';
+    try {
+        const resp = await fetch('/api/admin/kb/documents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: title || 'Nomsiz hujjat', content }),
+        });
+        if (!resp.ok) throw new Error((await resp.json()).detail || 'Xatolik');
+        document.getElementById('kb-doc-title').value = '';
+        document.getElementById('kb-doc-content').value = '';
+        toast('Hujjat qo\'shildi');
+        loadKbDocuments();
+    } catch (e) {
+        toast(e.message || 'Hujjatni yuklab bo\'lmadi', true);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Qo\'shish';
+    }
+}
+
+async function deleteKbDocument(id) {
+    if (!confirm('Bu hujjatni o\'chirishni tasdiqlaysizmi?')) return;
+    try {
+        const resp = await fetch(`/api/admin/kb/documents/${id}`, { method: 'DELETE' });
+        if (!resp.ok) throw new Error((await resp.json()).detail || 'Xatolik');
+        loadKbDocuments();
+    } catch (e) {
+        toast(e.message || 'O\'chirib bo\'lmadi', true);
     }
 }
 

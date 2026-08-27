@@ -455,7 +455,15 @@ async def _calc_delivery(session, tenant_id: str, region: str, order_amount: Opt
 
 
 async def _search_knowledge(session, tenant_id: str, question: str) -> Dict[str, Any]:
-    """Answer policy questions from the tenant's own Knowledge Base."""
+    """Answer policy questions from the tenant's own Knowledge Base.
+
+    Two sources, merged: the fixed settings fields (payment_info, faq, etc. —
+    always short, always the first thing filled in) and, on top of them,
+    uploaded documents searched by embedding similarity (kb_service) — for
+    the longer free-text policies a dropdown field can't hold. The document
+    search is best-effort: no key, no documents, or a failed embed call just
+    means that half returns nothing, not an error.
+    """
     cfg = await repo.get_settings(session, tenant_id)
 
     sections = {
@@ -468,7 +476,10 @@ async def _search_knowledge(session, tenant_id: str, question: str) -> Dict[str,
     }
     filled = {k: v for k, v in sections.items() if (v or "").strip()}
 
-    if not filled:
+    from app.services import kb_service
+    doc_hits = await kb_service.search(session, tenant_id, question, limit=3)
+
+    if not filled and not doc_hits:
         return {
             "found": False,
             "message": ("Bilimlar bazasi bo'sh. Javobni o'ylab topmang — "
@@ -476,10 +487,13 @@ async def _search_knowledge(session, tenant_id: str, question: str) -> Dict[str,
         }
 
     q = (question or "").lower()
-    # Return the whole KB when nothing matches: it is short, and a policy answer
-    # is worse than useless if it's the wrong section.
+    # Return the whole fixed KB when nothing matches: it is short, and a
+    # policy answer is worse than useless if it's the wrong section.
     hits = {k: v for k, v in filled.items() if k in q or any(w in (v or "").lower() for w in q.split() if len(w) > 3)}
-    return {"found": True, "knowledge": hits or filled}
+    result: Dict[str, Any] = {"found": True, "knowledge": hits or filled}
+    if doc_hits:
+        result["documents"] = doc_hits
+    return result
 
 
 MAX_ORDER_LINES = 20

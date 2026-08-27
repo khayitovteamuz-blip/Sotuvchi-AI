@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +19,7 @@ from app.db.base import get_session
 from app.db.models import Plan, User
 from app.models.schema import Category, DashboardStats, Order, Product, SystemSettings
 from app.services import (billing_service, categorize_service, import_service,
-                          quota_service, storage_service, tenant_service)
+                          kb_service, quota_service, storage_service, tenant_service)
 from app.services.sheets_service import sheets_service
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
@@ -213,6 +214,50 @@ async def get_settings(user: User = Depends(require_auth), session: AsyncSession
 @router.post("/settings", response_model=SystemSettings)
 async def save_settings(settings_data: SystemSettings, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     return await repo.save_settings(session, user.tenant_id, settings_data.model_dump())
+
+
+# ─── Knowledge Base documents (RAG) ────────────────────────────────────────────
+# The fixed fields above (payment_info, faq, ...) are the first source
+# search_knowledge reads; these are free-text documents for the policies a
+# few short fields can't hold — a full return-policy page, a long price list
+# of delivery rules, an FAQ dump. See app/services/kb_service.py.
+MAX_KB_DOC_CHARS = 200_000
+
+
+class KbDocumentIn(BaseModel):
+    title: str
+    content: str
+
+
+@router.get("/kb/documents")
+async def list_kb_documents(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    return await kb_service.list_documents(session, user.tenant_id)
+
+
+@router.post("/kb/documents")
+async def upload_kb_document(
+    data: KbDocumentIn, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)
+):
+    if not data.content.strip():
+        raise HTTPException(status_code=400, detail="Hujjat matni bo'sh.")
+    if len(data.content) > MAX_KB_DOC_CHARS:
+        raise HTTPException(status_code=400, detail=f"Matn {MAX_KB_DOC_CHARS:,} belgidan oshmasin.")
+    # Chunking + embedding is the AI-cost part of this endpoint.
+    if not rate_limit.allow(f"kb_upload:{user.tenant_id}", max_calls=10, window_seconds=300):
+        raise HTTPException(status_code=429, detail="Juda ko'p so'rov. Bir necha daqiqadan so'ng urinib ko'ring.")
+    doc = await kb_service.ingest_document(session, user.tenant_id, data.title, data.content)
+    docs = await kb_service.list_documents(session, user.tenant_id)
+    return next((d for d in docs if d["id"] == doc.id), {"id": doc.id, "title": doc.title})
+
+
+@router.delete("/kb/documents/{doc_id}")
+async def delete_kb_document(
+    doc_id: str, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)
+):
+    ok = await kb_service.delete_document(session, user.tenant_id, doc_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Hujjat topilmadi.")
+    return {"status": "success"}
 
 
 # ─── Image Upload ─────────────────────────────────────────────────────────────

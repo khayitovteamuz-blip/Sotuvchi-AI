@@ -380,6 +380,28 @@
                                     </div>
                                 </div>
                             </details>
+
+                            <details class="ai-acc">
+                                <summary><span class="ico ico-paperclip"></span> Hujjatlar <span class="ico ico-chevron-down ai-acc-arrow"></span></summary>
+                                <div class="ai-acc-body">
+                                    <p class="field-hint">Yuqoridagi maydonlarga sig'maydigan uzun matn uchun — to'liq
+                                        qaytarish siyosati, mahsulot qo'llanmasi, ko'p savol-javob. AI savolga mos qismini
+                                        o'zi topib javob beradi.</p>
+                                    <div id="kb-doc-list" class="kb-doc-list"></div>
+                                    <div class="kb-doc-form">
+                                        <input type="text" id="kb-doc-title" class="form-control" placeholder="Hujjat nomi (masalan: To'liq qaytarish siyosati)">
+                                        <textarea id="kb-doc-content" class="form-control" style="min-height:110px;"
+                                                  placeholder="Matnni shu yerga joylashtiring, yoki pastdan .txt/.md fayl tanlang"></textarea>
+                                        <div class="kb-doc-actions">
+                                            <label class="btn-secondary kb-doc-file-btn">
+                                                Fayldan (.txt, .md)
+                                                <input type="file" id="kb-doc-file" accept=".txt,.md,text/plain" hidden>
+                                            </label>
+                                            <button type="button" class="btn-primary" id="kb-doc-upload-btn" onclick="uploadKbDocument()">Qo'shish</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </details>
                         </div>
 
                         <div class="panel-card ai-card">

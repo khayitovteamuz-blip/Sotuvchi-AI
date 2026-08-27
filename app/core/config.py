@@ -40,7 +40,11 @@ class Settings:
     # final answer), and the free tier gives gemini-2.5-flash only ~5 req/min
     # versus 12+ here. Override per tenant in AI Agent → Prompt.
     GEMINI_CHAT_MODEL: str = os.getenv("GEMINI_CHAT_MODEL", "gemini-3.5-flash-lite")
-    EMBED_MODEL: str = os.getenv("EMBED_MODEL", "text-embedding-004")
+    # "text-embedding-004" (the old default here) 404s — Gemini retired it.
+    # gemini-embedding-001 supports a configurable output_dimensionality, set
+    # to EMBED_DIM below so it matches the fixed-width pgvector column
+    # (kb_chunks.embedding) without a migration.
+    EMBED_MODEL: str = os.getenv("EMBED_MODEL", "gemini-embedding-001")
     # Small, cheap model: column mapping is a one-shot classification, not a
     # conversation, so the flagship model would be money spent for nothing.
     IMPORT_MAP_MODEL: str = os.getenv("IMPORT_MAP_MODEL", "gemini-3.5-flash-lite")
