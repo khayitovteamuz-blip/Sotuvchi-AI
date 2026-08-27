@@ -101,6 +101,11 @@ async def lifespan(app: FastAPI):
     polling = _polling_allowed()
     if polling:
         await telegram_poller.start()
+    else:
+        # Webhook mode: re-point every connected bot at this deployment. Bots
+        # are otherwise left wherever they were last registered — which after
+        # any local run is nowhere, because the poller deletes the webhook.
+        await telegram_poller.register_webhooks()
     yield
     if polling:
         await telegram_poller.stop()

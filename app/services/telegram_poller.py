@@ -151,3 +151,50 @@ class TelegramPoller:
 
 
 telegram_poller = TelegramPoller()
+
+
+async def register_webhooks() -> dict:
+    """Point every connected bot at this deployment's webhook URL.
+
+    Called on startup in webhook mode. Without it a shop that connected its bot
+    while the app ran locally would go silent after a deploy: `set_webhook` only
+    runs from the Connect button, and the poller calls `delete_webhook` on every
+    local start — so Telegram has no URL to deliver to, and nothing reports it.
+    """
+    from app.core.config import settings
+    from app.db.base import AsyncSessionLocal
+    from app.db.models import Tenant
+    from app.core.crypto import decrypt
+    from sqlalchemy import select
+
+    base = settings.PUBLIC_BASE_URL.rstrip("/")
+    if not base:
+        return {"registered": 0, "failed": 0, "skipped": "PUBLIC_BASE_URL yo'q"}
+
+    ok, bad = 0, 0
+    async with AsyncSessionLocal() as session:
+        rows = await session.execute(
+            select(Tenant).where(Tenant.telegram_bot_token.is_not(None))
+        )
+        tenants = list(rows.scalars().all())
+
+        for tenant in tenants:
+            token = decrypt(tenant.telegram_bot_token) or ""
+            if not token:
+                continue
+            # A tenant connected before secrets existed has none; mint one now
+            # so the webhook endpoint can still reject forged updates.
+            if not tenant.telegram_webhook_secret:
+                import secrets as _secrets
+                tenant.telegram_webhook_secret = _secrets.token_urlsafe(32)
+
+            url = f"{base}/api/bot/webhook/{tenant.id}"
+            if await bot_service.set_webhook(token, url, tenant.telegram_webhook_secret):
+                ok += 1
+            else:
+                bad += 1
+                logger.error("Webhook o'rnatilmadi: %s (%s)", tenant.id, tenant.telegram_bot_username)
+        await session.commit()
+
+    logger.info("Webhook: %d ta bot ulandi, %d ta xato", ok, bad)
+    return {"registered": ok, "failed": bad}
