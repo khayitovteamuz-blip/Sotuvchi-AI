@@ -157,7 +157,7 @@ $('modal-scrim').addEventListener('click', closeModal);
 
 // ═══ NAVIGATSIYA ═══
 const VIEW_NAMES = {
-    home: 'Umumiy holat', plans: 'Tariflar', payments: 'To\'lovlar',
+    home: 'Umumiy holat', plans: 'Tariflar', ai_rules: 'AI qoidalari', payments: 'To\'lovlar',
     admins: 'Adminlar', audit: 'Audit',
 };
 let payFilter = 'pending';
@@ -167,6 +167,7 @@ function goto(view) {
     Object.keys(VIEW_NAMES).forEach((v) => { $(`view-${v}`).hidden = v !== view; });
     $('crumb').textContent = VIEW_NAMES[view];
     if (view === 'plans') loadPlans();
+    if (view === 'ai_rules') loadAiRules();
     if (view === 'payments') loadPayments();
     if (view === 'admins') loadAdmins();
     if (view === 'audit') loadAudit();
@@ -1123,6 +1124,33 @@ async function savePlan(name) {
         await Promise.all([loadPlans(), loadTenants()]);
     } catch (e) { toast(e.message, 'err'); }
 }
+
+// ═══ AI QOIDALARI ═══
+async function loadAiRules() {
+    try {
+        const r = await api('/api/platform/ai/rules');
+        $('ai-rules-style').value = r.style_text;
+        $('ai-rules-guardrails').value = r.guardrails_text;
+        $('ai-rules-meta').textContent = r.updated_by
+            ? `Oxirgi o'zgartirish: ${r.updated_by}, ${r.updated_at}`
+            : 'Hali hech kim o\'zgartirmagan — bu andoza matn.';
+    } catch (e) { toast(e.message, 'err'); }
+}
+
+$('btn-save-ai-rules').addEventListener('click', async () => {
+    const style_text = $('ai-rules-style').value;
+    const guardrails_text = $('ai-rules-guardrails').value;
+    if (!style_text.trim() || !guardrails_text.trim()) {
+        toast('Ikkala maydon ham bo\'sh bo\'lmasligi kerak', 'err');
+        return;
+    }
+    if (!confirm('Bu qoidalar BARCHA bizneslarning AI\'siga darhol (30 soniya ichida) ta\'sir qiladi. Saqlaymizmi?')) return;
+    try {
+        await api('/api/platform/ai/rules', { method: 'PUT', body: JSON.stringify({ style_text, guardrails_text }) });
+        toast('Saqlandi — barcha bizneslarga qo\'llanadi');
+        loadAiRules();
+    } catch (e) { toast(e.message, 'err'); }
+});
 
 // ═══ AUDIT ═══
 async function loadAudit() {

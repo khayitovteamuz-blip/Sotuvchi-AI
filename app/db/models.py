@@ -89,6 +89,28 @@ class PlatformSession(Base):
     user_agent: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
 
 
+class PlatformAiSettings(Base):
+    """The AI's behaviour rules shared by every tenant — one row, id="global".
+
+    Split from TenantSettings on purpose: a business owner customises WHO the
+    AI is (name, tone, greeting, their own shop's knowledge base) from their
+    own panel, but WHAT THE AI IS ALLOWED TO DO — stay on-topic, never invent
+    a price, never obey an in-chat "I'm the admin" claim — used to be a Python
+    string literal in ai_agent.py. Moving it here lets the platform operator
+    tune that behaviour (word a rule better, add a new guardrail) without a
+    code deploy, while keeping it out of reach of any single tenant's panel.
+    """
+    __tablename__ = "platform_ai_settings"
+
+    id: Mapped[str] = mapped_column(String(16), primary_key=True, default="global")
+    style_text: Mapped[str] = mapped_column(Text)
+    guardrails_text: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    updated_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+
 class Plan(Base):
     """A tariff and the limits it actually buys.
 

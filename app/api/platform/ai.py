@@ -27,6 +27,55 @@ async def ai_model_catalog(provider: str = "", model: str = ""):
     return {"providers": ai_models.catalog(provider, model)}
 
 
+# ─── Platform-wide AI rules (shared by every tenant) ───────────────────────────
+# What a business owner cannot touch from their own panel: not "who the AI
+# is" (name, tone, greeting, their shop's own knowledge) but "what it is
+# allowed to do at all" — stay on the shop's topic, never obey an in-chat
+# claim of authority, never invent a price. See app/db/models.py:PlatformAiSettings.
+@router.get("/ai/rules")
+async def get_ai_rules(session: AsyncSession = Depends(get_session)):
+    row = await repo.get_platform_ai_settings(session)
+    if not row:
+        raise HTTPException(
+            status_code=500,
+            detail="platform_ai_settings bo'sh — migratsiya a96c7a980e29 ishga tushirilmagan.",
+        )
+    return {
+        "style_text": row.style_text,
+        "guardrails_text": row.guardrails_text,
+        "updated_at": row.updated_at.strftime("%Y-%m-%d %H:%M") if row.updated_at else None,
+        "updated_by": row.updated_by,
+    }
+
+
+class AiRulesPatch(BaseModel):
+    style_text: str
+    guardrails_text: str
+
+
+@router.put("/ai/rules")
+async def update_ai_rules(
+    patch: AiRulesPatch,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: PlatformAdmin = Depends(require_platform_admin),
+):
+    """Edit the rules every tenant's AI runs under. Takes effect for chats
+    already in progress within app.db.repo._PLATFORM_AI_TTL seconds — see the
+    comment there for why an instant flip isn't needed."""
+    if not patch.style_text.strip() or not patch.guardrails_text.strip():
+        raise HTTPException(status_code=400, detail="Ikkala maydon ham bo'sh bo'lmasligi kerak.")
+    await repo.save_platform_ai_settings(
+        session, patch.style_text, patch.guardrails_text, admin.email
+    )
+    await audit_service.log(
+        session, admin, "ai_rules_update", None,
+        {"style_len": len(patch.style_text), "guardrails_len": len(patch.guardrails_text)},
+        request,
+    )
+    return {"status": "success"}
+
+
 class AiPatch(BaseModel):
     system_prompt: Optional[str] = None
     ai_provider: Optional[str] = None

@@ -440,6 +440,57 @@ async def save_settings(session: AsyncSession, tenant_id: str, data: dict) -> Te
     return s
 
 
+# ─── Platform-wide AI rules (shared by every tenant) ───────────────────────────
+# Cached in-process: this is read on every single AI turn (ai_agent.py), and
+# it changes only when a platform admin edits it from /boshqaruv — a support
+# call, not a per-second event. A short TTL keeps that read off the hot path
+# without needing a cache-invalidation signal; an edit takes up to this long
+# to reach chats already in flight, which is an acceptable tradeoff for text
+# a platform admin is proofreading, not a security switch that must flip
+# instantly (that part — obeying no in-chat claim — is baked into the model
+# instructions and, more importantly, into which tools exist at all).
+_PLATFORM_AI_TTL = 30.0
+_platform_ai_cache: dict = {"row": None, "at": 0.0}
+
+
+async def get_platform_ai_settings(session: AsyncSession):
+    import time
+
+    from app.db.models import PlatformAiSettings
+
+    now = time.monotonic()
+    cached = _platform_ai_cache["row"]
+    if cached is not None and now - _platform_ai_cache["at"] < _PLATFORM_AI_TTL:
+        return cached
+
+    row = await session.get(PlatformAiSettings, "global")
+    if not row:
+        # Seeded by migration a96c7a980e29; missing only on a database that
+        # skipped it. Empty rules must not silence guardrails outright, but
+        # there is nothing sensible to fall back to here — the caller decides.
+        return None
+    _platform_ai_cache["row"] = row
+    _platform_ai_cache["at"] = now
+    return row
+
+
+async def save_platform_ai_settings(
+    session: AsyncSession, style_text: str, guardrails_text: str, admin_email: str
+):
+    from app.db.models import PlatformAiSettings
+
+    row = await session.get(PlatformAiSettings, "global")
+    if not row:
+        row = PlatformAiSettings(id="global")
+        session.add(row)
+    row.style_text = style_text
+    row.guardrails_text = guardrails_text
+    row.updated_by = admin_email
+    await session.commit()
+    _platform_ai_cache["row"] = None  # next read is fresh, not stale for the full TTL
+    return row
+
+
 # ─── Conversations & Messages (Inbox backbone) ────────────────────────────────
 async def get_or_create_conversation(
     session: AsyncSession,

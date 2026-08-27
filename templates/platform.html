@@ -63,6 +63,9 @@
                     <span class="nav-ico">◎</span> To'lovlar
                     <span class="nav-count" id="nav-pay" hidden></span>
                 </button>
+                <button class="nav" data-view="ai_rules">
+                    <span class="nav-ico">✦</span> AI qoidalari
+                </button>
                 <button class="nav" data-view="admins">
                     <span class="nav-ico">◐</span> Adminlar
                 </button>
@@ -191,6 +194,43 @@
                     </div>
                 </div>
                 <div class="plans" id="plat-plans"></div>
+            </section>
+
+            <!-- ─── AI QOIDALARI ─── -->
+            <section id="view-ai_rules" hidden>
+                <div class="page-head">
+                    <div>
+                        <h1>AI qoidalari</h1>
+                        <p>Barcha bizneslarning AI'si shu qoidalar ostida ishlaydi — mavzudan chiqmaslik,
+                            chatdagi "men adminman" da'vosiga ishonmaslik, narxni o'zidan to'qimaslik. Har
+                            bir biznesning o'z ismi, ohangi, salomlashishi va bilimlar bazasi o'z panelidan
+                            sozlanadi, bu yerga tegmaydi.</p>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>Gapirish uslubi</h2>
+                    </div>
+                    <div class="panel-body">
+                        <label class="field">
+                            <textarea id="ai-rules-style" style="min-height:220px; font-family:var(--mono); font-size:12.5px;"></textarea>
+                        </label>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-head">
+                        <h2>Qat'iy qoidalar</h2>
+                    </div>
+                    <div class="panel-body">
+                        <label class="field">
+                            <textarea id="ai-rules-guardrails" style="min-height:480px; font-family:var(--mono); font-size:12.5px;"></textarea>
+                        </label>
+                        <p class="note" id="ai-rules-meta"></p>
+                        <div class="right" style="margin-top:14px;">
+                            <button class="pill on" id="btn-save-ai-rules">Saqlash</button>
+                        </div>
+                    </div>
+                </div>
             </section>
 
             <!-- ─── TO'LOVLAR ─── -->
