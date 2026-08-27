@@ -15,6 +15,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import settings
 
+# Cost tier every model is billed against, cheapest to most expensive. Plans
+# (app/db/models.py: Plan.max_model_tier) name the highest tier they buy, so
+# raising a tenant onto a pricier model without a plan change is a rejected
+# request, not a silent cost the platform absorbs.
+TIER_ORDER = ["lite", "flash", "pro"]
+
 PROVIDERS: Dict[str, Dict[str, Any]] = {
     "gemini": {
         "title": "Google Gemini",
@@ -23,10 +29,10 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         # Gemini is the only provider here that reads voice notes natively.
         "media": ("image/", "audio/", "video/"),
         "models": [
-            {"id": "gemini-3.5-flash-lite", "title": "Gemini 3.5 Flash Lite — eng tez, eng arzon"},
-            {"id": "gemini-3.5-flash", "title": "Gemini 3.5 Flash — muvozanatli"},
-            {"id": "gemini-2.5-flash", "title": "Gemini 2.5 Flash — oldingi avlod"},
-            {"id": "gemini-2.5-pro", "title": "Gemini 2.5 Pro — eng kuchli, sekinroq"},
+            {"id": "gemini-3.5-flash-lite", "title": "Gemini 3.5 Flash Lite — eng tez, eng arzon", "tier": "lite"},
+            {"id": "gemini-3.5-flash", "title": "Gemini 3.5 Flash — muvozanatli", "tier": "flash"},
+            {"id": "gemini-2.5-flash", "title": "Gemini 2.5 Flash — oldingi avlod", "tier": "flash"},
+            {"id": "gemini-2.5-pro", "title": "Gemini 2.5 Pro — eng kuchli, sekinroq", "tier": "pro"},
         ],
     },
     "claude": {
@@ -40,11 +46,11 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
             # rejects temperature outright, Haiku 4.5 rejects effort — sending the
             # wrong one is a 400, not a degraded answer.
             {"id": "claude-opus-5", "title": "Claude Opus 5 — eng kuchli",
-             "adaptive": True, "temperature": False},
+             "adaptive": True, "temperature": False, "tier": "pro"},
             {"id": "claude-sonnet-5", "title": "Claude Sonnet 5 — muvozanatli",
-             "adaptive": True, "temperature": False},
+             "adaptive": True, "temperature": False, "tier": "pro"},
             {"id": "claude-haiku-4-5", "title": "Claude Haiku 4.5 — eng tez, arzon",
-             "adaptive": False, "temperature": True},
+             "adaptive": False, "temperature": True, "tier": "flash"},
         ],
     },
     "openai": {
@@ -53,9 +59,9 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "key_env": "OPENAI_API_KEY",
         "media": ("image/",),
         "models": [
-            {"id": "gpt-5", "title": "GPT-5 — eng kuchli", "temperature": False},
-            {"id": "gpt-5-mini", "title": "GPT-5 mini — tez va arzon", "temperature": False},
-            {"id": "gpt-4o-mini", "title": "GPT-4o mini — oldingi avlod", "temperature": True},
+            {"id": "gpt-5", "title": "GPT-5 — eng kuchli", "temperature": False, "tier": "pro"},
+            {"id": "gpt-5-mini", "title": "GPT-5 mini — tez va arzon", "temperature": False, "tier": "flash"},
+            {"id": "gpt-4o-mini", "title": "GPT-4o mini — oldingi avlod", "temperature": True, "tier": "flash"},
         ],
     },
 }
@@ -101,6 +107,22 @@ def model_meta(provider: str, model_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def tier_allowed(provider: str, model_id: str, max_tier: Optional[str]) -> bool:
+    """Whether `model_id` fits within `max_tier` (a Plan.max_model_tier value).
+
+    None/unrecognised max_tier fails open — an unknown tariff must not stop a
+    business from selling (same policy as quota_service.get_plan).  A model we
+    don't recognise (not in PROVIDERS, or a legacy id) is treated as within
+    tier: it predates this restriction and cannot retroactively violate it.
+    """
+    if not max_tier or max_tier not in TIER_ORDER:
+        return True
+    meta = model_meta(provider, model_id)
+    if not meta or "tier" not in meta:
+        return True
+    return TIER_ORDER.index(meta["tier"]) <= TIER_ORDER.index(max_tier)
+
+
 def accepts_media(provider: str, mime_type: str) -> bool:
     prefixes = PROVIDERS.get(provider, {}).get("media", ())
     return any(mime_type.startswith(p) for p in prefixes)
@@ -132,7 +154,7 @@ def catalog(current_provider: str = "", current_model: str = "") -> List[Dict[st
     """
     out = []
     for name, spec in PROVIDERS.items():
-        models = [{"id": m["id"], "title": m["title"]} for m in spec["models"]]
+        models = [{"id": m["id"], "title": m["title"], "tier": m.get("tier")} for m in spec["models"]]
         if name == (current_provider or "").lower() and current_model and \
                 not any(m["id"] == current_model for m in models):
             models.append({"id": current_model, "title": f"{current_model} (hozirgi)"})

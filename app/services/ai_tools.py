@@ -618,7 +618,7 @@ async def _alert_operator_handoff(session, tenant_id: str, conversation, reason:
 
         tenant = await session.get(Tenant, tenant_id)
         cfg = await repo.get_settings(session, tenant_id)
-        history = await repo.recent_messages(session, conversation.id, limit=6)
+        history = await repo.recent_messages(session, tenant_id, conversation.id, limit=6)
         last_user = next((m.text for m in reversed(history) if m.sender == "user"), "")
         return await notify_service.notify_handoff(
             session, tenant, cfg, conversation, reason, last_user

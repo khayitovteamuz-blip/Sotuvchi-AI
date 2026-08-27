@@ -103,6 +103,11 @@ class Plan(Base):
     max_products: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     max_ai_messages_monthly: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     max_operators: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Highest AI model cost tier this tariff buys: lite | flash | pro (see
+    # app/services/ai_models.py: TIER_ORDER). Defaults to "pro" (unrestricted)
+    # so a tariff row nobody has configured yet does not suddenly block a
+    # tenant that was already working — the restriction is opt-in per plan.
+    max_model_tier: Mapped[str] = mapped_column(String(16), default="pro", server_default="pro")
     # A tariff lasts this long from the day it is bought. Data, not a constant,
     # so a promotional period needs no deploy.
     duration_days: Mapped[int] = mapped_column(Integer, default=30, server_default="30")

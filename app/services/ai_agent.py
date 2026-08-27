@@ -30,6 +30,11 @@ MAX_TOOL_ROUNDS = 5   # guard against a model looping on tools forever
 MAX_RETRIES = 2       # retries on transient 429/503 from the API
 MAX_RETRY_WAIT = 25.0 # seconds; longer than this we give up and use the fallback
 
+# Word tokenizer for the keyword fallback (\w is Unicode-aware, so this also
+# splits Cyrillic text — apostrophes in "o'zbek"-style spelling are not word
+# characters and split the word, same as elsewhere in this codebase).
+_WORD_RE = re.compile(r"\w+", re.UNICODE)
+
 
 def _new_usage() -> Dict[str, int]:
     return {"total": 0, "prompt": 0, "output": 0}
@@ -206,7 +211,7 @@ class AISalesAgent:
         the customer sent. Gemini reads both natively."""
         tenant_id = tenant.id
         cfg = await repo.get_settings(session, tenant_id)
-        history = await repo.recent_messages(session, conversation.id, limit=10)
+        history = await repo.recent_messages(session, tenant_id, conversation.id, limit=10)
 
         # A voice note or bare photo has no text — store a label so the Inbox
         # shows something meaningful instead of an empty bubble.
@@ -831,23 +836,50 @@ class AISalesAgent:
 
     def _detect_intent(self, msg: str) -> str:
         q = msg.lower()
-        if any(w in q for w in ["salom", "assalom", "hayrli", "privet"]):
+        if any(w in q for w in [
+            "salom", "assalom", "hayrli", "privet", "привет", "здравствуй",
+        ]):
             return "greeting"
-        if any(w in q for w in ["olmoqchi", "xarid", "sotib", "buyurtma", "zakaz", "olaman"]):
+        if any(w in q for w in [
+            "olmoqchi", "xarid", "sotib", "buyurtma", "zakaz", "olaman",
+            "куплю", "заказ", "хочу купить", "хочу заказать",
+        ]):
             return "order_intent"
-        if any(w in q for w in ["qimmat", "arzon", "kafolat", "ishonch"]):
+        if any(w in q for w in [
+            "qimmat", "arzon", "kafolat", "ishonch",
+            "дорого", "дешев", "гарант",
+        ]):
             return "objection"
-        if any(w in q for w in ["narx", "qancha", "necha pul", "aksiya", "chegirma", "katalog"]):
+        if any(w in q for w in [
+            "narx", "narhi", "qancha", "necha pul", "aksiya", "chegirma", "katalog",
+            "цена", "сколько стоит", "почем", "почём", "pochom", "pochyom", "скидк",
+        ]):
             return "query"
         return "general_query"
 
     def _match_products(self, msg: str, products: List[Product]) -> List[Product]:
-        q = msg.lower()
+        """Whole-word match against the customer's message.
+
+        The old version checked `term in q` — a plain substring test — so a
+        one- or two-letter product-name token matched almost anything: "s"
+        (from "Xbox Series S") is a substring of "salom", "mi" (from "Xiaomi
+        Mi Band") is a substring of "bormi". Splitting both sides into word
+        tokens and requiring a real token match (length >= 3, to skip size/
+        model-letter noise like "s", "5", "pro") fixes that without needing a
+        full NLP pass.
+        """
+        q_tokens = _WORD_RE.findall(msg.lower())
+        q_set = set(q_tokens)
         out = []
         for p in products:
-            if any(term in q for term in p.name.lower().split()) or (p.category and p.category.lower() in q):
-                if p not in out:
-                    out.append(p)
+            name_tokens = set(_WORD_RE.findall(p.name.lower()))
+            meaningful = {t for t in name_tokens if len(t) >= 3}
+            hit = bool((meaningful or name_tokens) & q_set)
+            if not hit and p.category:
+                cat_tokens = {t for t in _WORD_RE.findall(p.category.lower()) if len(t) >= 3}
+                hit = bool(cat_tokens & q_set)
+            if hit and p not in out:
+                out.append(p)
         return out
 
     # ─── fallback engine (no API key) ─────────────────────────────────────────

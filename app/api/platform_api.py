@@ -589,7 +589,7 @@ async def update_tenant_ai(
     admin: PlatformAdmin = Depends(require_platform_admin),
 ):
     """Fix a customer's AI configuration for them — the most common support call."""
-    await _get_tenant_or_404(session, tenant_id)
+    tenant = await _get_tenant_or_404(session, tenant_id)
     cfg = await repo.get_settings(session, tenant_id)
 
     # A model switch is only honoured if that model can actually serve the chat.
@@ -612,6 +612,25 @@ async def update_tenant_ai(
                 status_code=400,
                 detail=f"'{patch.model_name}' — {ai_models.PROVIDERS[provider]['title']} ro'yxatida yo'q model.",
             )
+        # Tarif shu modelni sotib olmagan bo'lsa, saqlanmaydi — aks holda
+        # Start tarifidagi mijoz Pro darajasidagi modelga o'tkazilib, farqni
+        # platforma to'lardi. Mavjud (o'zgarmayotgan) qiymatni qayta
+        # saqlashda tekshirmaymiz: pastroq tarifga tushirilgan mijoz allaqachon
+        # yuqoriroq modelda bo'lishi mumkin, va profilni tegmasdan qayta
+        # saqlash shu sababli rad etilmasligi kerak.
+        changed = model != cfg.model_name or provider != (cfg.ai_provider or ai_models.DEFAULT_PROVIDER).lower()
+        if changed:
+            plan = await session.get(Plan, tenant.plan)
+            max_tier = plan.max_model_tier if plan else None
+            if not ai_models.tier_allowed(provider, model, max_tier):
+                meta = ai_models.model_meta(provider, model) or {}
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"'{tenant.business_name}' — {(plan.title if plan else tenant.plan)} tarifida "
+                        f"'{meta.get('title', model)}' modeli yo'q. Avval tarifni oshiring."
+                    ),
+                )
         patch.ai_provider = provider
         patch.model_name = model
 
@@ -716,6 +735,7 @@ async def list_plans(session: AsyncSession = Depends(get_session)):
             "max_products": p.max_products,
             "max_ai_messages_monthly": p.max_ai_messages_monthly,
             "max_operators": p.max_operators,
+            "max_model_tier": p.max_model_tier,
             "is_active": p.is_active,
             "tenants": counts.get(p.name, 0),
         }
@@ -731,6 +751,7 @@ class PlanPatch(BaseModel):
     max_products: Optional[int] = None
     max_ai_messages_monthly: Optional[int] = None
     max_operators: Optional[int] = None
+    max_model_tier: Optional[str] = None  # lite | flash | pro — see ai_models.TIER_ORDER
     unlimited: Optional[list[str]] = None  # fields to explicitly clear
 
 
@@ -746,8 +767,15 @@ async def update_plan(
     if not plan:
         raise HTTPException(status_code=404, detail="Tarif topilmadi.")
 
+    if patch.max_model_tier is not None and patch.max_model_tier not in ai_models.TIER_ORDER:
+        raise HTTPException(
+            status_code=400,
+            detail=f"max_model_tier {ai_models.TIER_ORDER} dan biri bo'lishi kerak.",
+        )
+
     changes = {}
-    for field in ("title", "price_uzs", "max_products", "max_ai_messages_monthly", "max_operators"):
+    for field in ("title", "price_uzs", "max_products", "max_ai_messages_monthly",
+                  "max_operators", "max_model_tier"):
         new = getattr(patch, field)
         if new is not None and new != getattr(plan, field):
             changes[field] = {"from": getattr(plan, field), "to": new}

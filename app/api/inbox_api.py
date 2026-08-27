@@ -46,7 +46,7 @@ async def get_conversation(conv_id: str, user: User = Depends(require_auth), ses
     if not conv:
         raise HTTPException(status_code=404, detail="Suhbat topilmadi.")
     await repo.mark_conversation_read(session, user.tenant_id, conv_id)
-    msgs = await repo.conversation_messages(session, conv_id)
+    msgs = await repo.conversation_messages(session, user.tenant_id, conv_id)
     return {
         "conversation": {
             "id": conv.id, "channel": conv.channel, "status": conv.status,

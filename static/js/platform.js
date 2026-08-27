@@ -633,12 +633,24 @@ function providerOptions(current) {
     }).join('');
 }
 
-function modelOptions(providerName, current) {
+const MODEL_TIER_ORDER = ['lite', 'flash', 'pro'];
+
+function modelOptions(providerName, current, maxTier) {
     const p = provider(providerName) || AI_PROVIDERS[0];
     if (!p) return '';
-    return p.models.map((m) =>
-        `<option value="${esc(m.id)}" ${m.id === current ? 'selected' : ''}>${esc(m.title)}</option>`
-    ).join('');
+    const maxIdx = MODEL_TIER_ORDER.indexOf(maxTier);
+    return p.models.map((m) => {
+        // A tier we don't recognise (custom/legacy model) is never blocked —
+        // matches the backend's tier_allowed() fail-open policy.
+        const idx = MODEL_TIER_ORDER.indexOf(m.tier);
+        const overTier = maxIdx >= 0 && idx >= 0 && idx > maxIdx && m.id !== current;
+        return `<option value="${esc(m.id)}" ${m.id === current ? 'selected' : ''} ${overTier ? 'disabled' : ''}>${
+            esc(m.title)}${overTier ? ' — tarifda yo\'q' : ''}</option>`;
+    }).join('');
+}
+
+function planTier(planName) {
+    return (PLANS.find((p) => p.name === planName) || {}).max_model_tier;
 }
 
 function providerNote(providerName) {
@@ -752,7 +764,7 @@ async function openTenant(id) {
             <label class="field"><span>AI provayderi</span>
                 <select id="dr-provider">${providerOptions(d.ai.ai_provider)}</select></label>
             <label class="field"><span>Model</span>
-                <select id="dr-model">${modelOptions(d.ai.ai_provider, d.ai.model_name)}</select></label>
+                <select id="dr-model">${modelOptions(d.ai.ai_provider, d.ai.model_name, planTier(d.plan))}</select></label>
             <p class="note" id="dr-model-note">${esc(providerNote(d.ai.ai_provider))}</p>
             <label class="field"><span>Temperature</span>
                 <input type="number" id="dr-temp" step="0.1" min="0" max="1" value="${d.ai.temperature}"></label>
@@ -845,7 +857,7 @@ async function openTenant(id) {
     // rejected, which reads as a bug rather than a mismatch.
     $('dr-provider').addEventListener('change', () => {
         const p = $('dr-provider').value;
-        $('dr-model').innerHTML = modelOptions(p, '');
+        $('dr-model').innerHTML = modelOptions(p, '', planTier(d.plan));
         $('dr-model-note').textContent = providerNote(p);
     });
 
@@ -1041,6 +1053,8 @@ async function patchAi(id, body) {
 }
 
 // ═══ TARIFLAR ═══
+const MODEL_TIER_LABEL = { lite: 'Lite (eng arzon)', flash: 'Flash', pro: 'Pro (hammasi)' };
+
 async function loadPlans() {
     PLANS = await api('/api/platform/plans');
 
@@ -1072,6 +1086,12 @@ async function loadPlans() {
                 <input type="number" data-f="max_ai_messages_monthly" value="${p.max_ai_messages_monthly ?? ''}" placeholder="∞"></div>
             <div class="plan-line"><span>Operator</span>
                 <input type="number" data-f="max_operators" value="${p.max_operators ?? ''}" placeholder="∞"></div>
+            <div class="plan-line"><span>AI model darajasi</span>
+                <select data-f="max_model_tier">
+                    ${['lite', 'flash', 'pro'].map((t) =>
+                        `<option value="${t}" ${p.max_model_tier === t ? 'selected' : ''}>${MODEL_TIER_LABEL[t]}</option>`
+                    ).join('')}
+                </select></div>
             <div class="acts"><button class="btn btn-green" data-save="${esc(p.name)}">Saqlash</button></div>
             <p class="plan-note">Bo'sh maydon — cheksiz.</p>
         </div>`).join('');
@@ -1093,6 +1113,9 @@ async function savePlan(name) {
         } else {
             body[field] = Number(raw);
         }
+    });
+    card.querySelectorAll('select[data-f]').forEach((sel) => {
+        body[sel.dataset.f] = sel.value;
     });
     try {
         const r = await api(`/api/platform/plans/${name}`, { method: 'PATCH', body: JSON.stringify(body) });

@@ -537,10 +537,12 @@ async def add_message(
     return m
 
 
-async def recent_messages(session: AsyncSession, conversation_id: str, limit: int = 10) -> List[Message]:
+async def recent_messages(
+    session: AsyncSession, tenant_id: str, conversation_id: str, limit: int = 10
+) -> List[Message]:
     res = await session.execute(
         select(Message)
-        .where(Message.conversation_id == conversation_id)
+        .where(Message.tenant_id == tenant_id, Message.conversation_id == conversation_id)
         .order_by(Message.created_at.desc())
         .limit(limit)
     )
@@ -622,9 +624,11 @@ async def get_conversation(session: AsyncSession, tenant_id: str, conv_id: str) 
     return c
 
 
-async def conversation_messages(session: AsyncSession, conv_id: str) -> List[Message]:
+async def conversation_messages(session: AsyncSession, tenant_id: str, conv_id: str) -> List[Message]:
     res = await session.execute(
-        select(Message).where(Message.conversation_id == conv_id).order_by(Message.created_at.asc())
+        select(Message)
+        .where(Message.tenant_id == tenant_id, Message.conversation_id == conv_id)
+        .order_by(Message.created_at.asc())
     )
     return list(res.scalars().all())
 
