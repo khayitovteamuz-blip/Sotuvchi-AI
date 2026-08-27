@@ -213,6 +213,20 @@
 
             <!-- ═══ DASHBOARD ═══ -->
             <section id="tab-overview" class="tab-view">
+                <!-- Real setup state (see /api/admin/onboarding), not a flag —
+                     dismissed per-browser (localStorage) once every step is done
+                     or the owner closes it. Hidden by default until loadOnboarding()
+                     decides whether there's anything left to show. -->
+                <div class="onboard-card" id="onboard-card" hidden>
+                    <div class="onboard-head">
+                        <h3>Boshlash uchun</h3>
+                        <button type="button" class="onboard-dismiss" onclick="dismissOnboarding()" title="Yopish">
+                            <span class="ico ico-x"></span>
+                        </button>
+                    </div>
+                    <div class="onboard-steps" id="onboard-steps"></div>
+                </div>
+
                 <!-- Every figure below is scoped to the period picked here -->
                 <div class="period-picker" id="dashboard-period">
                     <button type="button" data-period="today">Bugun</button>

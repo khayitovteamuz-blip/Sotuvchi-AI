@@ -36,6 +36,40 @@ async def get_dashboard_stats(
     return DashboardStats(**s)
 
 
+@router.get("/onboarding")
+async def get_onboarding(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    """Setup checklist for the dashboard: connect bot -> import catalog ->
+    configure AI -> connect notification group.
+
+    Each step reads real state rather than a flag the panel has to remember
+    to set — a business that connected its bot from a fresh install (or had
+    it done for them by support) shows that step done without anyone having
+    to mark it.
+    """
+    tenant = await tenant_service.get_tenant(session, user.tenant_id)
+    cfg = await repo.get_settings(session, user.tenant_id)
+    product_count = await quota_service.count_products(session, user.tenant_id)
+
+    kb_filled = any(
+        (getattr(cfg, f) or "").strip()
+        for f in ("delivery_info", "payment_info", "warranty_info",
+                  "return_policy", "working_hours", "faq")
+    )
+    ai_configured = bool((cfg.greeting_message or "").strip()) or kb_filled
+
+    steps = [
+        {"key": "bot", "title": "Telegram botni ulang", "done": bool(tenant.telegram_bot_token),
+         "tab": "tab-integrations"},
+        {"key": "catalog", "title": "Katalogni to'ldiring", "done": product_count > 0,
+         "tab": "tab-products"},
+        {"key": "ai", "title": "AI'ni sozlang — salomlashish yoki bilimlar bazasi",
+         "done": ai_configured, "tab": "tab-ai-agent"},
+        {"key": "group", "title": "Bildirishnoma guruhini ulang", "done": bool(tenant.orders_group_id),
+         "tab": "tab-integrations"},
+    ]
+    return {"steps": steps, "all_done": all(s["done"] for s in steps)}
+
+
 # ─── Categories ───────────────────────────────────────────────────────────────
 @router.get("/categories", response_model=List[Category])
 async def get_categories(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):

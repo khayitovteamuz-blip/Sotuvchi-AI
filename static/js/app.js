@@ -508,6 +508,7 @@ function showDashboardSkeleton() {
 async function loadDashboardStats() {
     initPeriodPicker();
     showDashboardSkeleton();
+    loadOnboarding();
     try {
         const q = `?period=${encodeURIComponent(dashPeriod)}`;
         const [statsResp, anResp] = await Promise.all([
@@ -656,6 +657,43 @@ async function loadDashboardStats() {
             if (el) el.innerHTML = '';
         });
     }
+}
+
+// ─── Boshlash checklisti ────────────────────────────────────────────────────
+const ONBOARD_DISMISS_KEY = 'sotuvchi_onboard_dismissed';
+
+async function loadOnboarding() {
+    const card = document.getElementById('onboard-card');
+    if (!card || localStorage.getItem(ONBOARD_DISMISS_KEY) === '1') return;
+    try {
+        const data = await (await fetch('/api/admin/onboarding')).json();
+        if (data.all_done) {
+            // Nothing left to do — no reason to keep asking, same as a manual dismiss.
+            localStorage.setItem(ONBOARD_DISMISS_KEY, '1');
+            card.hidden = true;
+            return;
+        }
+        document.getElementById('onboard-steps').innerHTML = data.steps.map((s) => `
+            <div class="onboard-step ${s.done ? 'is-done' : ''}" ${s.done ? '' : `onclick="goToOnboardStep('${s.tab}')"`}>
+                <span class="onboard-step-dot">${s.done ? '✓' : ''}</span>
+                <span class="onboard-step-title">${escapeHtml(s.title)}</span>
+            </div>`).join('');
+        card.hidden = false;
+    } catch (e) {
+        console.error('Onboarding holatini yuklashda xatolik:', e);
+    }
+}
+
+// A real function declaration (not the `let activateTab` closure) so inline
+// onclick can resolve it unambiguously as a global.
+function goToOnboardStep(tab) {
+    if (typeof activateTab === 'function') activateTab(tab);
+}
+
+function dismissOnboarding() {
+    localStorage.setItem(ONBOARD_DISMISS_KEY, '1');
+    const card = document.getElementById('onboard-card');
+    if (card) card.hidden = true;
 }
 
 // ════════════════════════════════════════════════════════
