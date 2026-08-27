@@ -4,6 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sotuvchi AI - Boshqaruv Paneli</title>
+    <script>
+        /* Mavzu CSS yuklanishidan oldin qo'yiladi: aks holda yorug' mavzuni
+           tanlagan foydalanuvchi har safar bir lahza qorong'i chaqnashni
+           ko'radi. Shuning uchun bu skript inline va <head> ichida. */
+        (function () {
+            try {
+                var saved = localStorage.getItem('theme') || 'auto';
+                var dark = saved === 'auto'
+                    ? !window.matchMedia('(prefers-color-scheme: light)').matches
+                    : saved === 'dark';
+                document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+            } catch (e) {
+                /* Shaxsiy rejimda localStorage otishi mumkin — qorong'ida qolamiz. */
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+        })();
+    </script>
     <link rel="stylesheet" href="/static/css/style.css?v={{ asset_v }}">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
 </head>
@@ -85,16 +102,16 @@
                 </div>
             </div>
 
+            <!-- Menyu Stitch dizayniga mos: yettita bo'lim, shu tartibda.
+                 Ikonkalar Material Symbols, emoji emas. -->
             <nav class="nav-menu">
-                <div class="nav-item" data-tab="tab-overview"><span>🏠</span> Dashboard</div>
-                <div class="nav-item active" data-tab="tab-inbox"><span>💬</span> Inbox <span class="nav-badge" id="inbox-nav-badge" style="display:none;">0</span></div>
-                <div class="nav-item" data-tab="tab-ai-agent"><span>🤖</span> AI Agent</div>
-                <div class="nav-item" data-tab="tab-products"><span>📦</span> Katalog</div>
-                <div class="nav-item" data-tab="tab-orders"><span>🧾</span> Buyurtmalar</div>
-                <div class="nav-item" data-tab="tab-customers"><span>👥</span> Mijozlar</div>
-                <div class="nav-item" data-tab="tab-integrations"><span>🔌</span> Integratsiyalar</div>
-                <div class="nav-item" data-tab="tab-billing"><span>💳</span> Hisobim</div>
-                <div class="nav-item" data-tab="tab-settings"><span>⚙️</span> Sozlamalar</div>
+                <div class="nav-item" data-tab="tab-overview"><span class="ico ico-layout-dashboard"></span> Dashboard</div>
+                <div class="nav-item" data-tab="tab-orders"><span class="ico ico-shopping-cart"></span> Buyurtmalar</div>
+                <div class="nav-item active" data-tab="tab-inbox"><span class="ico ico-mail"></span> Inbox <span class="nav-badge" id="inbox-nav-badge" style="display:none;">0</span></div>
+                <div class="nav-item" data-tab="tab-products"><span class="ico ico-boxes"></span> Katalog</div>
+                <div class="nav-item" data-tab="tab-ai-agent"><span class="ico ico-bot"></span> AI Agent</div>
+                <div class="nav-item" data-tab="tab-settings"><span class="ico ico-settings"></span> Sozlamalar</div>
+                <div class="nav-item" data-tab="tab-billing"><span class="ico ico-banknote"></span> Hisobim</div>
             </nav>
 
             <div id="tenant-info-bar" style="padding:12px 16px; border-top:1px solid var(--card-border); margin-top:auto;">
@@ -106,6 +123,12 @@
                     </div>
                     <button onclick="doLogout()" title="Chiqish" style="background:rgba(225,29,72,0.08); border:1px solid rgba(225,29,72,0.2); color:#e11d48; padding:5px 8px; border-radius:7px; cursor:pointer; font-size:12px; flex-shrink:0;">↪</button>
                 </div>
+            </div>
+
+            <div class="theme-switch" role="group" aria-label="Mavzu">
+                <button type="button" data-theme-set="auto"  onclick="setTheme('auto')">Avto</button>
+                <button type="button" data-theme-set="light" onclick="setTheme('light')">Yorug'</button>
+                <button type="button" data-theme-set="dark"  onclick="setTheme('dark')">Qorong'i</button>
             </div>
 
             <div class="sidebar-status">
@@ -124,7 +147,8 @@
                 <div id="header-action-group" style="display: none; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
                     <button class="btn-secondary" onclick="openAddCategoryModal()" title="Qo'lda kategoriya qo'shish">+ Kategoriya</button>
                     <button class="btn-secondary" onclick="autoCategorize()" id="ai-cat-btn" title="AI mahsulotlarni kategoriyalarga ajratadi">✨ AI kategoriyalash</button>
-                    <button class="btn-primary" onclick="openImportModal()">📥 Excel yuklash</button>
+                    <button class="btn-secondary" onclick="exportCatalog()" title="Katalogni .xlsx qilib yuklab olish">Excel'ga chiqarish</button>
+                    <button class="btn-primary" onclick="openImportModal()">Excel yuklash</button>
                 </div>
             </header>
 
@@ -135,29 +159,52 @@
                     <span id="handoff-banner-text">Operator kutayotgan suhbatlar bor</span>
                     <span class="handoff-banner-cta">Ko'rish →</span>
                 </div>
+
                 <div class="inbox-layout">
+                    <!-- Chap ustun: qidiruv, saralash va suhbatlar ro'yxati -->
                     <div class="inbox-list-pane">
-                        <div class="inbox-filters">
-                            <button class="inbox-filter active" data-status="all" onclick="filterInbox('all',this)">Barchasi</button>
-                            <button class="inbox-filter" data-status="ai" onclick="filterInbox('ai',this)">🤖 AI</button>
-                            <button class="inbox-filter" data-status="operator" onclick="filterInbox('operator',this)">👨‍💼 Operator</button>
-                            <button class="inbox-filter" data-status="closed" onclick="filterInbox('closed',this)">✅ Yopilgan</button>
+                        <div class="inbox-search">
+                            <span class="ico ico-search"></span>
+                            <input type="text" id="inbox-search-input" placeholder="Suhbatlarni qidirish..."
+                                   oninput="renderInboxList()">
                         </div>
+
+                        <div class="inbox-filters">
+                            <button class="inbox-filter active" data-status="all" onclick="filterInbox('all',this)">Barchasi <b id="inbox-count-all">0</b></button>
+                            <button class="inbox-filter" data-status="operator" onclick="filterInbox('operator',this)">Operator kutmoqda <b id="inbox-count-operator">0</b></button>
+                            <button class="inbox-filter" data-status="ai" onclick="filterInbox('ai',this)">AI hal qilgan <b id="inbox-count-ai">0</b></button>
+                            <button class="inbox-filter" data-status="closed" onclick="filterInbox('closed',this)">Yopilgan <b id="inbox-count-closed">0</b></button>
+                        </div>
+
                         <div id="inbox-conversations" class="inbox-conversations"></div>
                     </div>
+
+                    <!-- O'ng ustun: tanlangan suhbat -->
                     <div class="inbox-chat-pane">
                         <div class="inbox-empty" id="inbox-empty">
-                            <div style="text-align:center;">
-                                <div style="font-size:48px; opacity:0.4;">💬</div>
-                                <p style="color:var(--text-muted); margin-top:10px;">Suhbatni tanlang</p>
-                            </div>
+                            <span class="ico ico-messages-square"></span>
+                            <p>Suhbatni tanlang</p>
                         </div>
-                        <div id="inbox-chat-active" style="display:none; flex-direction:column; height:100%;">
+
+                        <div id="inbox-chat-active" class="inbox-chat-active" style="display:none;">
                             <div class="inbox-chat-header" id="inbox-chat-header"></div>
                             <div class="inbox-messages" id="inbox-messages"></div>
-                            <div class="inbox-composer">
-                                <textarea id="inbox-reply-text" placeholder="Javob yozing..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendOperatorReply();}"></textarea>
-                                <button class="btn-primary" onclick="sendOperatorReply()">Yuborish</button>
+
+                            <div class="inbox-composer-wrap">
+                                <div class="inbox-composer">
+                                    <button type="button" class="composer-attach" title="Fayl biriktirish" aria-label="Fayl biriktirish">
+                                        <span class="ico ico-paperclip"></span>
+                                    </button>
+                                    <textarea id="inbox-reply-text" placeholder="Xabar yozing..." rows="1"
+                                              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendOperatorReply();}"></textarea>
+                                    <button type="button" class="composer-send" onclick="sendOperatorReply()" aria-label="Yuborish">
+                                        <span class="ico ico-send"></span>
+                                    </button>
+                                </div>
+                                <div class="inbox-composer-foot">
+                                    <span id="inbox-mode-note"></span>
+                                    <span class="composer-hint">Enter — yuborish, Shift+Enter — yangi qator</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -181,10 +228,36 @@
                         <h3 class="panel-card-title">Suhbatlar holati</h3>
                         <div id="dashboard-status-bars"></div>
                     </div>
+
+                    <!-- AI faoliyati. renderActivityChart() shu ikki konteynerga
+                         chizadi; ular yo'q edi, shuning uchun grafik ko'rinmasdi. -->
                     <div class="panel-card">
-                        <h3 class="panel-card-title">Tarif sarfi</h3>
-                        <div id="dashboard-usage"></div>
+                        <div class="chart-head">
+                            <div>
+                                <h3 class="panel-card-title" style="margin-bottom:2px;">AI Faoliyati</h3>
+                                <p class="chart-sub">Suhbatlar va konversiya dinamikasi</p>
+                            </div>
+                            <div class="chart-toggle">
+                                <button type="button" id="chart-btn-oy" class="is-on" onclick="setChartPeriod('oy')">Oy</button>
+                                <button type="button" id="chart-btn-yil" onclick="setChartPeriod('yil')">Yil</button>
+                            </div>
+                        </div>
+
+                        <div class="chart-body">
+                            <div class="chart-axis">
+                                <span>100%</span><span>75%</span><span>50%</span><span>25%</span><span>0%</span>
+                            </div>
+                            <div class="chart-plot">
+                                <div class="chart-bars" id="ai-chart-bars"></div>
+                                <div class="chart-labels" id="ai-chart-labels"></div>
+                            </div>
+                        </div>
                     </div>
+                </div>
+
+                <div class="panel-card" style="margin-top:16px;">
+                    <h3 class="panel-card-title">Tarif sarfi</h3>
+                    <div id="dashboard-usage"></div>
                 </div>
 
                 <div class="table-container" style="margin-top:20px;">
@@ -200,175 +273,238 @@
             </section>
 
             <!-- ═══ AI AGENT ═══ -->
+            <!-- AI sozlamalari: chapda konfiguratsiya, o'ngda jonli sinov.
+                 Bilimlar bazasi yig'iladigan bo'limlarga bo'lingan - bir ekranga
+                 sig'masligi mumkin bo'lgan uzun forma o'rniga. -->
             <section id="tab-ai-agent" class="tab-view">
-                <!-- Kept minimal on purpose: full AI configuration lands in the
-                     big admin panel once there are 10+ customers. -->
-                <div class="agent-layout">
-                    <!-- Chap ustun: persona va sinov oynasi ustma-ust -->
-                    <div class="agent-col">
-                        <div class="panel-card">
-                        <div class="agent-row">
-                            <div class="form-group" style="flex:1;"><label>AI ismi</label>
-                                <input type="text" id="ai-name" class="form-control" placeholder="Sotuvchi AI">
+                <div class="ai-layout">
+                    <div class="ai-main">
+                        <div class="panel-card ai-card">
+                            <div class="ai-card-head">
+                                <div>
+                                    <h3>Asosiy bilim</h3>
+                                    <p>AI shu ma'lumotga tayanib gapiradi.</p>
+                                </div>
+                                <span class="ico ico-cpu ai-card-ico"></span>
                             </div>
-                            <div class="form-group" style="width:150px;"><label>Til</label>
-                                <select id="ai-language" class="form-control">
-                                    <option value="uz">O'zbek</option>
-                                    <option value="ru">Rus</option>
-                                    <option value="en">Ingliz</option>
+
+                            <div class="ai-row">
+                                <div class="form-group" style="flex:1 1 200px;"><label>AI ismi</label>
+                                    <input type="text" id="ai-name" class="form-control" placeholder="Sotuvchi AI">
+                                </div>
+                                <div class="form-group" style="flex:0 1 140px;"><label>Til</label>
+                                    <select id="ai-language" class="form-control">
+                                        <option value="uz">O'zbek</option>
+                                        <option value="ru">Rus</option>
+                                        <option value="en">Ingliz</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" style="flex:0 1 170px;"><label>Ohang</label>
+                                    <select id="ai-tone" class="form-control">
+                                        <option value="friendly">Do'stona</option>
+                                        <option value="professional">Professional</option>
+                                        <option value="concise">Qisqa va aniq</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group"><label>Salomlashish xabari</label>
+                                <input type="text" id="ai-greeting" class="form-control" placeholder="Assalomu alaykum! Nima qidiryapsiz?">
+                            </div>
+
+                            <div class="form-group ai-prompt-group">
+                                <div class="ai-label-row">
+                                    <label for="setting-prompt">Do'koningiz haqida</label>
+                                    <span class="ai-hint-badge"><span class="ico ico-sparkles"></span>Xarakter va qoidalar</span>
+                                </div>
+                                <textarea id="setting-prompt" class="form-control" style="min-height:150px;"
+                                          placeholder="Masalan: Biz premium elektronika sotamiz. Ohangimiz professional, lekin issiq..."></textarea>
+                                <p class="field-hint">Narx, ombor va buyurtma qoidalari tizimga o'rnatilgan. Bu yerda faqat xarakter va biznes qoidalaringizni yozing.</p>
+                            </div>
+                        </div>
+
+                        <div class="ai-accordions">
+                            <details class="ai-acc">
+                                <summary><span class="ico ico-truck"></span> Yetkazib berish <span class="ico ico-chevron-down ai-acc-arrow"></span></summary>
+                                <div class="ai-acc-body">
+                                    <div class="ai-row">
+                                        <div class="form-group" style="flex:1 1 150px;"><label>Shahar ichida (UZS)</label>
+                                            <input type="number" id="kb-fee-city" class="form-control" placeholder="25000"></div>
+                                        <div class="form-group" style="flex:1 1 150px;"><label>Viloyatlarga (UZS)</label>
+                                            <input type="number" id="kb-fee-regions" class="form-control" placeholder="45000"></div>
+                                        <div class="form-group" style="flex:1 1 150px;"><label>Shu summadan bepul</label>
+                                            <input type="number" id="kb-free-from" class="form-control" placeholder="1000000"></div>
+                                    </div>
+                                    <div class="ai-row">
+                                        <div class="form-group" style="flex:1 1 150px;"><label>Shaharda muddat</label>
+                                            <input type="text" id="kb-days-city" class="form-control" placeholder="1-2 kun"></div>
+                                        <div class="form-group" style="flex:1 1 150px;"><label>Viloyatda muddat</label>
+                                            <input type="text" id="kb-days-regions" class="form-control" placeholder="2-4 kun"></div>
+                                    </div>
+                                    <div class="form-group"><label>Qo'shimcha shartlar</label>
+                                        <textarea id="kb-delivery" class="form-control" style="min-height:60px;"
+                                                  placeholder="Masalan: BTS orqali yuboramiz, yetkazish kuni oldindan qo'ng'iroq qilamiz"></textarea></div>
+                                </div>
+                            </details>
+
+                            <details class="ai-acc">
+                                <summary><span class="ico ico-banknote"></span> To'lov va ish vaqti <span class="ico ico-chevron-down ai-acc-arrow"></span></summary>
+                                <div class="ai-acc-body">
+                                    <div class="form-group"><label>To'lov turlari</label>
+                                        <textarea id="kb-payment" class="form-control" style="min-height:70px;"
+                                                  placeholder="Naqd, Payme, Click, plastik karta, bo'lib to'lash (3/6/12 oy)..."></textarea></div>
+                                    <div class="form-group"><label>Ish vaqti</label>
+                                        <input type="text" id="kb-hours" class="form-control"
+                                               placeholder="Dush-Shan 9:00-19:00, Yakshanba dam olish"></div>
+                                </div>
+                            </details>
+
+                            <details class="ai-acc">
+                                <summary><span class="ico ico-shield-check"></span> Kafolat va qaytarish <span class="ico ico-chevron-down ai-acc-arrow"></span></summary>
+                                <div class="ai-acc-body">
+                                    <div class="form-group"><label>Kafolat</label>
+                                        <textarea id="kb-warranty" class="form-control" style="min-height:70px;"
+                                                  placeholder="Masalan: barcha texnikaga 1 yil rasmiy kafolat, servis markaz manzili..."></textarea></div>
+                                    <div class="form-group"><label>Qaytarish siyosati</label>
+                                        <textarea id="kb-return" class="form-control" style="min-height:70px;"
+                                                  placeholder="Masalan: 14 kun ichida qaytarish mumkin, mahsulot ishlatilmagan bo'lsa..."></textarea></div>
+                                </div>
+                            </details>
+
+                            <details class="ai-acc">
+                                <summary><span class="ico ico-circle-help"></span> Savol-javoblar <span class="ico ico-chevron-down ai-acc-arrow"></span></summary>
+                                <div class="ai-acc-body">
+                                    <div class="form-group">
+                                        <textarea id="kb-faq" class="form-control" style="min-height:130px;"
+                                                  placeholder="S: Filialingiz qayerda?&#10;J: Chilonzor 9-kvartal, 45-uy&#10;&#10;S: Ulgurji narx bormi?&#10;J: 10 donadan yuqori xaridga chegirma bor"></textarea>
+                                    </div>
+                                </div>
+                            </details>
+                        </div>
+
+                        <div class="panel-card ai-card">
+                            <div class="ai-card-head">
+                                <div><h3>Model sozlamasi</h3></div>
+                            </div>
+                            <div class="form-group"><label for="ai-model">Model</label>
+                                <select id="ai-model" class="form-control">
+                                    <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite — eng tez</option>
+                                    <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                                    <option value="gemini-2.5-pro">Gemini 2.5 Pro — eng kuchli</option>
                                 </select>
                             </div>
-                            <div class="form-group" style="width:170px;"><label>Ohang</label>
-                                <select id="ai-tone" class="form-control">
-                                    <option value="friendly">Do'stona</option>
-                                    <option value="professional">Professional</option>
-                                    <option value="concise">Qisqa va aniq</option>
-                                </select>
+                            <div class="form-group">
+                                <div class="ai-label-row">
+                                    <label for="ai-temp">Ijodkorlik</label>
+                                    <b class="ai-temp-value" id="ai-temp-value">0.7</b>
+                                </div>
+                                <input type="range" id="ai-temp" class="ai-range" min="0" max="1" step="0.1" value="0.7"
+                                       oninput="document.getElementById('ai-temp-value').textContent = Number(this.value).toFixed(1)">
+                                <div class="ai-range-ends"><span>Aniq</span><span>Ijodkor</span></div>
                             </div>
                         </div>
 
-                        <div class="form-group"><label>Salomlashish xabari</label>
-                            <input type="text" id="ai-greeting" class="form-control" placeholder="Assalomu alaykum! Nima qidiryapsiz?">
-                        </div>
-
-                        <div class="form-group">
-                            <label>System Prompt — AI nima qiladi va nima QILMAYDI</label>
-                            <textarea id="setting-prompt" class="form-control" style="min-height:210px;" placeholder="AI sotuvchining xarakteri va qoidalari..."></textarea>
-                            <p class="field-hint">Narx, ombor va buyurtma qoidalari tizimga o'rnatilgan — bu yerda faqat xarakter va biznes qoidalaringizni yozing.</p>
-                        </div>
-
-                        <button class="btn-primary" onclick="saveSettings()">Saqlash</button>
-                    </div>
-
-                        <div class="panel-card" style="padding:0; overflow:hidden; display:flex; flex-direction:column;">
-                        <div class="agent-test-head">🧪 Sinov — mijoz sifatida yozib ko'ring</div>
-                        <div id="test-messages" class="inbox-messages" style="flex:1; min-height:300px;"></div>
-                        <div class="inbox-composer">
-                            <textarea id="test-input" placeholder="Salom, noutbuk bormi?" rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendTestMessage();}"></textarea>
-                            <button class="btn-primary" onclick="sendTestMessage()">Yuborish</button>
+                        <div class="ai-save-row">
+                            <span class="agent-note" id="kb-status"></span>
+                            <button class="btn-primary" onclick="saveSettings()">Sozlamani saqlash</button>
                         </div>
                     </div>
-                    </div>
 
-                    <div class="panel-card">
-                        <h3 class="panel-card-title">📚 Bilimlar bazasi</h3>
-                        <p class="field-hint" style="margin-bottom:16px;">
-                            AI shu ma'lumotlarga tayanib javob beradi. To'ldirilmagan bo'lsa —
-                            o'ylab topmaydi, operatorga uzatadi.
-                        </p>
-
-                        <div class="kb-group">
-                            <div class="kb-group-title">🚚 Yetkazib berish</div>
-                            <div class="agent-row">
-                                <div class="form-group" style="flex:1 1 150px;"><label>Shahar ichida (UZS)</label>
-                                    <input type="number" id="kb-fee-city" class="form-control" placeholder="25000"></div>
-                                <div class="form-group" style="flex:1 1 150px;"><label>Viloyatlarga (UZS)</label>
-                                    <input type="number" id="kb-fee-regions" class="form-control" placeholder="45000"></div>
-                                <div class="form-group" style="flex:1 1 150px;"><label>Shu summadan bepul</label>
-                                    <input type="number" id="kb-free-from" class="form-control" placeholder="1000000"></div>
+                    <aside class="ai-sandbox">
+                        <div class="ai-sandbox-head">
+                            <span class="ai-live-dot"></span> Jonli sinov
+                            <button type="button" class="chat-icon-btn" onclick="resetTestChat()" title="Suhbatni tozalash">
+                                <span class="ico ico-refresh-cw"></span>
+                            </button>
+                        </div>
+                        <div id="test-messages" class="inbox-messages"></div>
+                        <div class="inbox-composer-wrap">
+                            <div class="inbox-composer">
+                                <textarea id="test-input" placeholder="Mijoz sifatida yozib ko'ring..." rows="1"
+                                          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendTestMessage();}"></textarea>
+                                <button type="button" class="composer-send" onclick="sendTestMessage()" aria-label="Yuborish">
+                                    <span class="ico ico-send"></span>
+                                </button>
                             </div>
-                            <div class="agent-row">
-                                <div class="form-group" style="flex:1 1 150px;"><label>Shaharda muddat</label>
-                                    <input type="text" id="kb-days-city" class="form-control" placeholder="1-2 kun"></div>
-                                <div class="form-group" style="flex:1 1 150px;"><label>Viloyatda muddat</label>
-                                    <input type="text" id="kb-days-regions" class="form-control" placeholder="2-4 kun"></div>
-                            </div>
-                            <div class="form-group"><label>Qo'shimcha shartlar</label>
-                                <textarea id="kb-delivery" class="form-control" style="min-height:60px;"
-                                          placeholder="Masalan: BTS orqali yuboramiz, yetkazib berish kuni oldindan qo'ng'iroq qilamiz"></textarea></div>
                         </div>
-
-                        <div class="kb-group">
-                            <div class="kb-group-title">💳 To'lov turlari</div>
-                            <textarea id="kb-payment" class="form-control" style="min-height:70px;"
-                                      placeholder="Naqd, Payme, Click, plastik karta, bo'lib to'lash (3/6/12 oy)..."></textarea>
-                        </div>
-
-                        <div class="kb-group">
-                            <div class="kb-group-title">🛡 Kafolat</div>
-                            <textarea id="kb-warranty" class="form-control" style="min-height:70px;"
-                                      placeholder="Masalan: barcha texnikaga 1 yil rasmiy kafolat, servis markaz manzili..."></textarea>
-                        </div>
-
-                        <div class="kb-group">
-                            <div class="kb-group-title">↩️ Qaytarish siyosati</div>
-                            <textarea id="kb-return" class="form-control" style="min-height:70px;"
-                                      placeholder="Masalan: 14 kun ichida qaytarish mumkin, mahsulot ishlatilmagan bo'lsa..."></textarea>
-                        </div>
-
-                        <div class="kb-group">
-                            <div class="kb-group-title">🕐 Ish vaqti</div>
-                            <input type="text" id="kb-hours" class="form-control"
-                                   placeholder="Dush-Shan 9:00-19:00, Yakshanba dam olish">
-                        </div>
-
-                        <div class="kb-group">
-                            <div class="kb-group-title">❓ Boshqa savol-javoblar</div>
-                            <textarea id="kb-faq" class="form-control" style="min-height:110px;"
-                                      placeholder="S: Filialingiz qayerda?&#10;J: Chilonzor 9-kvartal, 45-uy&#10;&#10;S: Ulgurji narx bormi?&#10;J: 10 donadan yuqori xaridga chegirma bor"></textarea>
-                        </div>
-
-                        <button class="btn-primary" onclick="saveSettings()">Bilimlar bazasini saqlash</button>
-                        <span class="agent-note" id="kb-status"></span>
-                    </div>
+                    </aside>
                 </div>
             </section>
 
             <!-- ═══ KATALOG ═══ -->
             <!-- Products are the screen; categories are a filter, not a landing page. -->
+            <!-- Katalog kartochka panjarasi ko'rinishida. renderProductsTable()
+                 #products-grid-view ga chizadi; u markupda yo'q edi, shuning
+                 uchun eski jadval ko'rinib turardi. -->
             <section id="tab-products" class="tab-view">
                 <div class="catalog-toolbar">
-                    <input type="text" id="product-search" class="form-control catalog-search"
-                           placeholder="🔍 Mahsulot qidirish..." oninput="renderProductsTable()">
-                    <button class="btn-primary" onclick="openAddProductModal()"><span>+</span> Mahsulot</button>
+                    <div class="catalog-search">
+                        <span class="ico ico-search"></span>
+                        <input type="text" id="product-search" placeholder="Mahsulot qidirish..."
+                               oninput="renderProductsTable()">
+                    </div>
+                    <button class="btn-primary catalog-add" onclick="openAddProductModal()">
+                        <span class="ico ico-plus"></span> Mahsulot
+                    </button>
                 </div>
 
                 <div class="cat-filter-row" id="category-filter-row"></div>
 
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th style="width:60px;">Rasm</th>
-                                <th>Mahsulot</th>
-                                <th>Kategoriya</th>
-                                <th style="text-align:right;">Narxi</th>
-                                <th style="text-align:center;">Qoldiq</th>
-                                <th style="text-align:center;">Holati</th>
-                                <th style="width:96px;"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="products-tbody"></tbody>
-                    </table>
-                </div>
+                <div class="products-grid" id="products-grid-view"></div>
+
                 <div class="catalog-foot" id="catalog-foot"></div>
             </section>
 
             <!-- ═══ BUYURTMALAR ═══ -->
+            <!-- Buyurtmalar: chapda ro'yxat, o'ngda tafsilot paneli.
+                 app.js dagi renderOrdersStatsCards / showOrderDetail /
+                 closeOrderDetail shu konteynerlarni kutadi; ular yozilmagani
+                 uchun statistika ham, panel ham umuman ko'rinmasdi. -->
             <section id="tab-orders" class="tab-view">
-                <div class="orders-filter-bar" style="display: flex; align-items: center; gap: 12px; flex-wrap: nowrap; overflow-x: auto;">
-                    <div style="flex-shrink: 0; min-width: 230px;">
-                        <input type="text" id="order-search-input" class="form-control" placeholder="🔍 Mijoz yoki ID bo'yicha qidiruv..." oninput="renderOrdersTable()" style="margin: 0;">
+                <div class="orders-layout">
+                    <div class="orders-main">
+                        <div class="orders-stats-row" id="orders-stats-row"></div>
+
+                        <div class="orders-filter-bar">
+                            <input type="text" id="order-search-input" class="form-control orders-search"
+                                   placeholder="Mijoz yoki ID bo'yicha qidiruv..." oninput="renderOrdersTable()">
+                            <div class="filter-pills-group">
+                                <button class="filter-pill active" onclick="filterOrdersByStatus('all', this)">Barchasi</button>
+                                <button class="filter-pill" onclick="filterOrdersByStatus('Yangi', this)">Yangi</button>
+                                <button class="filter-pill" onclick="filterOrdersByStatus('Tasdiqlandi', this)">Tasdiqlandi</button>
+                                <button class="filter-pill" onclick="filterOrdersByStatus('Yo\'lda', this)">Yo'lda</button>
+                                <button class="filter-pill" onclick="filterOrdersByStatus('Yetkazildi', this)">Yetkazildi</button>
+                                <button class="filter-pill" onclick="filterOrdersByStatus('Bekor qilindi', this)">Bekor qilindi</button>
+                            </div>
+                        </div>
+
+                        <div class="table-container">
+                            <table class="orders-table">
+                                <thead>
+                                    <tr>
+                                        <th>Buyurtma ID</th>
+                                        <th>Mijoz</th>
+                                        <th>Sana</th>
+                                        <th style="text-align:right;">Summa</th>
+                                        <th>Holat</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="orders-tbody"></tbody>
+                            </table>
+                            <div class="orders-footer" id="orders-footer"></div>
+                        </div>
                     </div>
-                    <div class="filter-pills-group" style="display: flex; gap: 8px; flex-wrap: nowrap; align-items: center;">
-                        <button class="filter-pill active" onclick="filterOrdersByStatus('all', this)">Barcha <span class="filter-count" id="count-order-all">0</span></button>
-                        <button class="filter-pill" onclick="filterOrdersByStatus('Yangi', this)">🔥 Yangi <span class="filter-count" id="count-order-yangi">0</span></button>
-                        <button class="filter-pill" onclick="filterOrdersByStatus('Tasdiqlandi', this)">⚡️ Tasdiqlandi <span class="filter-count" id="count-order-tasdiqlandi">0</span></button>
-                        <button class="filter-pill" onclick="filterOrdersByStatus('Yo\'lda', this)">🚚 Yo'lda <span class="filter-count" id="count-order-yolda">0</span></button>
-                        <button class="filter-pill" onclick="filterOrdersByStatus('Yetkazildi', this)">✅ Yetkazildi <span class="filter-count" id="count-order-yetkazildi">0</span></button>
-                        <button class="filter-pill" onclick="filterOrdersByStatus('Bekor qilindi', this)">❌ Bekor qilindi <span class="filter-count" id="count-order-bekor">0</span></button>
-                    </div>
-                </div>
-                <div class="table-container">
-                    <table>
-                        <thead><tr><th>Buyurtma ID</th><th>Sana</th><th>Mijoz Nomi</th><th>Telefon</th><th>Mahsulotlar</th><th>Summa</th><th>Holati</th><th>Amallar</th></tr></thead>
-                        <tbody id="orders-tbody"></tbody>
-                    </table>
+
+                    <aside class="order-detail-panel" id="order-detail-panel">
+                        <div class="order-detail-inner" id="order-detail-inner"></div>
+                    </aside>
                 </div>
             </section>
 
             <!-- ═══ MIJOZLAR ═══ -->
             <section id="tab-customers" class="tab-view">
+<div class="page-container">
                 <div class="orders-filter-bar" style="display:flex; align-items:center; gap:12px;">
                     <div style="flex-shrink:0; min-width:260px;">
                         <input type="search" id="cust-search" class="form-control"
@@ -391,7 +527,7 @@
                         <tbody id="customers-tbody"></tbody>
                     </table>
                 </div>
-            </section>
+            </div></section>
 
             <!-- Mijoz kartochkasi -->
             <div class="modal-overlay" id="customer-modal">
@@ -409,20 +545,8 @@
 
             <!-- ═══ INTEGRATSIYALAR ═══ -->
             <section id="tab-integrations" class="tab-view">
+<div class="page-container">
                 <div class="integration-grid">
-                    <div class="integration-card">
-                        <div class="integration-head"><span class="integration-icon">✈️</span><div><h3>Telegram Bot</h3><p id="tg-status-text">Ulanmagan</p></div></div>
-                        <div id="tg-connected" style="display:none;">
-                            <div class="tg-badge">✅ Ulangan: <b id="tg-username">—</b></div>
-                            <div id="tg-note" style="font-size:12px; color:var(--text-muted); margin:10px 0;"></div>
-                            <button class="btn-danger-soft" onclick="disconnectTelegram()">Uzish</button>
-                        </div>
-                        <div id="tg-disconnected">
-                            <p style="font-size:13px; color:var(--text-muted); margin:8px 0 12px;">@BotFather'dan olingan bot tokenini kiriting:</p>
-                            <input type="text" id="tg-token-input" class="form-control" placeholder="123456:ABC-DEF...">
-                            <button class="btn-primary" style="margin-top:10px;" onclick="connectTelegram()">Ulash</button>
-                        </div>
-                    </div>
                     <div class="integration-card" style="grid-column: 1 / -1;">
                         <div class="integration-head">
                             <span class="integration-icon">🔔</span>
@@ -483,51 +607,130 @@
                         <p class="field-hint" id="sheets-reason"></p>
                     </div>
                 </div>
-            </section>
+            </div></section>
 
             <!-- ═══ ANALITIKA ═══ -->
 
             <!-- ═══ SOZLAMALAR ═══ -->
             <!-- ═══ HISOBIM ═══ -->
+            <!-- Hisobim: yuqorida joriy obuna va balans, o'rtada tariflar,
+                 pastda to'lovlar tarixi. -->
             <section id="tab-billing" class="tab-view">
-                <div class="bill-top">
-                    <div class="bill-balance">
+                <div class="bill-banner">
+                    <div class="bill-sub" id="bill-sub"></div>
+                    <div class="bill-banner-side">
                         <span class="bill-label">Hisobingiz</span>
                         <div class="bill-amount" id="bill-balance">—</div>
                         <button class="btn-primary" id="bill-topup-btn">Hisobni to'ldirish</button>
                     </div>
-                    <div class="bill-sub" id="bill-sub"></div>
                 </div>
 
-                <h3 class="bill-h">Tariflar</h3>
                 <div class="bill-plans" id="bill-plans"></div>
 
-                <h3 class="bill-h">To'lovlar tarixi</h3>
-                <div class="table-container">
-                    <table>
-                        <thead><tr><th>Sana</th><th>Turi</th><th>Summa</th><th>Izoh</th><th>Holat</th></tr></thead>
-                        <tbody id="bill-history"></tbody>
-                    </table>
+                <div class="panel-card bill-history-card">
+                    <div class="ai-card-head">
+                        <div><h3>To'lovlar tarixi</h3></div>
+                    </div>
+                    <div class="table-container" style="border:none; background:transparent;">
+                        <table class="orders-table">
+                            <thead>
+                                <tr>
+                                    <th>Sana</th>
+                                    <th>Turi</th>
+                                    <th>Izoh</th>
+                                    <th style="text-align:right;">Summa</th>
+                                    <th>Holat</th>
+                                </tr>
+                            </thead>
+                            <tbody id="bill-history"></tbody>
+                        </table>
+                    </div>
                 </div>
             </section>
 
+            <!-- Sozlamalar: chapda biznes profili, o'ngda Telegram va boshqa
+                 ulanishlar, pastda xodimlar. Telegram bloki Integratsiyalar
+                 bo'limidan shu yerga ko'chirildi: bot sozlash eng ko'p
+                 ishlatiladigan amal va uni menyudan izlash noqulay edi. -->
             <section id="tab-settings" class="tab-view">
-                <div class="panel-card" style="max-width:640px;">
-                    <h3 style="margin-bottom:20px;">🏢 Biznes ma'lumoti</h3>
-                    <div class="form-group"><label>Biznes nomi</label><input type="text" id="set-biz-name" class="form-control" disabled></div>
-                    <div class="form-group"><label>Email</label><input type="text" id="set-email" class="form-control" disabled></div>
-                    <div class="form-group"><label>Tarif</label><input type="text" id="set-plan" class="form-control" disabled></div>
-                </div>
-
-                <div class="panel-card" style="max-width:640px; margin-top:20px;" id="staff-card">
-                    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px;">
-                        <h3>👥 Xodimlar</h3>
-                        <button class="btn-primary" id="staff-add-btn">+ Xodim qo'shish</button>
+                <div class="settings-grid">
+                  <div class="settings-main">
+                    <div class="panel-card">
+                        <div class="ai-card-head">
+                            <div>
+                                <h3>Biznes profili</h3>
+                                <p>Hisobingiz asosiy ma'lumotlari.</p>
+                            </div>
+                        </div>
+                        <div class="form-group"><label>Biznes nomi</label>
+                            <input type="text" id="set-biz-name" class="form-control" disabled></div>
+                        <div class="form-group"><label>Email</label>
+                            <input type="text" id="set-email" class="form-control" disabled></div>
+                        <div class="form-group"><label>Tarif</label>
+                            <input type="text" id="set-plan" class="form-control" disabled></div>
+                        <p class="field-hint">Bu maydonlarni o'zgartirish uchun qo'llab-quvvatlash xizmatiga murojaat qiling.</p>
+                    </div>
+                <div class="panel-card settings-team" id="staff-card">
+                    <div class="ai-card-head">
+                        <div>
+                            <h3>Xodimlar</h3>
+                            <p>Panelga kirish huquqlarini boshqaring.</p>
+                        </div>
+                        <button class="btn-primary catalog-add" id="staff-add-btn">
+                            <span class="ico ico-user-plus"></span> Xodim qo'shish
+                        </button>
                     </div>
                     <p class="settings-note" id="staff-limit" style="margin-top:0;"></p>
                     <div id="staff-list"></div>
                 </div>
-            </section>
+                  </div>
+
+                    <div class="settings-side">
+                        <div class="panel-card">
+                            <div class="ai-card-head">
+                                <div><h3>Telegram bot</h3></div>
+                                <span class="tg-state" id="tg-status-text">Ulanmagan</span>
+                            </div>
+
+                            <div id="tg-connected" style="display:none;">
+                                <div class="tg-badge">Ulangan: <b id="tg-username">—</b></div>
+                                <div id="tg-note" style="font-size:12px; color:var(--text-muted); margin:10px 0;"></div>
+                                <button class="btn-danger-soft" onclick="disconnectTelegram()">Uzish</button>
+                            </div>
+
+                            <div id="tg-disconnected">
+                                <div class="form-group">
+                                    <label for="tg-token-input">Bot token</label>
+                                    <input type="text" id="tg-token-input" class="form-control" placeholder="123456:ABC-DEF...">
+                                    <p class="field-hint">@BotFather'dan olingan tokenni kiriting.</p>
+                                </div>
+                                <button class="btn-primary" onclick="connectTelegram()">Ulash</button>
+                            </div>
+                        </div>
+
+                        <div class="panel-card settings-links">
+                            <div class="ai-card-head"><div><h3>Boshqa ulanishlar</h3></div></div>
+                            <button type="button" class="settings-link" onclick="switchToTab('tab-integrations')">
+                                <span class="ico ico-share-2"></span>
+                                <span>
+                                    <b>Integratsiyalar</b>
+                                    <i>Bildirishnomalar, Instagram, veb-vidjet, Google Sheets</i>
+                                </span>
+                                <span class="ico ico-chevron-right settings-link-go"></span>
+                            </button>
+                            <button type="button" class="settings-link" onclick="switchToTab('tab-customers')">
+                                <span class="ico ico-users"></span>
+                                <span>
+                                    <b>Mijozlar</b>
+                                    <i>Kim nima olgan va qachon yozgan</i>
+                                </span>
+                                <span class="ico ico-chevron-right settings-link-go"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+</section>
 
             <!-- Xodim qo'shish / tahrirlash -->
             <div class="modal-overlay" id="staff-modal">

@@ -15,6 +15,37 @@ function showAuthOverlay() {
     document.getElementById('app-container').style.display = 'none';
 }
 
+/* ── Mavzu ───────────────────────────────────────────────────────────────────
+   Uch holat: 'auto' tizim sozlamasiga ergashadi, 'light'/'dark' majburiy.
+   Dastlabki qiymat <head> dagi inline skriptda qo'yiladi (chaqnashning
+   oldini olish uchun); bu yerda faqat almashtirish va tugmalar holati. */
+function applyTheme(mode) {
+    const dark = mode === 'auto'
+        ? !window.matchMedia('(prefers-color-scheme: light)').matches
+        : mode === 'dark';
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    document.querySelectorAll('[data-theme-set]').forEach(b =>
+        b.classList.toggle('is-on', b.getAttribute('data-theme-set') === mode));
+}
+
+function setTheme(mode) {
+    try { localStorage.setItem('theme', mode); } catch (e) { /* shaxsiy rejim */ }
+    applyTheme(mode);
+}
+
+function initTheme() {
+    let saved = 'auto';
+    try { saved = localStorage.getItem('theme') || 'auto'; } catch (e) { /* shaxsiy rejim */ }
+    applyTheme(saved);
+    /* 'Avto' tanlangan bo'lsa, tizim mavzusi almashganda panel ham darhol
+       ergashsin — foydalanuvchi sahifani qayta yuklashi shart emas. */
+    window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+        let cur = 'auto';
+        try { cur = localStorage.getItem('theme') || 'auto'; } catch (e) { /* shaxsiy rejim */ }
+        if (cur === 'auto') applyTheme('auto');
+    });
+}
+
 function showAppDashboard(tenant) {
     document.getElementById('auth-overlay').style.display = 'none';
     document.getElementById('app-container').style.display = 'flex';
@@ -169,6 +200,7 @@ function restoreActiveTab() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    initTheme();
     try {
         const resp = await fetch('/api/auth/me');
         if (resp.ok) {
@@ -195,7 +227,7 @@ const TAB_META = {
     'tab-customers':    { title: 'Mijozlar', sub: 'Kim nima olgan va qachon yozgan', btn: false, load: loadCustomers },
     'tab-integrations': { title: 'Integratsiyalar', sub: 'Telegram bot va operator bildirishnomasi', btn: false, load: loadIntegrations },
     'tab-billing':      { title: 'Hisobim', sub: 'Balans, tarif va to\'lovlar', btn: false, load: loadBilling },
-    'tab-settings':     { title: 'Sozlamalar', sub: 'Biznes profili, xodimlar va tarif', btn: false, load: loadAccountSettings }
+    'tab-settings':     { title: 'Sozlamalar', sub: 'Biznes profili, Telegram bot va xodimlar', btn: false, load: loadSettingsTab }
 };
 
 function initNavigation() {
@@ -204,34 +236,46 @@ function initNavigation() {
     const headerTitle = document.getElementById('page-title');
     const headerSubtitle = document.getElementById('page-subtitle');
     const headerActionGroup = document.getElementById('header-action-group');
+    const dashboardActionGroup = document.getElementById('dashboard-action-group');
+
+    /* Bo'limni ochish menyu elementidan ajratilgan. Sabab: menyu Stitch
+       dizayniga qisqartirilgach, ba'zi bo'limlarga (Integratsiyalar,
+       Mijozlar) menyu elementi qolmadi, lekin ular Sozlamalar ichidan
+       ochilishi kerak. Ilgari bu mantiq click ichida yopiq edi va
+       menyusiz bo'lim umuman ochilmasdi. */
+    activateTab = function (targetTab) {
+        const view = document.getElementById(targetTab);
+        if (!view) return;
+        const meta = TAB_META[targetTab];
+
+        navItems.forEach(i => i.classList.remove('active'));
+        tabViews.forEach(v => v.classList.remove('active'));
+
+        const navItem = document.querySelector(`.nav-item[data-tab="${targetTab}"]`);
+        if (navItem) navItem.classList.add('active');
+        view.classList.add('active');
+
+        if (meta) {
+            document.querySelector('.top-header').style.display = 'flex';
+            headerTitle.textContent = meta.title;
+            if (headerSubtitle) headerSubtitle.textContent = meta.sub;
+            // Show/hide action groups based on active tab
+            if (headerActionGroup) headerActionGroup.style.display = meta.btn ? 'flex' : 'none';
+            if (dashboardActionGroup) dashboardActionGroup.style.display = (targetTab === 'tab-overview') ? 'flex' : 'none';
+            const mobileTitle = document.getElementById('mobile-page-title');
+            if (mobileTitle) mobileTitle.textContent = meta.title;
+            if (typeof meta.load === 'function') meta.load();
+        }
+
+        // On a phone the drawer covers the content — close it after choosing
+        toggleSidebar(false);
+
+        // Remember the section so a reload returns here instead of Inbox
+        localStorage.setItem('sotuvchi_active_tab', targetTab);
+    };
 
     navItems.forEach(item => {
-        item.addEventListener('click', () => {
-            const targetTab = item.getAttribute('data-tab');
-            const meta = TAB_META[targetTab];
-
-            navItems.forEach(i => i.classList.remove('active'));
-            tabViews.forEach(v => v.classList.remove('active'));
-
-            item.classList.add('active');
-            document.getElementById(targetTab).classList.add('active');
-
-            if (meta) {
-                document.querySelector('.top-header').style.display = 'flex';
-                headerTitle.textContent = meta.title;
-                headerSubtitle.textContent = meta.sub;
-                headerActionGroup.style.display = meta.btn ? 'flex' : 'none';
-                const mobileTitle = document.getElementById('mobile-page-title');
-                if (mobileTitle) mobileTitle.textContent = meta.title;
-                if (typeof meta.load === 'function') meta.load();
-            }
-
-            // On a phone the drawer covers the content — close it after choosing
-            toggleSidebar(false);
-
-            // Remember the section so a reload returns here instead of Inbox
-            localStorage.setItem('sotuvchi_active_tab', targetTab);
-        });
+        item.addEventListener('click', () => activateTab(item.getAttribute('data-tab')));
     });
 }
 
@@ -246,11 +290,17 @@ function toggleSidebar(force) {
     document.body.style.overflow = open ? 'hidden' : '';
 }
 
+/* Menyuda elementi bo'lmagan bo'limlar ham ochilishi uchun to'g'ridan-to'g'ri
+   activateTab chaqiriladi. */
+let activateTab = null;
+
 function switchToTab(targetTab) {
-    const navItem = document.querySelector(`.nav-item[data-tab="${targetTab}"]`);
-    if (navItem) {
-        navItem.click();
+    if (typeof activateTab === 'function') {
+        activateTab(targetTab);
+        return;
     }
+    const navItem = document.querySelector(`.nav-item[data-tab="${targetTab}"]`);
+    if (navItem) navItem.click();
 }
 
 // Categories now only feed the filter chips and the product form's dropdown
@@ -269,8 +319,9 @@ async function loadCategories() {
 
 /** Catalog screen = products + their category filter. */
 async function loadCatalog() {
-    await loadCategories();
-    await loadProducts();
+    /* Ikkalasi bir-biriga bog'liq emas. Ketma-ket kutish bazagacha borish
+       vaqtini ikki barobar qiladi — birga jo'natamiz. */
+    await Promise.all([loadCategories(), loadProducts()]);
 }
 
 
@@ -293,29 +344,6 @@ function openAddCategoryModal() {
     document.getElementById('category-modal').style.display = 'flex';
 }
 
-function openEditCategoryModal(catId, event) {
-    if (event) event.stopPropagation();
-    const cat = currentCategories.find(c => c.id === catId);
-    if (!cat) return;
-
-    document.getElementById('cat-edit-mode').value = 'edit';
-    document.getElementById('cat-id-val').value = cat.id;
-    document.getElementById('cat-image-url-val').value = cat.image_url || '';
-    document.getElementById('cat-name').value = cat.name;
-    document.getElementById('cat-modal-title').textContent = "Kategoriyani Tahrirlash";
-    document.getElementById('cat-save-btn').textContent = "O'zgarishlarni Saqlash";
-
-    if (cat.image_url) {
-        document.getElementById('cat-image-preview').src = cat.image_url;
-        document.getElementById('cat-image-preview-container').style.display = 'block';
-        document.getElementById('cat-upload-hint-text').style.display = 'none';
-    } else {
-        document.getElementById('cat-image-preview-container').style.display = 'none';
-        document.getElementById('cat-upload-hint-text').style.display = 'block';
-    }
-
-    document.getElementById('category-modal').style.display = 'flex';
-}
 
 function closeCategoryModal() {
     document.getElementById('category-modal').style.display = 'none';
@@ -411,16 +439,6 @@ function populateCategoryDropdown() {
     }
 }
 
-async function deleteCategory(catId, catName, event) {
-    if (event) event.stopPropagation();
-    if (!confirm(`"${catName}" kategoriyasini o'chirmoqchimisiz?`)) return;
-    try {
-        await fetch(`/api/admin/categories/${catId}`, { method: 'DELETE' });
-        loadCategories();
-    } catch (e) {
-        console.error('O\'chirishda xatolik:', e);
-    }
-}
 
 // ════════════════════════════════════════════════════════
 // DASHBOARD — AI KPI cards
@@ -428,35 +446,6 @@ async function deleteCategory(catId, catName, event) {
 /** Uzbek number format: 45 700 000 (spaces, not commas). */
 function fmtNum(n) {
     return Math.round(Number(n) || 0).toLocaleString('ru-RU').replace(/ /g, ' ');
-}
-
-/**
- * One KPI tile. Pass `tab` to make it drill down into that section —
- * a number you can't act on is decoration, so every tile that has a
- * matching screen links to it.
- */
-function kpiCard(icon, color, label, value, hint, tab, action, growth) {
-    const go = action || (tab ? `switchToTab('${tab}')` : '');
-    const clickable = go ? ` kpi-card--link" onclick="${go}" role="button" tabindex="0"` : '"';
-    return `<div class="kpi-card${clickable}>
-        <div class="kpi-top">
-            <span class="kpi-icon" style="background:${color}1a; color:${color};">${icon}</span>
-            <span class="kpi-label">${label}</span>
-        </div>
-        <div class="kpi-value">${value}${growthBadge(growth)}</div>
-        <div class="kpi-foot">
-            <span class="kpi-hint">${hint || ''}</span>
-            ${go ? '<span class="kpi-arrow">→</span>' : ''}
-        </div>
-    </div>`;
-}
-
-/** Change against the previous period. null means there was no baseline —
- *  rendering "+100%" against zero would read as growth that never happened. */
-function growthBadge(pct) {
-    if (pct === null || pct === undefined) return '';
-    const up = pct >= 0;
-    return `<span class="kpi-growth ${up ? 'is-up' : 'is-down'}">${up ? '▲' : '▼'} ${Math.abs(pct)}%</span>`;
 }
 
 // Which window the dashboard is showing. Persisted so a reload does not
@@ -488,7 +477,7 @@ function initPeriodPicker() {
 function showDashboardSkeleton() {
     const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
 
-    set('dashboard-kpis', Array.from({ length: 6 }, () => `
+    set('dashboard-kpis', Array.from({ length: 3 }, () => `
         <div class="skel-kpi">
             <div class="skel-kpi-top">
                 <span class="skel skel-ico"></span>
@@ -529,57 +518,272 @@ async function loadDashboardStats() {
         const an = await anResp.json();
         const g = data.growth || {};
 
-        // AI-attributed revenue leads: that is what this product produced.
-        // The shop's overall revenue is context, shown as a hint underneath.
-        document.getElementById('dashboard-kpis').innerHTML =
-            kpiCard('🤖', '#00b87c', 'AI orqali tushum', fmtNum(data.ai_revenue) + ' <small>UZS</small>',
-                    `butun davr: ${fmtNum(data.all_time_revenue)}`, 'tab-orders', null, g.ai_revenue) +
-            kpiCard('🧾', '#06b6d4', 'AI buyurtmalari', fmtNum(data.ai_order_count),
-                    `jami: ${fmtNum(data.total_orders)} ta`, 'tab-orders', null, g.ai_order_count) +
-            kpiCard('💬', '#f59e0b', 'Suhbatlar', fmtNum(an.total_conversations),
-                    fmtNum(an.total_messages) + ' xabar', 'tab-inbox', null,
-                    (an.growth || {}).total_conversations) +
-            kpiCard('📈', '#a855f7', 'Konversiya', an.conversion_rate + '<small>%</small>',
-                    'suhbat → buyurtma') +
-            kpiCard('⚡️', '#0ea5e9', "O'rtacha javob", fmtNum(an.avg_latency_ms) + ' <small>ms</small>',
-                    'AI javob tezligi') +
-            kpiCard('🙋', '#e11d48', 'Eskalatsiya', an.escalation_rate + '<small>%</small>',
-                    'operatorga uzatildi', null, 'openInboxOperator()');
+        // Render top cards
+        /* onAccent = yashil kartochka ustida: u yerda shishasimon nishon
+           ishlatiladi (.kpi-growth), qorong'i kartochkalarda esa oddiy matn. */
+        const growthBadgeHTML = (pct, onAccent) => {
+            if (pct === null || pct === undefined) return '';
+            const up = pct >= 0;
+            const icon = `<span class="ico ico-trending-${up ? 'up' : 'down'}" style="font-size:14px;"></span>`;
+            const text = `${up ? '+' : ''}${pct}%`;
+            if (onAccent) return `<span class="kpi-growth">${icon} ${text}</span>`;
+            return `<span style="font-size:12px; font-weight:600; color:${up ? 'var(--primary)' : 'var(--accent-danger)'}; display:flex; align-items:center; gap:2px;">${icon} ${text}</span>`;
+        };
 
-        renderStatusBars(an);
-        renderUsagePanel(data);
+        const todayRevenue = data.ai_revenue; // Using ai_revenue for now as placeholder for today
+        const kpisHTML = `
+            <!-- Bugungi Daromad -->
+            <div class="kpi-hero">
+                <span class="kpi-hero-pattern" aria-hidden="true"></span>
+                <span class="kpi-hero-glow" aria-hidden="true"></span>
+                <div class="kpi-hero-layer" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <div style="width:40px; height:40px; background:rgba(255,255,255,0.18); border:1px solid rgba(255,255,255,0.12); border-radius:12px; display:flex; align-items:center; justify-content:center;">
+                            <span class="ico ico-wallet" style="font-size:20px; color:#fff;"></span>
+                        </div>
+                        <div>
+                            <div style="font-family:var(--font-display); font-size:15px; font-weight:600;">Bugungi Daromad</div>
+                            <div style="font-size:12px; opacity:0.8;">Daily Revenue</div>
+                        </div>
+                    </div>
+                    <button style="background:transparent; border:none; color:#fff; cursor:pointer;"><span class="ico ico-ellipsis" style="font-size:20px;"></span></button>
+                </div>
+                <div class="kpi-hero-layer" style="display:flex; align-items:baseline; gap:12px;">
+                    <div style="font-family:var(--font-mono); font-size:28px; font-weight:700;">${fmtNum(todayRevenue)} <span style="font-size:16px; font-weight:500; font-family:var(--font-body); opacity:0.9;">so'm</span></div>
+                    ${growthBadgeHTML(g.ai_revenue, true)}
+                </div>
+            </div>
+
+            <!-- Shu Oy Buyurtmalar -->
+            <div class="kpi-tile" style="padding:24px; display:flex; flex-direction:column; justify-content:space-between;">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+                    <div style="width:40px; height:40px; background:var(--surface); border:1px solid var(--border); border-radius:12px; display:flex; align-items:center; justify-content:center;">
+                        <span class="ico ico-shopping-bag" style="font-size:20px; color:var(--text-muted);"></span>
+                    </div>
+                    <div>
+                        <div style="font-family:var(--font-display); font-size:15px; font-weight:600; color:var(--text-main);">Shu Oy Buyurtmalar</div>
+                        <div style="font-size:12px; color:var(--text-muted);">Monthly Orders</div>
+                    </div>
+                </div>
+                <div style="display:flex; align-items:baseline; justify-content:space-between;">
+                    <div style="font-family:var(--font-mono); font-size:28px; font-weight:700; color:var(--text-main);">${fmtNum(data.ai_order_count)}</div>
+                    ${growthBadgeHTML(g.ai_order_count)}
+                </div>
+            </div>
+
+            <!-- AI Suhbatlar -->
+            <div class="kpi-tile" style="padding:24px; display:flex; flex-direction:column; justify-content:space-between;">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+                    <div style="width:40px; height:40px; background:var(--surface); border:1px solid var(--border); border-radius:12px; display:flex; align-items:center; justify-content:center;">
+                        <span class="ico ico-messages-square" style="font-size:20px; color:var(--text-muted);"></span>
+                    </div>
+                    <div>
+                        <div style="font-family:var(--font-display); font-size:15px; font-weight:600; color:var(--text-main);">AI Suhbatlar</div>
+                        <div style="font-size:12px; color:var(--text-muted);">Total Interactions</div>
+                    </div>
+                </div>
+                <div style="display:flex; align-items:baseline; justify-content:space-between;">
+                    <div style="font-family:var(--font-mono); font-size:28px; font-weight:700; color:var(--text-main);">${fmtNum(an.total_conversations)}</div>
+                    ${growthBadgeHTML((an.growth || {}).total_conversations)}
+                </div>
+            </div>
+        `;
+        document.getElementById('dashboard-kpis').innerHTML = kpisHTML;
+
+        // Render Status Grid
+        /* Backend suhbat holatlarini beradi (ai / operator / closed).
+           Stitch dizaynidagi "Buyurtmalar Holati" boshqa narsa: u buyurtma
+           bosqichlarini ko'rsatadi va bunday sanoq API da hali yo'q.
+           Shuning uchun bu blok mavjud HAQIQIY ma'lumotni ko'rsatadi. */
+        const bs = an.by_status || {};
+        const total = (bs.ai ?? 0) + (bs.operator ?? 0) + (bs.closed ?? 0);
+        const statusHTML = `
+            <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px; display:flex; flex-direction:column; justify-content:space-between; height:100px;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div style="width:8px; height:8px; border-radius:50%; background:var(--status-delivered);"></div>
+                    <span class="ico ico-bot" style="font-size:16px; color:var(--text-muted);"></span>
+                </div>
+                <div>
+                    <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">AI hal qilgan</div>
+                    <div style="font-family:var(--font-display); font-size:20px; font-weight:700; color:var(--status-delivered);">${bs.ai ?? 0}</div>
+                </div>
+            </div>
+            <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px; display:flex; flex-direction:column; justify-content:space-between; height:100px;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div style="width:8px; height:8px; border-radius:50%; background:var(--status-confirmed);"></div>
+                    <span class="ico ico-headphones" style="font-size:16px; color:var(--text-muted);"></span>
+                </div>
+                <div>
+                    <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Operatorda</div>
+                    <div style="font-family:var(--font-display); font-size:20px; font-weight:700; color:var(--text-main);">${bs.operator ?? 0}</div>
+                </div>
+            </div>
+            <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px; display:flex; flex-direction:column; justify-content:space-between; height:100px;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div style="width:8px; height:8px; border-radius:50%; background:var(--status-new);"></div>
+                    <span class="ico ico-check-check" style="font-size:16px; color:var(--text-muted);"></span>
+                </div>
+                <div>
+                    <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Yopilgan</div>
+                    <div style="font-family:var(--font-display); font-size:20px; font-weight:700; color:var(--text-main);">${bs.closed ?? 0}</div>
+                </div>
+            </div>
+            <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px; display:flex; flex-direction:column; justify-content:space-between; height:100px;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div style="width:8px; height:8px; border-radius:50%; background:var(--status-shipped);"></div>
+                    <span class="ico ico-messages-square" style="font-size:16px; color:var(--text-muted);"></span>
+                </div>
+                <div>
+                    <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Jami suhbat</div>
+                    <div style="font-family:var(--font-display); font-size:20px; font-weight:700; color:var(--text-main);">${total}</div>
+                </div>
+            </div>
+        `;
+        document.getElementById('dashboard-status-bars').innerHTML = statusHTML;
+
         renderRecentOrders(data.recent_orders);
+        loadActivityChart();
+        renderUsagePanel(data);   // "Tarif sarfi" bloki: ilgari hech qachon chaqirilmasdi
     } catch (e) {
         console.error('Stats yuklashda xatolik:', e);
-        // The skeleton must not outlive the request. Left shimmering after a
-        // failure it promises data that is never coming.
         document.getElementById('dashboard-kpis').innerHTML = `
             <div class="load-fail">
                 <p>Ma'lumotlarni yuklab bo'lmadi.</p>
                 <button class="btn-primary" onclick="loadDashboardStats()">Qayta urinish</button>
             </div>`;
-        ['dashboard-status-bars', 'dashboard-cost', 'recent-orders-tbody'].forEach((id) => {
+        ['dashboard-status-bars', 'recent-orders-tbody'].forEach((id) => {
             const el = document.getElementById(id);
             if (el) el.innerHTML = '';
         });
     }
 }
 
-/** Where conversations stand: how many the AI still owns vs handed over. */
-function renderStatusBars(an) {
-    const box = document.getElementById('dashboard-status-bars');
-    if (!box) return;
-    const total = Math.max(an.total_conversations, 1);
-    const bar = (label, val, color) => `
-        <div class="stat-bar-row">
-            <span class="stat-bar-label">${label}</span>
-            <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${(val / total * 100).toFixed(1)}%; background:${color};"></div></div>
-            <span class="stat-bar-val">${val}</span>
-        </div>`;
-    box.innerHTML =
-        bar('🤖 AI', an.by_status.ai, '#00b87c') +
-        bar('👨‍💼 Operator', an.by_status.operator, '#f59e0b') +
-        bar('✅ Yopilgan', an.by_status.closed, '#64748b');
+// ════════════════════════════════════════════════════════
+// AI FAOLIYATI CHART
+// ════════════════════════════════════════════════════════
+let chartPeriod = 'oy';
+
+/* Bazadan kelgan dinamika. Ilgari bu yerda qo'lda yozilgan namunaviy
+   raqamlar turardi — grafik chiroyli chizilardi, lekin hech narsani
+   anglatmasdi va haqiqiy ko'rsatkichdek ko'rinardi. */
+let chartData = null;
+
+/** Tanlangan ustun indeksi. null - hech biri tanlanmagan. */
+let chartPicked = null;
+
+function setChartPeriod(period) {
+    if (chartPeriod === period) return;
+    chartPeriod = period;
+    chartPicked = null;                    // davr almashsa tanlov ma'nosini yo'qotadi
+    document.querySelectorAll('.chart-toggle button')
+        .forEach(b => b.classList.toggle('is-on', b.id === 'chart-btn-' + period));
+    loadActivityChart();
+}
+
+/** Grafik ma'lumotini bazadan olish.
+ *
+ *  Ilgari bu yerda "yuklanyapti bo'lsa qaytib ket" qorovuli turardi. U poyga
+ *  yaratardi: bo'limlar orasida tez o'tilganda ikkinchi chaqiruv tashlanar,
+ *  ekranda esa skelet qolib ketardi. Endi eng oxirgi so'rov g'olib bo'ladi —
+ *  kechikib kelgan javob yangisining ustiga yozilmaydi. */
+let chartReq = 0;
+async function loadActivityChart() {
+    const req = ++chartReq;
+    try {
+        const resp = await fetch('/api/admin/analytics/series?span=' + chartPeriod);
+        if (!resp.ok) throw new Error('series');
+        const data = await resp.json();
+        if (req !== chartReq) return;          // eskirgan javob
+        chartData = data;
+    } catch (e) {
+        if (req !== chartReq) return;
+        chartData = null;
+    }
+    renderActivityChart();
+}
+
+/**
+ * Ustunni tanlash. Bir bosilganda tanlanadi, ikkinchi marta bosilganda
+ * bekor qilinadi - saytdagi boshqa filtrlar bilan bir xil xulq.
+ */
+function pickChartBar(index) {
+    chartPicked = chartPicked === index ? null : index;
+    renderActivityChart();
+}
+
+/**
+ * AI faoliyati grafigi.
+ *
+ * Ustunlar `div` emas, `button`: ular bosiladi, shuning uchun klaviatura
+ * bilan ham o'tish va tanlash mumkin bo'lishi kerak.
+ *
+ * Ko'rish darajalari: tanlangan ustun > eng baland ustun > qolganlari.
+ * Tanlov bo'lganda eng balandning ajratilishi so'nadi, aks holda ekranda
+ * ikkita "asosiy" ustun paydo bo'lardi.
+ */
+function renderActivityChart() {
+    const barsEl = document.getElementById('ai-chart-bars');
+    const labelsEl = document.getElementById('ai-chart-labels');
+    if (!barsEl || !labelsEl) return;
+
+    const d = chartData;
+    if (!d) {
+        barsEl.innerHTML = '<div class="chart-empty">Ma\'lumotni yuklab bo\'lmadi</div>';
+        labelsEl.innerHTML = '';
+        return;
+    }
+    /* Hech qanday faoliyat bo'lmasa bo'sh ustunlar chizilmaydi: nol balandlikdagi
+       yigirmata tayoqcha buzuq grafikka o'xshaydi, sabab esa oddiy — hali
+       suhbat bo'lmagan. */
+    if (!d.values.some(v => v > 0)) {
+        const where = d.span === 'yil' ? 'bu yilda' : 'bu oyda';
+        barsEl.innerHTML = `<div class="chart-empty">${where} hali suhbat bo'lmagan</div>`;
+        labelsEl.innerHTML = '';
+        return;
+    }
+
+    const max = Math.max(...d.values, 1);
+    const hasPick = chartPicked !== null;
+    /* Yorliqqa birlik qo'shiladi: "11" o'zi kunmi yoki oymi — bilib bo'lmaydi.
+       Oy nomlari o'zi tushunarli, ularga qo'shimcha shart emas. */
+    const suffix = d.span === 'yil' ? '' : '-kun';
+    /* Fokus — bugungi kun (yillik ko'rinishda shu oy). Ustun tanlanganda
+       fokus so'nadi: aks holda ekranda ikkita "asosiy" ustun turardi. */
+    const focus = d.focus;
+
+    barsEl.innerHTML = d.values.map((v, i) => {
+        const isFocus = i === focus;
+        /* Nolga teng kun ham ko'rinib tursin: 0% balandlik ustunni butunlay
+           yo'qotib, o'sha kunni sanoqdan tushib qolgandek ko'rsatardi.
+           Bugungi ustun esa hech bo'lmasa sezilarli bo'lsin — u fokusda, va
+           ko'rinmaydigan fokus fokus emas. */
+        const pct = v === 0 ? (isFocus ? 6 : 2) : Math.max(4, Math.round((v / max) * 100));
+        const isPicked = chartPicked === i;
+        const strong = isPicked || (!hasPick && isFocus);
+        const cls = ['chart-bar'];
+        if (strong) cls.push('is-strong');
+        if (isPicked) cls.push('is-picked');
+        if (v === 0 && !strong) cls.push('is-zero');
+        const ords = (d.orders || [])[i] || 0;
+        const bugun = isFocus ? (d.span === 'yil' ? ' · shu oy' : ' · bugun') : '';
+        const tip = `${d.labels[i]}${suffix}${bugun} · ${fmtNum(v)} suhbat · ${fmtNum(ords)} buyurtma`;
+        return `<button type="button" class="${cls.join(' ')}" style="height:${pct}%;"
+                    onclick="pickChartBar(${i})"
+                    aria-pressed="${isPicked}"
+                    aria-label="${tip}">
+                    <span class="chart-tip">${tip}</span>
+                </button>`;
+    }).join('');
+
+    /* Kunlik ko'rinishda ustun ko'p: har bir raqamni yozsak ular bir-biriga
+       tegib ketadi. Shuning uchun oraliq yorliqlar tashlanadi, lekin ustunlar
+       o'z joyida qoladi — bo'sh `div` o'rinni ushlab turadi. */
+    const step = d.labels.length > 12 ? Math.ceil(d.labels.length / 8) : 1;
+    labelsEl.innerHTML = d.labels.map((l, i) => {
+        const strong = chartPicked === i || (!hasPick && i === focus);
+        const show = strong || i % step === 0 || i === d.labels.length - 1;
+        return `<div class="chart-label${strong ? ' is-strong' : ''}">${show ? l : ''}</div>`;
+    }).join('');
 }
 
 /** Google Sheets state. The card used to read "tez orada" while the integration
@@ -624,8 +828,6 @@ async function renderUsagePanel(data) {
     const cap = (v) => (v === null || v === undefined ? '∞' : fmtNum(v));
     const row = (label, m) => {
         const pct = m.pct === null || m.pct === undefined ? null : Math.min(m.pct, 100);
-        // Red before the wall is hit, not after: at 90% the owner still has
-        // time to upgrade, at 100% the AI has already stopped answering.
         const tone = pct === null ? '' : pct >= 90 ? ' is-danger' : pct >= 70 ? ' is-warn' : '';
         return `
         <div class="cost-row"><span>${label}</span><b>${fmtNum(m.used)} / ${cap(m.limit)}</b></div>
@@ -643,23 +845,61 @@ async function renderUsagePanel(data) {
 
 function renderRecentOrders(orders) {
     const tbody = document.getElementById('recent-orders-tbody');
+    if (!tbody) return;
     tbody.innerHTML = '';
 
     if (!orders || orders.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Hali buyurtmalar kelib tushmagan. Telegram bot orqali buyurtma bering!</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:32px; color:var(--text-muted);">Hali buyurtmalar kelib tushmagan.</td></tr>';
         return;
     }
 
-    orders.forEach(o => {
+    const monthNames = ['Yan', 'Fev', 'Mar', 'Apr', 'May', 'Iyun', 'Iyul', 'Avg', 'Sen', 'Okt', 'Noy', 'Dek'];
+
+    orders.forEach((o, idx) => {
+        const d = new Date(o.created_at);
+        const day = isNaN(d) ? '' : d.getDate();
+        const month = isNaN(d) ? '' : monthNames[d.getMonth()];
+        const hh = isNaN(d) ? '' : d.getHours().toString().padStart(2, '0');
+        const mm = isNaN(d) ? '' : d.getMinutes().toString().padStart(2, '0');
+        const dateStr = isNaN(d) ? (o.created_at || '—') : `${day} ${month}, ${hh}:${mm}`;
+
+        // Avatar color palette
+        const COLORS = ['#388BFD','#A371F7','#00b87c','#f59e0b','#f0883e','#e11d48'];
+        const avatarColor = COLORS[idx % COLORS.length];
+        const initials = (o.customer_name || 'MI').substring(0, 2).toUpperCase();
+
+        // Short invoice ID
+        const shortId = '#INV-' + String(o.id).replace(/[^0-9]/g,'').substring(0, 4).padStart(4,'0');
+
+        // Status pill
+        let sc = 'var(--text-muted)', sb = 'var(--surface)';
+        const st = (o.status || '').toLowerCase();
+        if (st.includes('yangi') || st === 'new') { sc = 'var(--status-new)'; sb = 'var(--status-new-bg)'; }
+        else if (st.includes('tasdiq') || st === 'confirmed') { sc = 'var(--status-confirmed)'; sb = 'var(--status-confirmed-bg)'; }
+        else if (st.includes('yolda') || st.includes("yo'lda") || st === 'shipped') { sc = 'var(--status-shipped)'; sb = 'var(--status-shipped-bg)'; }
+        else if (st.includes('yetkazildi') || st === 'delivered') { sc = 'var(--status-delivered)'; sb = 'var(--status-delivered-bg)'; }
+        else if (st.includes('bekor') || st === 'cancelled') { sc = 'var(--accent-danger)'; sb = 'rgba(252,121,120,0.1)'; }
+
+        const amount = fmtNum(o.total_amount) + " so'm";
+
         const tr = document.createElement('tr');
-        const [day, time] = (o.created_at || '').split(' ');
+        tr.style.borderBottom = '1px solid var(--border)';
         tr.innerHTML = `
-            <td class="cell-nowrap"><code>${o.id}</code></td>
-            <td><strong>${escapeHtml(o.customer_name)}</strong></td>
-            <td class="cell-nowrap">${escapeHtml(o.customer_phone)}</td>
-            <td class="cell-nowrap cell-num">${fmtNum(o.total_amount)} <small>UZS</small></td>
-            <td><span class="badge badge-${o.status.toLowerCase().replace("'", "")}">${o.status}</span></td>
-            <td class="cell-nowrap cell-date">${day || ''}<span>${time || ''}</span></td>
+            <td style="padding:14px 0;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div style="width:32px; height:32px; border-radius:6px; background:${avatarColor}22; color:${avatarColor}; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; font-family:var(--font-mono); flex-shrink:0;">${initials}</div>
+                    <span style="font-weight:500; font-size:15px; color:var(--text-main);">${escapeHtml(o.customer_name || '—')}</span>
+                </div>
+            </td>
+            <td style="padding:14px 0; color:var(--text-muted); font-family:var(--font-mono); font-size:13px;">${shortId}</td>
+            <td style="padding:14px 0; color:var(--text-muted); font-size:13px;">${dateStr}</td>
+            <td style="padding:14px 0; text-align:right; font-family:var(--font-mono); font-weight:600; color:var(--text-main);">${amount}</td>
+            <td style="padding:14px 0 14px 16px;">
+                <span style="display:inline-flex; align-items:center; gap:5px; padding:5px 12px; border-radius:100px; background:${sb}; border:1px solid ${sc}44; color:${sc}; font-size:13px; font-weight:600;">
+                    <span style="width:5px; height:5px; border-radius:50%; background:${sc};"></span>
+                    ${escapeHtml(o.status || '—')}
+                </span>
+            </td>
         `;
         tbody.appendChild(tr);
     });
@@ -677,7 +917,10 @@ async function loadProducts() {
     }
 }
 
-/** Category chips above the table — a filter, not a separate screen. */
+let catalogViewMode = 'grid'; // 'grid' or 'table'
+
+
+/** Category chips in Stitch design */
 function renderCategoryFilter() {
     const row = document.getElementById('category-filter-row');
     if (!row) return;
@@ -689,10 +932,17 @@ function renderCategoryFilter() {
     });
     const names = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
 
-    const chip = (label, value, n, active) =>
-        `<button class="cat-chip${active ? ' active' : ''}" onclick="filterByCategory(${value === null ? 'null' : `'${value.replace(/'/g, "\\'")}'`})">
-            ${escapeHtml(label)} <span>${n}</span>
+    const chip = (label, value, n, active) => {
+        const bg = active ? 'background:var(--primary-glow); border:1px solid var(--primary); color:var(--primary); font-weight:600;'
+                          : 'background:var(--card-bg); border:1px solid var(--border); color:var(--text-muted); font-weight:400;';
+        const badgeBg = active ? 'background:var(--primary); color:#fff;' : 'background:var(--surface); color:var(--text-muted);';
+        const escapedValue = value === null ? 'null' : `'${value.replace(/'/g, "\\'")}'`;
+
+        return `<button onclick="filterByCategory(${escapedValue})" style="${bg} border-radius:100px; padding:6px 14px; font-size:13px; font-family:var(--font-body); display:inline-flex; align-items:center; gap:6px; cursor:pointer; white-space:nowrap; transition:all 0.15s;">
+            ${escapeHtml(label)}
+            <span style="${badgeBg} font-size:11px; padding:1px 7px; border-radius:100px; font-family:var(--font-mono); font-weight:600;">${n}</span>
         </button>`;
+    };
 
     row.innerHTML =
         chip('Barchasi', null, currentProducts.length, !selectedCategoryFilter) +
@@ -706,8 +956,9 @@ function filterByCategory(name) {
 }
 
 function renderProductsTable() {
+    const gridEl = document.getElementById('products-grid-view');
     const tbody = document.getElementById('products-tbody');
-    if (!tbody) return;
+    if (!gridEl && !tbody) return;
 
     const q = (document.getElementById('product-search')?.value || '').trim().toLowerCase();
     let list = currentProducts;
@@ -728,47 +979,112 @@ function renderProductsTable() {
     const foot = document.getElementById('catalog-foot');
     if (foot) {
         foot.textContent = list.length === currentProducts.length
-            ? `${currentProducts.length} ta mahsulot`
-            : `${list.length} / ${currentProducts.length} ta mahsulot`;
+            ? `Jami ${currentProducts.length} ta mahsulot`
+            : `${list.length} / ${currentProducts.length} ta mahsulot ko'rsatilmoqda`;
     }
 
-    if (list.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" class="table-empty">
-            ${currentProducts.length === 0
-                ? 'Katalog bo\'sh. <b>Excel katalog yuklash</b> yoki <b>+ Mahsulot</b> bilan boshlang.'
-                : 'Bu shartlarga mos mahsulot topilmadi.'}
-        </td></tr>`;
-        return;
+    // --- GRID CARDS VIEW ---
+    if (gridEl) {
+        if (list.length === 0) {
+            gridEl.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:48px; color:var(--text-muted); background:var(--card-bg); border:1px solid var(--border); border-radius:var(--r-xl); box-shadow:var(--shadow-1);">
+                ${currentProducts.length === 0
+                    ? 'Katalog bo\'sh. <b>Excel yuklash</b> yoki <b>+ Mahsulot qo\'shish</b> bilan boshlang.'
+                    : 'Ushbu shartlarga mos mahsulot topilmadi.'}
+            </div>`;
+        } else {
+            gridEl.innerHTML = list.map(p => {
+                const img = (p.image_urls && p.image_urls[0]) || p.image_url || '';
+                const qty = p.stock_quantity || 0;
+                const inStock = p.in_stock && qty > 0;
+                const stockBadge = inStock
+                    ? `<span style="background:rgba(0,184,124,0.12); color:#00b87c; border:1px solid rgba(0,184,124,0.3); font-size:11px; font-weight:700; padding:3px 10px; border-radius:100px; display:inline-flex; align-items:center; gap:4px;"><span style="width:6px; height:6px; border-radius:50%; background:#00b87c;"></span> ${qty} ta bor</span>`
+                    : `<span style="background:rgba(239,68,68,0.12); color:#ef4444; border:1px solid rgba(239,68,68,0.3); font-size:11px; font-weight:700; padding:3px 10px; border-radius:100px;">Tugagan</span>`;
+
+                const catName = (p.category || '—').toUpperCase();
+
+                const imgHTML = img
+                    ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(p.name)}" style="width:100%; height:180px; object-fit:cover; display:block;" onerror="this.onerror=null; this.parentNode.innerHTML='<div style=\\'width:100%; height:180px; background:var(--surface); display:flex; align-items:center; justify-content:center;\\'><span class=\\'ico ico-package\\' style=\\'font-size:36px; color:var(--text-muted);\\'></span></div>';">`
+                    : `<div style="width:100%; height:180px; background:var(--surface); display:flex; align-items:center; justify-content:center;">
+                        <span class="ico ico-package" style="font-size:36px; color:var(--text-muted);"></span>
+                       </div>`;
+
+                return `
+                <div class="prod-card" style="background:var(--card-bg); border:1px solid var(--border); border-radius:var(--r-xl); box-shadow:var(--shadow-1); overflow:hidden; display:flex; flex-direction:column; transition:transform 0.2s, box-shadow 0.2s; position:relative;">
+                    <div style="position:relative; width:100%; overflow:hidden;">
+                        ${imgHTML}
+                        <div style="position:absolute; top:10px; right:10px;">${stockBadge}</div>
+                    </div>
+                    <div style="padding:16px; display:flex; flex-direction:column; flex:1;">
+                        <div style="font-family:var(--font-mono); font-size:10px; font-weight:600; color:var(--text-dim); letter-spacing:0.05em; margin-bottom:4px;">${escapeHtml(catName)}</div>
+                        <h3 style="font-family:var(--font-display); font-size:15px; font-weight:600; color:var(--text-main); margin:0 0 8px; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${escapeHtml(p.name)}</h3>
+                        <p style="font-size:12px; color:var(--text-muted); margin:0 0 12px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; flex:1;">${escapeHtml(p.description || '')}</p>
+                        
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding-top:12px; border-top:1px solid var(--border); margin-top:auto;">
+                            <div style="font-family:var(--font-mono); font-size:15px; font-weight:700; color:var(--primary);">${fmtNum(p.price)} <span style="font-size:11px; font-weight:400; color:var(--text-muted);">${escapeHtml(p.currency || "so'm")}</span></div>
+                            <div style="display:flex; gap:6px;">
+                                <button onclick="openEditProductModal('${p.id}')" title="Tahrirlash" style="background:var(--surface); border:1px solid var(--border); border-radius:6px; color:var(--text-main); width:30px; height:30px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+                                    <span class="ico ico-square-pen" style="font-size:16px;"></span>
+                                </button>
+                                <button onclick="deleteProduct('${p.id}')" title="O'chirish" style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.2); border-radius:6px; color:#ef4444; width:30px; height:30px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+                                    <span class="ico ico-trash-2" style="font-size:16px;"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
     }
 
-    tbody.innerHTML = list.map(p => {
-        const img = (p.image_urls && p.image_urls[0]) || p.image_url || '/static/images/logo.svg';
-        const qty = p.stock_quantity;
-        const state = !p.in_stock || qty <= 0
-            ? '<span class="stock-pill out">Tugagan</span>'
-            : qty <= 3
-                ? '<span class="stock-pill low">Kam qoldi</span>'
-                : '<span class="stock-pill ok">Mavjud</span>';
-        return `<tr>
-            <td><img src="${escapeHtml(img)}" alt="" class="prod-thumb" loading="lazy"
-                     onerror="this.src='/static/images/logo.svg'"></td>
-            <td>
-                <strong>${escapeHtml(p.name)}</strong>
-                <div class="prod-desc">${escapeHtml(p.description || '')}</div>
-            </td>
-            <td class="cell-muted">${escapeHtml(p.category || '—')}</td>
-            <td class="cell-nowrap cell-num">${fmtNum(p.price)} <small>${escapeHtml(p.currency)}</small></td>
-            <td style="text-align:center;">${fmtNum(qty)}</td>
-            <td style="text-align:center;">${state}</td>
-            <td>
-                <div class="row-actions">
-                    <button onclick="openEditProductModal('${p.id}')" title="Tahrirlash">✏️</button>
-                    <button onclick="deleteProduct('${p.id}')" title="O'chirish" class="danger">🗑</button>
-                </div>
-            </td>
-        </tr>`;
-    }).join('');
+    // --- TABLE VIEW ---
+    if (tbody) {
+        if (list.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:36px; color:var(--text-muted);">
+                ${currentProducts.length === 0
+                    ? 'Katalog bo\'sh.'
+                    : 'Ushbu shartlarga mos mahsulot topilmadi.'}
+            </td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = list.map(p => {
+            const img = (p.image_urls && p.image_urls[0]) || p.image_url || '';
+            const qty = p.stock_quantity || 0;
+            const state = !p.in_stock || qty <= 0
+                ? '<span style="color:#ef4444; font-size:12px; font-weight:600;">Tugagan</span>'
+                : qty <= 3
+                    ? '<span style="color:#f59e0b; font-size:12px; font-weight:600;">Kam qoldi</span>'
+                    : '<span style="color:#00b87c; font-size:12px; font-weight:600;">Mavjud</span>';
+
+            const imgTd = img
+                ? `<img src="${escapeHtml(img)}" alt="" style="width:40px; height:40px; object-fit:cover; border-radius:6px;" onerror="this.src='/static/images/logo.svg'">`
+                : `<div style="width:40px; height:40px; background:var(--surface); border-radius:6px; display:flex; align-items:center; justify-content:center;"><span class="ico ico-package" style="font-size:20px; color:var(--text-muted);"></span></div>`;
+
+            return `<tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:12px 16px;">${imgTd}</td>
+                <td style="padding:12px 16px;">
+                    <strong style="color:var(--text-main); font-weight:600;">${escapeHtml(p.name)}</strong>
+                    <div style="font-size:12px; color:var(--text-muted);">${escapeHtml(p.description || '')}</div>
+                </td>
+                <td style="padding:12px 16px; color:var(--text-muted); font-size:13px;">${escapeHtml(p.category || '—')}</td>
+                <td style="padding:12px 16px; text-align:right; font-family:var(--font-mono); font-weight:600; color:var(--text-main);">${fmtNum(p.price)} <small style="font-weight:400; color:var(--text-muted);">${escapeHtml(p.currency||"so'm")}</small></td>
+                <td style="padding:12px 16px; text-align:center; font-family:var(--font-mono); font-weight:600;">${fmtNum(qty)}</td>
+                <td style="padding:12px 16px; text-align:center;">${state}</td>
+                <td style="padding:12px 16px; text-align:center;">
+                    <div style="display:flex; gap:6px; justify-content:center;">
+                        <button onclick="openEditProductModal('${p.id}')" title="Tahrirlash" style="background:var(--surface); border:1px solid var(--border); border-radius:6px; color:var(--text-main); width:30px; height:30px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+                            <span class="ico ico-square-pen" style="font-size:16px;"></span>
+                        </button>
+                        <button onclick="deleteProduct('${p.id}')" title="O'chirish" style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.2); border-radius:6px; color:#ef4444; width:30px; height:30px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+                            <span class="ico ico-trash-2" style="font-size:16px;"></span>
+                        </button>
+                    </div>
+                </td>
+            </tr>`;
+        }).join('');
+    }
 }
+
 
 // Multi-Image Gallery Handlers & Clean Vector Trash Icon Logic
 function triggerFileInput() {
@@ -978,8 +1294,7 @@ async function saveProductForm() {
         }
 
         closeProductModal();
-        await loadProducts();
-        await loadCategories();
+        await Promise.all([loadProducts(), loadCategories()]);
     } catch (e) {
         console.error('Mahsulotni saqlashda xatolik:', e);
         alert('Tarmoqda muammo. Qaytadan urinib ko\'ring.');
@@ -990,8 +1305,8 @@ async function deleteProduct(productId) {
     if (!confirm('Ushbu mahsulotni katalogdan o\'chirmoqchimisiz?')) return;
     try {
         await fetch(`/api/admin/products/${productId}`, { method: 'DELETE' });
-        await loadProducts();
-        await loadCategories();    } catch (e) {
+        await Promise.all([loadProducts(), loadCategories()]);
+    } catch (e) {
         console.error('O\'chirishda xatolik:', e);
     }
 }
@@ -1004,107 +1319,294 @@ async function loadOrders() {
     try {
         const resp = await fetch('/api/admin/orders');
         currentOrders = await resp.json();
+        renderOrdersStatsCards();
         renderOrdersTable();
     } catch (e) {
         console.error('Buyurtmalarni yuklashda xatolik:', e);
     }
 }
 
+function renderOrdersStatsCards() {
+    const row = document.getElementById('orders-stats-row');
+    if (!row) return;
+
+    const yangi    = currentOrders.filter(o => o.status === 'Yangi').length;
+    const tasdiq   = currentOrders.filter(o => o.status === 'Tasdiqlandi').length;
+    const yolda    = currentOrders.filter(o => o.status === "Yo'lda").length;
+    const yetkazil = currentOrders.filter(o => o.status === 'Yetkazildi').length;
+
+    const card = (icon, iconColor, iconBg, label, count, badge, badgeColor) => `
+        <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:var(--r-xl); box-shadow:var(--shadow-1); padding:20px; display:flex; flex-direction:column; gap:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div style="width:36px; height:36px; background:${iconBg}; border-radius:8px; display:flex; align-items:center; justify-content:center;">
+                        <span class="ico ico-${icon}" style="font-size:18px; color:${iconColor};"></span>
+                    </div>
+                    <span style="font-size:13px; color:var(--text-muted); font-weight:500;">${label}</span>
+                </div>
+                <span style="font-size:11px; font-weight:600; padding:3px 8px; border-radius:100px; background:${badgeColor}22; color:${badgeColor};">${badge}</span>
+            </div>
+            <div style="font-family:var(--font-mono); font-size:32px; font-weight:700; color:var(--text-main);">${count}</div>
+        </div>`;
+
+    row.innerHTML =
+        card('circle-plus', 'var(--status-new)', 'var(--status-new-bg)', 'Yangi (New)', yangi, 'NEW', 'var(--status-new)') +
+        card('circle-check', 'var(--status-delivered)', 'var(--status-delivered-bg)', 'Tasdiqlandi', tasdiq, 'CONFIRMED', 'var(--status-delivered)') +
+        card('truck', 'var(--status-shipped)', 'var(--status-shipped-bg)', "Yo'lda", yolda, 'SHIPPING', 'var(--status-shipped)') +
+        card('check-check', '#A371F7', 'rgba(163,113,247,0.12)', 'Yetkazildi', yetkazil, 'DONE', '#A371F7');
+}
+
+/**
+ * Holat bo'yicha saralash. Ikkinchi marta bosilsa, filtr o'chadi va
+ * ro'yxat to'liq holatiga qaytadi.
+ *
+ * Ilgari bu funksiya `.o-filter-tab` klassini tozalardi, lekin markupda
+ * bunday klass yo'q edi: shuning uchun bosilgan chiplar hech qachon
+ * o'chmasdi va vaqt o'tib hammasi yashil bo'lib qolardi. Endi holat
+ * inline uslub bilan emas, `active` klassi bilan boshqariladi.
+ */
 function filterOrdersByStatus(status, el) {
-    selectedOrderStatusFilter = status;
-    if (el) {
-        document.querySelectorAll('.filter-pill').forEach(btn => btn.classList.remove('active'));
+    const alreadyOn = selectedOrderStatusFilter === status && status !== 'all';
+    selectedOrderStatusFilter = alreadyOn ? 'all' : status;
+
+    document.querySelectorAll('.orders-filter-bar .filter-pill')
+        .forEach(b => b.classList.remove('active'));
+
+    if (alreadyOn || selectedOrderStatusFilter === 'all') {
+        const allBtn = document.querySelector('.orders-filter-bar .filter-pill');
+        if (allBtn) allBtn.classList.add('active');
+    } else if (el) {
         el.classList.add('active');
     }
+
     renderOrdersTable();
 }
+
+let selectedOrderId = null;
 
 function renderOrdersTable() {
     const tbody = document.getElementById('orders-tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
 
-    // Update Pill Count Badges
-    const countAll = currentOrders.length;
-    const countYangi = currentOrders.filter(o => o.status === 'Yangi').length;
-    const countTasdiqlandi = currentOrders.filter(o => o.status === 'Tasdiqlandi').length;
-    const countYolda = currentOrders.filter(o => o.status === "Yo'lda").length;
-    const countYetkazildi = currentOrders.filter(o => o.status === 'Yetkazildi').length;
-    const countBekor = currentOrders.filter(o => o.status === 'Bekor qilindi').length;
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const COLORS = ['#388BFD','#A371F7','#00b87c','#f59e0b','#f0883e','#e11d48'];
 
-    if (document.getElementById('count-order-all')) document.getElementById('count-order-all').textContent = countAll;
-    if (document.getElementById('count-order-yangi')) document.getElementById('count-order-yangi').textContent = countYangi;
-    if (document.getElementById('count-order-tasdiqlandi')) document.getElementById('count-order-tasdiqlandi').textContent = countTasdiqlandi;
-    if (document.getElementById('count-order-yolda')) document.getElementById('count-order-yolda').textContent = countYolda;
-    if (document.getElementById('count-order-yetkazildi')) document.getElementById('count-order-yetkazildi').textContent = countYetkazildi;
-    if (document.getElementById('count-order-bekor')) document.getElementById('count-order-bekor').textContent = countBekor;
-
-    // Filter Logic
     const searchTerm = (document.getElementById('order-search-input')?.value || '').toLowerCase();
     const filtered = currentOrders.filter(o => {
-        const matchesStatus = selectedOrderStatusFilter === 'all' || o.status === selectedOrderStatusFilter;
-        const matchesSearch = !searchTerm || 
-            o.id.toLowerCase().includes(searchTerm) || 
-            o.customer_name.toLowerCase().includes(searchTerm) || 
-            o.customer_phone.toLowerCase().includes(searchTerm);
-        return matchesStatus && matchesSearch;
+        const matchStatus = selectedOrderStatusFilter === 'all' || o.status === selectedOrderStatusFilter;
+        const matchSearch = !searchTerm ||
+            (o.id || '').toLowerCase().includes(searchTerm) ||
+            (o.customer_name || '').toLowerCase().includes(searchTerm) ||
+            (o.customer_phone || '').toLowerCase().includes(searchTerm);
+        return matchStatus && matchSearch;
     });
 
+    const footer = document.getElementById('orders-footer');
+    if (footer) footer.textContent = `Showing 1 to ${Math.min(filtered.length, 50)} of ${filtered.length} orders`;
+
     if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 36px;">Ushbu holatda buyurtmalar topilmadi.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--text-muted);">Buyurtmalar topilmadi.</td></tr>`;
         return;
     }
 
-    filtered.forEach(o => {
-        const itemsStr = o.items.map(i => `${i.product_name} (${i.quantity}x)`).join(', ');
-        const badgeClass = o.status === 'Yangi' ? 'badge-yangi' :
-                           o.status === 'Tasdiqlandi' ? 'badge-tasdiqlandi' :
-                           o.status === "Yo'lda" ? 'badge-yolda' :
-                           o.status === 'Yetkazildi' ? 'badge-yetkazildi' : 'badge-bekor';
+    filtered.slice(0, 50).forEach((o, idx) => {
+        const d = new Date(o.created_at);
+        const dateStr = isNaN(d) ? (o.created_at || '—') :
+            `${monthNames[d.getMonth()]} ${d.getDate()}, ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
 
-        const statusSelected = (val) => o.status === val ? 'selected' : '';
+        const initials = (o.customer_name || 'MI').substring(0, 2).toUpperCase();
+        const avatarColor = COLORS[idx % COLORS.length];
+        const shortId = '#ORD-' + String(o.id).replace(/[^0-9]/g, '').substring(0, 4).padStart(4, '0');
 
+        const [sc, sb] = orderStatusColors(o.status);
+
+        const isActive = selectedOrderId === o.id;
         const tr = document.createElement('tr');
+        tr.style.cssText = `border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.15s; ${isActive ? 'background:var(--primary-glow);' : ''}`;
+        tr.onmouseenter = () => { if (!isActive) tr.style.background = 'var(--surface)'; };
+        tr.onmouseleave = () => { if (!isActive) tr.style.background = ''; };
 
-        // Every value below reaches us from a Telegram customer, so it is
-        // escaped: an unescaped name let an outsider run script in the shop
-        // owner's panel, with the owner's session attached.
         tr.innerHTML = `
-            <td><code>${escapeHtml(o.id)}</code></td>
-            <td style="font-size: 12px; color: var(--text-muted);">${escapeHtml(o.created_at)}</td>
-            <td><strong>${escapeHtml(o.customer_name)}</strong></td>
-            <td>${escapeHtml(o.customer_phone)}</td>
-            <td style="max-width: 220px; font-size: 13px;">${escapeHtml(itemsStr)}</td>
-            <td><strong>${o.total_amount.toLocaleString()} UZS</strong></td>
-            <td>
-                <select class="status-select ${badgeClass}" onchange="updateOrderStatus('${o.id}', this.value)">
-                    <option value="Yangi" ${statusSelected('Yangi')}>🔥 Yangi</option>
-                    <option value="Tasdiqlandi" ${statusSelected('Tasdiqlandi')}>⚡️ Tasdiqlandi</option>
-                    <option value="Yo'lda" ${statusSelected("Yo'lda")}>🚚 Yo'lda</option>
-                    <option value="Yetkazildi" ${statusSelected('Yetkazildi')}>✅ Yetkazildi</option>
-                    <option value="Bekor qilindi" ${statusSelected('Bekor qilindi')}>❌ Bekor qilindi</option>
-                </select>
+            <td style="padding:16px 20px; font-family:var(--font-mono); font-size:14.5px; font-weight:600; color:${isActive ? 'var(--primary)' : 'var(--text-main)'};">${shortId}</td>
+            <td style="padding:14px 20px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div style="width:36px; height:36px; border-radius:50%; background:${avatarColor}22; color:${avatarColor}; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; font-family:var(--font-mono); flex-shrink:0;">${initials}</div>
+                    <span style="font-weight:500; font-size:15px; color:var(--text-main);">${escapeHtml(o.customer_name || '—')}</span>
+                </div>
             </td>
-            <td>
-                <button class="btn-detail" data-id="${o.id}" style="background: rgba(2,132,199,0.1); border: 1px solid rgba(2,132,199,0.25); color: #0284c7; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 700;">
-                    👁 Tafsilotlar
-                </button>
+            <td style="padding:16px 20px; color:var(--text-muted); font-size:14px;">${dateStr}</td>
+            <td style="padding:16px 20px; text-align:right; font-family:var(--font-mono); font-size:14.5px; font-weight:600; color:var(--text-main);">${fmtNum(o.total_amount)} <span style="font-size:11px; color:var(--text-muted); font-weight:400;">so'm</span></td>
+            <td style="padding:14px 20px;">
+                <span style="display:inline-flex; align-items:center; gap:5px; padding:5px 12px; border-radius:100px; background:${sb}; border:1px solid ${sc}44; color:${sc}; font-size:13px; font-weight:600;">
+                    <span style="width:5px; height:5px; border-radius:50%; background:${sc};"></span>
+                    ${escapeHtml(o.status || '—')}
+                </span>
             </td>
         `;
-
-        // Attach detail click using data attributes (avoids all quote issues)
-        tr.querySelector('.btn-detail').addEventListener('click', function() {
-            showOrderDetail(o);
-        });
-
+        tr.addEventListener('click', () => showOrderDetail(o));
         tbody.appendChild(tr);
     });
 }
 
+/** Buyurtma bosqichlari, tartib bo'yicha. Keyingi qadam shu ro'yxatdan olinadi. */
+const ORDER_FLOW = ['Yangi', 'Tasdiqlandi', "Yo'lda", 'Yetkazildi'];
+
+/* Bosqich sarlavhalari va hali bajarilmagan qadamning izohi. Matnlar Stitch
+   dizaynidan olingan. */
+const ORDER_STEP_LABEL = {
+    'Yangi': 'Yangi (Order Placed)',
+    'Tasdiqlandi': 'Tasdiqlandi (Confirmed)',
+    "Yo'lda": "Yo'lda (Shipping)",
+    'Yetkazildi': 'Yetkazildi (Delivered)',
+};
+const ORDER_STEP_PENDING = {
+    'Yangi': 'Kutilmoqda',
+    'Tasdiqlandi': 'Tasdiq kutilmoqda',
+    "Yo'lda": 'Pending courier pickup',
+    'Yetkazildi': 'Awaiting delivery',
+};
+
+/** Holat uchun rang juftligi. */
+function orderStatusColors(status) {
+    const st = (status || '').toLowerCase();
+    if (st.includes('yangi'))       return ['var(--status-new)', 'var(--status-new-bg)'];
+    if (st.includes('tasdiq'))      return ['var(--status-confirmed)', 'var(--status-confirmed-bg)'];
+    if (st.includes("yo'lda") || st.includes('yolda')) return ['var(--status-shipped)', 'var(--status-shipped-bg)'];
+    if (st.includes('yetkazildi'))  return ['var(--status-delivered)', 'var(--status-delivered-bg)'];
+    if (st.includes('bekor'))       return ['var(--accent-danger)', 'rgba(255,180,171,0.12)'];
+    return ['var(--text-muted)', 'var(--surface)'];
+}
+
+/**
+ * O'ng tomondagi buyurtma tafsiloti.
+ *
+ * Panel ataylab skrollsiz: sarlavha, mijoz, mahsulotlar, hisob, bosqichlar va
+ * tugmalar bitta ekranga sig'adigan qilib ixcham berilgan. Shuning uchun
+ * bo'shliqlar kichik va bosqichlar ro'yxati bir qatorli.
+ */
 function showOrderDetail(o) {
-    const addr = o.delivery_address || 'Kiritilmagan';
-    const note = o.notes || "Yo'q";
-    alert(`Buyurtma: ${o.id}\nMijoz: ${o.customer_name}\nTelefon: ${o.customer_phone}\nManzil: ${addr}\nEslatma: ${note}`);
+    // O'sha qatorga qayta bosish panelni yopadi.
+    if (selectedOrderId === o.id) {
+        closeOrderDetail();
+        return;
+    }
+    selectedOrderId = o.id;
+    renderOrdersTable(); // re-render to highlight active row
+
+    const panel = document.getElementById('order-detail-panel');
+    const inner = document.getElementById('order-detail-inner');
+    if (!panel || !inner) return;
+
+    panel.style.width = '420px';
+
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const fmtDate = (value) => {
+        const d = new Date(value);
+        if (isNaN(d)) return value || '—';
+        const hh = d.getHours().toString().padStart(2, '0');
+        const mm = d.getMinutes().toString().padStart(2, '0');
+        return `${monthNames[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} at ${hh}:${mm}`;
+    };
+
+    const shortId = '#ORD-' + String(o.id).replace(/[^0-9]/g, '').substring(0, 4).padStart(4, '0');
+    /* Panel belgisi Stitch dizaynida yashil tint bilan beriladi. */
+    const [sc, sb] = ['var(--primary-text)', 'var(--primary-glow)'];
+    const initials = (o.customer_name || 'MI').substring(0, 2).toUpperCase();
+
+    /* Buyurtma qatorida faqat product_id bor. Rasmni katalogdan izlaymiz;
+       katalog hali yuklanmagan bo'lsa, o'rniga belgi ko'rsatiladi. */
+    const items = (o.items || []).map((it) => {
+        const prod = (currentProducts || []).find(pr => pr.id === it.product_id);
+        const img = prod && prod.image_url;
+        const line = (Number(it.unit_price) || 0) * (Number(it.quantity) || 0);
+        const thumb = img
+            ? `<img src="${escapeHtml(img)}" alt="" class="od-thumb" loading="lazy">`
+            : `<div class="od-thumb od-thumb--empty"><span class="ico ico-package"></span></div>`;
+        return `
+            <div class="od-item">
+                ${thumb}
+                <div class="od-item-text">
+                    <div class="od-item-name">${escapeHtml(it.product_name || '—')}</div>
+                    <div class="od-item-qty">${it.quantity} x ${fmtNum(it.unit_price)} so'm</div>
+                </div>
+                <div class="od-item-sum">${fmtNum(line)} <em>so'm</em></div>
+            </div>`;
+    }).join('');
+
+    const doneIndex = ORDER_FLOW.indexOf(o.status);
+    const timeline = ORDER_FLOW.map((step, i) => {
+        const done = doneIndex >= 0 && i <= doneIndex;
+        const isCurrent = i === doneIndex;
+        const sub = isCurrent
+            ? fmtDate(o.created_at)
+            : (done ? fmtDate(o.created_at) : ORDER_STEP_PENDING[step]);
+        return `
+            <li class="od-step${done ? ' is-done' : ''}${isCurrent ? ' is-current' : ''}">
+                <span class="od-step-dot"></span>
+                <div>
+                    <div class="od-step-name">${ORDER_STEP_LABEL[step] || step}</div>
+                    <div class="od-step-sub">${sub}</div>
+                </div>
+            </li>`;
+    }).join('');
+
+    const next = doneIndex >= 0 && doneIndex < ORDER_FLOW.length - 1 ? ORDER_FLOW[doneIndex + 1] : null;
+
+    inner.innerHTML = `
+        <div class="od-head">
+            <div class="od-head-text">
+                <div class="od-title-row">
+                    <h3>Order ${shortId}</h3>
+                    <span class="od-badge" style="background:${sb}; border-color:${sc}44; color:${sc};">${escapeHtml((o.status || '').toUpperCase())}</span>
+                </div>
+                <div class="od-date">${fmtDate(o.created_at)}</div>
+            </div>
+            <button type="button" class="od-close" onclick="closeOrderDetail()" aria-label="Yopish">
+                <span class="ico ico-x"></span>
+            </button>
+        </div>
+
+        <div class="od-body">
+            <div class="od-customer">
+                <div class="od-avatar">${initials}</div>
+                <div class="od-cust-text">
+                    <div class="od-cust-name">${escapeHtml(o.customer_name || '—')}</div>
+                    <div class="od-cust-row"><span class="ico ico-phone"></span>${escapeHtml(o.customer_phone || '—')}</div>
+                    ${o.delivery_address ? `<div class="od-cust-row"><span class="ico ico-map-pin"></span>${escapeHtml(o.delivery_address)}</div>` : ''}
+                </div>
+            </div>
+
+            <div class="od-label">Items (${(o.items || []).length})</div>
+            <div class="od-items">${items || '<div class="od-empty">Mahsulot ma\'lumotlari yo\'q</div>'}</div>
+
+            <div class="od-totals">
+                <div class="od-total-row"><span>Subtotal</span><span>${fmtNum(o.total_amount)} so'm</span></div>
+                <div class="od-total-row"><span>Shipping</span><span>0 so'm</span></div>
+                <div class="od-total-row"><span>Tax</span><span>Included</span></div>
+                <div class="od-total-row od-total-row--sum"><span>Total Sum</span><span>${fmtNum(o.total_amount)} so'm</span></div>
+            </div>
+
+            <div class="od-status-card">
+                <div class="od-label">Order Status</div>
+                <ol class="od-timeline">${timeline}</ol>
+            </div>
+        </div>
+
+        <div class="od-foot">
+            <button type="button" class="od-btn-ghost" onclick="updateOrderStatus('${o.id}', 'Bekor qilindi')">Reject</button>
+            ${next
+                ? `<button type="button" class="od-btn-primary" onclick="updateOrderStatus('${o.id}', '${next}')">Move to ${next} <span class="ico ico-arrow-right"></span></button>`
+                : `<button type="button" class="od-btn-primary" disabled>Yakunlangan</button>`}
+        </div>
+    `;
+}
+
+function closeOrderDetail() {
+    selectedOrderId = null;
+    const panel = document.getElementById('order-detail-panel');
+    if (panel) panel.style.width = '0';
+    renderOrdersTable();
 }
 
 async function updateOrderStatus(orderId, newStatus) {
@@ -1115,11 +1617,16 @@ async function updateOrderStatus(orderId, newStatus) {
             body: JSON.stringify({ status: newStatus })
         });
         await loadOrders();
-        await loadDashboardStats();
+        // Re-open detail if same order
+        if (selectedOrderId === orderId) {
+            const updated = currentOrders.find(o => o.id === orderId);
+            if (updated) showOrderDetail(updated);
+        }
     } catch (e) {
         console.error('Status o\'zgartirishda xatolik:', e);
     }
 }
+
 
 // ════════════════════════════════════════════════════════
 // AI AGENT — persona + prompt settings
@@ -1137,9 +1644,14 @@ async function loadSettings() {
 
         hiddenSettings = {
             ai_provider: data.ai_provider || 'gemini',
-            model_name: data.model_name || 'gemini-3.5-flash-lite',
             auto_handoff_after: data.auto_handoff_after || 3
         };
+
+        setVal('ai-model', data.model_name || 'gemini-3.5-flash-lite');
+        const temp = data.temperature ?? 0.7;
+        setVal('ai-temp', temp);
+        const tempOut = document.getElementById('ai-temp-value');
+        if (tempOut) tempOut.textContent = Number(temp).toFixed(1);
 
         setVal('setting-prompt', data.system_prompt);
         setVal('ai-name', data.ai_name || 'Sotuvchi AI');
@@ -1194,6 +1706,8 @@ async function saveSettings() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 ...hiddenSettings,
+                model_name: gv('ai-model') || 'gemini-3.5-flash-lite',
+                temperature: num(gv('ai-temp')) ?? 0.7,
                 system_prompt: gv('setting-prompt') || '',
                 ai_name: gv('ai-name'),
                 ai_tone: gv('ai-tone'),
@@ -1255,12 +1769,17 @@ const CHANNEL_ICON = { telegram: '✈️', web: '🌐', instagram: '📸' };
 const isSandbox = (c) => (c.external_id || '').startsWith('sandbox-');
 const STATUS_LABEL = { ai: '🤖 AI', operator: '👨‍💼 Operator', closed: '✅ Yopilgan' };
 
+/* Barcha suhbatlar shu yerda saqlanadi. Saralash va qidiruv mijoz tomonida
+   bajariladi: shunda har bir filtr yonidagi sanoqni ko'rsatish uchun
+   qo'shimcha so'rov kerak bo'lmaydi. */
+let inboxAll = [];
+
 async function loadInbox() {
     try {
-        const resp = await fetch('/api/inbox/conversations?status=' + inboxFilter);
-        const list = await resp.json();
-        renderInboxList(list);
-        updateInboxBadge(list);
+        const resp = await fetch('/api/inbox/conversations?status=all');
+        inboxAll = await resp.json() || [];
+        renderInboxList();
+        updateInboxBadge(inboxAll);
     } catch (e) {
         console.error('Inbox yuklashda xatolik:', e);
     }
@@ -1283,34 +1802,74 @@ function updateInboxBadge(list) {
     notifiedWaiting = new Set(waitingIds);
 }
 
-function renderInboxList(list) {
+/** Suhbat holati uchun yorliq: matn va rang sinfi. */
+const CONV_BADGE = {
+    ai:       { text: 'AI HAL QILDI',   cls: 'is-ai' },
+    operator: { text: 'OPERATOR KERAK', cls: 'is-operator' },
+    closed:   { text: 'YOPILGAN',       cls: 'is-closed' },
+};
+
+function renderInboxList() {
     const box = document.getElementById('inbox-conversations');
     if (!box) return;
-    if (!list || list.length === 0) {
-        box.innerHTML = `<div class="inbox-empty-list">Hali suhbatlar yo'q.<br><span>Telegram botni ulang yoki Test rejimida sinab ko'ring.</span></div>`;
+
+    const term = (document.getElementById('inbox-search-input')?.value || '').trim().toLowerCase();
+
+    /* Sanoqlar qidiruvdan oldin hisoblanadi: filtr yorlig'i qancha suhbat
+       borligini ko'rsatishi kerak, qidiruv natijasini emas. */
+    const counts = {
+        all: inboxAll.length,
+        ai: inboxAll.filter(c => c.status === 'ai').length,
+        operator: inboxAll.filter(c => c.status === 'operator').length,
+        closed: inboxAll.filter(c => c.status === 'closed').length,
+    };
+    for (const key of Object.keys(counts)) {
+        const el = document.getElementById('inbox-count-' + key);
+        if (el) el.textContent = counts[key];
+    }
+
+    const list = inboxAll.filter(c => {
+        const byStatus = inboxFilter === 'all' || c.status === inboxFilter;
+        const bySearch = !term ||
+            (c.customer_name || '').toLowerCase().includes(term) ||
+            (c.last_message || '').toLowerCase().includes(term) ||
+            (c.customer_phone || '').toLowerCase().includes(term);
+        return byStatus && bySearch;
+    });
+
+    if (list.length === 0) {
+        box.innerHTML = term
+            ? `<div class="inbox-empty-list">Topilmadi.<br><span>Boshqa so'z bilan qidirib ko'ring.</span></div>`
+            : `<div class="inbox-empty-list">Hali suhbatlar yo'q.<br><span>Telegram botni ulang yoki Test rejimida sinab ko'ring.</span></div>`;
+        renderHandoffBanner(inboxAll.filter(c => c.waiting_for_operator).length);
         return;
     }
-    box.innerHTML = list.map(c => `
+
+    box.innerHTML = list.map(c => {
+        const badge = CONV_BADGE[c.status] || { text: c.status, cls: '' };
+        const initials = (c.customer_name || 'MI').substring(0, 2).toUpperCase();
+        return `
         <div class="conv-item ${c.id === activeConvId ? 'active' : ''} ${c.waiting_for_operator ? 'waiting' : ''}" onclick="openConversation('${c.id}')">
-            <div class="conv-avatar">${isSandbox(c) ? '🧪' : (CHANNEL_ICON[c.channel] || '💬')}</div>
+            <div class="conv-avatar">
+                ${initials}
+                <span class="conv-channel">${isSandbox(c) ? '🧪' : (CHANNEL_ICON[c.channel] || '💬')}</span>
+            </div>
             <div class="conv-body">
                 <div class="conv-top">
-                    <span class="conv-name">${escapeHtml(c.customer_name)}${isSandbox(c) ? ' <span class="conv-sandbox">sinov</span>' : ''}</span>
-                    <span class="conv-time">${c.last_message_at || ''}</span>
+                    <span class="conv-name">${escapeHtml(c.customer_name)}</span>
+                    <span class="conv-time">${shortStamp(c.last_message_at)}</span>
                 </div>
-                <div class="conv-preview">${escapeHtml(c.last_message)}</div>
+                <div class="conv-preview">${escapeHtml(c.last_message || '')}</div>
                 <div class="conv-tags">
-                    <span class="conv-status status-${c.status}">${STATUS_LABEL[c.status] || c.status}</span>
-                    ${c.waiting_for_operator ? '<span class="conv-waiting">⏳ javob kutmoqda</span>' : ''}
-                    ${c.assigned_user_name ? `<span class="conv-assignee">👤 ${escapeHtml(c.assigned_user_name)}</span>` : ''}
+                    <span class="conv-badge ${badge.cls}">${badge.text}</span>
+                    ${c.blocked ? '<span class="conv-badge is-blocked">BLOKLANGAN</span>' : ''}
                     ${c.unread_count > 0 ? `<span class="conv-unread">${c.unread_count}</span>` : ''}
                 </div>
             </div>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 
-    const waiting = list.filter(c => c.waiting_for_operator).length;
-    renderHandoffBanner(waiting);
+    renderHandoffBanner(inboxAll.filter(c => c.waiting_for_operator).length);
 }
 
 function renderHandoffBanner(waiting) {
@@ -1328,17 +1887,12 @@ function filterInboxTo(status) {
     if (btn) filterInbox(status, btn);
 }
 
-/** Dashboard escalation tile: open the Inbox already filtered to handoffs. */
-function openInboxOperator() {
-    switchToTab('tab-inbox');
-    setTimeout(() => filterInboxTo('operator'), 250);
-}
 
 function filterInbox(status, btn) {
     inboxFilter = status;
     document.querySelectorAll('.inbox-filter').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    loadInbox();
+    if (btn) btn.classList.add('active');
+    renderInboxList();
 }
 
 async function openConversation(convId) {
@@ -1352,19 +1906,48 @@ async function openConversation(convId) {
         document.getElementById('inbox-chat-active').style.display = 'flex';
 
         const c = data.conversation;
+        const initials = (c.customer_name || 'MI').substring(0, 2).toUpperCase();
+        const handle = c.external_id ? '@' + String(c.external_id).replace(/^@/, '') : '';
+
+        /* Amallar ikonka tugmalarida: sarlavha tinch qolsin, lekin operator
+           uchun kerakli to'rtta amal ham joyida bo'lsin. */
         document.getElementById('inbox-chat-header').innerHTML = `
-            <div>
-                <div class="chat-customer">${CHANNEL_ICON[c.channel] || '💬'} ${escapeHtml(c.customer_name)}</div>
-                <div class="chat-meta">${escapeHtml(c.customer_phone || c.external_id || '')}${c.assigned_user_name ? ' · 👤 ' + escapeHtml(c.assigned_user_name) : ''}</div>
-                ${c.status === 'operator' && c.handoff_reason ? `<div class="chat-reason">🔔 ${escapeHtml(c.handoff_reason)}</div>` : ''}
+            <div class="chat-who">
+                <div class="chat-avatar">${initials}<span class="conv-channel">${CHANNEL_ICON[c.channel] || '💬'}</span></div>
+                <div class="chat-who-text">
+                    <div class="chat-customer">${escapeHtml(c.customer_name)}</div>
+                    <div class="chat-meta">
+                        <span class="ico ico-phone"></span>${escapeHtml(c.customer_phone || '—')}
+                        ${handle ? `<span class="chat-dot"></span>${escapeHtml(handle)}` : ''}
+                    </div>
+                    ${c.status === 'operator' && c.handoff_reason ? `<div class="chat-reason">${escapeHtml(c.handoff_reason)}</div>` : ''}
+                </div>
             </div>
             <div class="chat-actions">
-                <span class="conv-status status-${c.status}">${STATUS_LABEL[c.status] || c.status}</span>
-                ${c.status !== 'operator' ? `<button class="btn-mini" onclick="setConvStatus('${c.id}','operator')">👨‍💼 Men javob beraman</button>` : ''}
-                ${c.status !== 'ai' ? `<button class="btn-mini" onclick="setConvStatus('${c.id}','ai')">🤖 AI'ga qaytar</button>` : ''}
-                ${c.status !== 'closed' ? `<button class="btn-mini" onclick="setConvStatus('${c.id}','closed')">✅ Yopish</button>` : ''}
-                <button class="btn-mini danger" onclick="deleteConversation('${c.id}')" title="Suhbatni o'chirish">🗑</button>
+                ${c.status !== 'operator' ? `<button class="chat-icon-btn" onclick="setConvStatus('${c.id}','operator')" title="Men javob beraman"><span class="ico ico-headset"></span></button>` : ''}
+                ${c.status !== 'ai' ? `<button class="chat-icon-btn" onclick="setConvStatus('${c.id}','ai')" title="AI'ga qaytarish"><span class="ico ico-bot"></span></button>` : ''}
+                ${c.status !== 'closed' ? `<button class="chat-icon-btn" onclick="setConvStatus('${c.id}','closed')" title="Suhbatni yopish"><span class="ico ico-circle-check"></span></button>` : ''}
+                ${c.blocked ? `<button class="chat-icon-btn" onclick="unblockConversation('${c.id}')" title="Blokni bekor qilish"><span class="ico ico-lock-open"></span></button>` : ''}
+                <button class="chat-icon-btn is-danger" onclick="deleteConversation('${c.id}')" title="O'chirish"><span class="ico ico-trash-2"></span></button>
             </div>`;
+
+        /* Pastdagi izoh: suhbatni hozir kim boshqarayotgani. */
+        const note = document.getElementById('inbox-mode-note');
+        if (note) {
+            const modes = {
+                ai: ['is-ai', 'AI bu suhbatni boshqaryapti'],
+                operator: ['is-operator', 'Siz javob beryapsiz'],
+                closed: ['is-closed', 'Suhbat yopilgan'],
+            };
+            /* Blok statusdan ustun: yopilgan suhbat bilan bloklangan suhbat
+               bir xil emas — birinchisiga operator yozsa bot davom etadi,
+               ikkinchisiga umuman javob bo'lmaydi. */
+            const [cls, text] = c.blocked
+                ? ['is-blocked', 'Haqorat uchun bloklangan — bot javob bermaydi']
+                : (modes[c.status] || ['', c.status]);
+            note.className = 'inbox-mode ' + cls;
+            note.textContent = text;
+        }
 
         renderMessages('inbox-messages', data.messages);
         loadInbox();
@@ -1373,24 +1956,82 @@ async function openConversation(convId) {
     }
 }
 
+/** Ro'yxatdagi vaqt: bugun bo'lsa soat, kecha bo'lsa "Kecha", aks holda
+    "13-avg" ko'rinishi. To'liq sana ro'yxatda joy egallaydi va foyda bermaydi. */
+const SHORT_MONTHS = ['yan','fev','mar','apr','may','iyn','iyl','avg','sen','okt','noy','dek'];
+function shortStamp(value) {
+    const { day, time } = splitStamp(value);
+    if (!day) return time || '';
+    const today = new Date();
+    const iso = (d) => d.toISOString().slice(0, 10);
+    if (day === iso(today)) return time;
+    if (day === iso(new Date(today.getTime() - 86400000))) return 'Kecha';
+    const [, m, d] = day.split('-');
+    return `${Number(d)}-${SHORT_MONTHS[Number(m) - 1] || m}`;
+}
+
+/** "2026-08-13 10:10" dan sana va soatni ajratadi. */
+function splitStamp(value) {
+    const s = String(value || '');
+    const m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
+    return m ? { day: m[1], time: m[2] } : { day: '', time: s };
+}
+
+/** Sana ajratgichi uchun yorliq: bugun va kecha alohida nomlanadi. */
+function dayLabel(day) {
+    if (!day) return '';
+    const today = new Date();
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const yesterday = new Date(today.getTime() - 86400000);
+    if (day === iso(today)) return 'BUGUN';
+    if (day === iso(yesterday)) return 'KECHA';
+    return day;
+}
+
+/**
+ * Suhbat oynasi.
+ *
+ * Tomonlar Stitch dizayni bo'yicha: MIJOZ o'ngda va yashil, AI bilan operator
+ * chapda. Ilgari teskari edi. Sabab: operator o'z tomonini o'ngda ko'rishga
+ * o'rgangan, lekin bu yerda "o'z tomoni" mijoz emas - suhbatni mijoz boshlaydi
+ * va uning gapi asosiy.
+ */
 function renderMessages(containerId, messages) {
     const box = document.getElementById(containerId);
     if (!box) return;
+
+    let lastDay = null;
     box.innerHTML = (messages || []).map(m => {
-        const side = m.sender === 'user' ? 'left' : 'right';
-        const who = { user: 'Mijoz', assistant: '🤖 AI', operator: '👨‍💼 Operator', system: 'Tizim' }[m.sender] || m.sender;
-        const meta = m.model_name && m.model_name !== 'fallback' ? ` · ${m.model_name}` : (m.model_name === 'fallback' ? ' · demo' : '');
-        // Show the product images the AI sent, so the operator sees the full exchange
-        const photos = (m.photos || []).map(p =>
-            `<img src="${escapeHtml(p.url)}" class="msg-photo" loading="lazy"
+        const { day, time } = splitStamp(m.created_at);
+        let divider = '';
+        if (day && day !== lastDay) {
+            lastDay = day;
+            divider = `<div class="msg-daydiv"><span>${dayLabel(day)}</span></div>`;
+        }
+
+        /* Mijoz chapda avatar bilan, biz (AI/operator) o'ngda — odatiy
+           messenjer tartibi: suhbatdoshning yuzi ko'rinadi, o'zimizniki yo'q. */
+        const isCustomer = m.sender === 'user';
+        const avatarIcon = 'user';
+        const meta = m.model_name && m.model_name !== 'fallback'
+            ? m.model_name
+            : (m.model_name === 'fallback' ? 'demo' : '');
+
+        const photos = (m.photos || []).map(ph =>
+            `<img src="${escapeHtml(ph.url)}" class="msg-photo" loading="lazy"
                   onerror="this.style.display='none'" alt="">`).join('');
-        return `<div class="msg msg-${side} sender-${m.sender}">
-            <div class="msg-who">${who}${meta}</div>
-            <div class="msg-bubble">${escapeHtml(m.text).replace(/\n/g, '<br>')}</div>
-            ${photos ? `<div class="msg-photos">${photos}</div>` : ''}
-            <div class="msg-time">${m.created_at || ''}</div>
+
+        return divider + `
+        <div class="msg ${isCustomer ? 'msg-in' : 'msg-out'} sender-${m.sender}">
+            ${isCustomer ? `<div class="msg-avatar"><span class="ico ico-${avatarIcon}"></span></div>` : ''}
+            <div class="msg-col">
+                <div class="msg-bubble">${escapeHtml(m.text || '').replace(/\n/g, '<br>')}</div>
+                ${photos ? `<div class="msg-photos">${photos}</div>` : ''}
+                <div class="msg-time">${time}${meta ? ' · ' + escapeHtml(meta) : ''}</div>
+            </div>
         </div>`;
     }).join('');
+
     box.scrollTop = box.scrollHeight;
 }
 
@@ -1421,6 +2062,18 @@ async function setConvStatus(convId, status) {
         });
         openConversation(convId);
         toast(status === 'operator' ? 'Siz javob berasiz' : status === 'ai' ? "AI'ga qaytarildi" : 'Suhbat yopildi');
+    } catch (e) {
+        toast('Xatolik', true);
+    }
+}
+
+async function unblockConversation(convId) {
+    if (!confirm('Blok bekor qilinsinmi? Bot bu mijozga yana javob bera boshlaydi.')) return;
+    try {
+        const resp = await fetch(`/api/inbox/conversations/${convId}/unblock`, { method: 'POST' });
+        if (!resp.ok) throw new Error('unblock failed');
+        openConversation(convId);
+        toast('Blok bekor qilindi');
     } catch (e) {
         toast('Xatolik', true);
     }
@@ -1457,7 +2110,7 @@ function startInboxPolling() {
                 updateWaitingBadge(d.ids || []);
             } catch (e) { /* offline; try again next tick */ }
         }
-    }, 8000);
+    }, 15000);
 }
 
 // Conversations already announced. Alerting once per conversation is what stops
@@ -1508,6 +2161,13 @@ if (!testSessionId) {
     localStorage.setItem('sotuvchi_sandbox_id', testSessionId);
 }
 let testMessages = [];
+
+/** Sinov suhbatini boshidan boshlash. */
+function resetTestChat() {
+    testMessages = [];
+    renderMessages('test-messages', testMessages);
+    testSessionId = 'sandbox-' + Math.random().toString(36).slice(2, 10);
+}
 
 async function sendTestMessage() {
     const input = document.getElementById('test-input');
@@ -1602,8 +2262,7 @@ async function runImport(dryRun) {
         } else {
             confirmBtn.style.display = 'none';
             toast(`✅ ${d.added} ta qo'shildi, ${d.updated} ta yangilandi`);
-            await loadProducts();
-            await loadCategories();
+            await Promise.all([loadProducts(), loadCategories()]);
 
             // A price list often has no category column — offer to fix that now,
             // while the user is still looking at the result.
@@ -1623,12 +2282,57 @@ async function runImport(dryRun) {
     }
 }
 
+/** Maydon kalitining odam o'qiydigan nomi. */
+const IMPORT_FIELD_LABEL = {
+    name: 'Nomi', price: 'Narxi', category: 'Kategoriya', description: 'Tavsif',
+    stock_quantity: 'Qoldiq', id: 'ID', currency: 'Valyuta', image_url: 'Rasm',
+};
+
+/** Katalogni .xlsx qilib yuklab olish. Fayl importer o'qiydigan shaklda:
+    tahrirlab, qaytadan yuklash mumkin — ID ustuni tufayli nusxa emas,
+    yangilanish bo'ladi. */
+async function exportCatalog() {
+    try {
+        const r = await fetch('/api/admin/products/export');
+        if (!r.ok) throw new Error('export failed');
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `katalog-${new Date().toISOString().slice(0, 10)}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        toast('Katalog yuklab olindi');
+    } catch (e) {
+        console.error('Eksport xatosi:', e);
+        toast('Yuklab bo\'lmadi', true);
+    }
+}
+
 function renderImportResult(d, dryRun) {
-    const mapped = Object.values(d.matched_columns || {})
-        .map(h => `<code>${escapeHtml(h)}</code>`).join(' ');
+    /* Qaysi ustun qaysi maydonga tushganini ko'rsatamiz. Faqat sarlavhalarni
+       sanash yetarli emas: fayl "Стоимость" deb yozilgan bo'lsa, egasi uni
+       narx deb tanilganini ko'rishi kerak. */
+    const pairs = Object.entries(d.matched_columns || {})
+        .map(([field, header]) => `
+            <span class="imp-pair">
+                <code>${escapeHtml(header)}</code>
+                <span class="ico ico-arrow-right"></span>
+                <b>${escapeHtml(IMPORT_FIELD_LABEL[field] || field)}</b>
+            </span>`).join('');
+
     const ignored = (d.ignored_columns || []).length
-        ? `<br>E'tiborga olinmadi: ${d.ignored_columns.map(h => `<code>${escapeHtml(h)}</code>`).join(' ')}`
+        ? `<div class="imp-ignored">E'tiborga olinmadi:
+             ${d.ignored_columns.map(h => `<code>${escapeHtml(h)}</code>`).join(' ')}</div>`
         : '';
+
+    const notes = [];
+    if (d.ai_mapping) notes.push('Ustunlar AI yordamida tanildi');
+    if (d.images_saved) notes.push(`${d.images_saved} ta rasm fayldan olindi`);
+    const noteBox = notes.length
+        ? `<div class="imp-note">${notes.map(escapeHtml).join(' · ')}</div>` : '';
 
     const errs = (d.errors || []).length
         ? `<div class="import-errors">
@@ -1640,14 +2344,16 @@ function renderImportResult(d, dryRun) {
 
     document.getElementById('import-step-result').innerHTML = `
         <div style="font-size:13px;font-weight:700;margin-bottom:10px;">
-            ${dryRun ? "👀 Oldindan ko'rish — hali saqlanmadi" : '✅ Yuklandi'}
+            ${dryRun ? "Oldindan ko'rish — hali saqlanmadi" : 'Yuklandi'}
         </div>
         <div class="import-summary">
             <div class="import-stat ok"><b>${d.added}</b><span>yangi</span></div>
             <div class="import-stat"><b>${d.updated}</b><span>yangilandi</span></div>
             <div class="import-stat ${d.skipped ? 'warn' : ''}"><b>${d.skipped}</b><span>o'tkazildi</span></div>
         </div>
-        <div class="import-mapped">Tanildi: ${mapped || '—'}${ignored}</div>
+        ${noteBox}
+        <div class="imp-pairs">${pairs || '—'}</div>
+        ${ignored}
         ${errs}`;
 }
 
@@ -1673,8 +2379,7 @@ async function autoCategorize(onlyUncategorized = true) {
         }
 
         toast(`✨ ${d.updated} ta mahsulot ${d.categories.length} ta kategoriyaga ajratildi`);
-        await loadProducts();
-        await loadCategories();
+        await Promise.all([loadProducts(), loadCategories()]);
     } catch (e) {
         toast('Serverga ulanishda xatolik', true);
     } finally {
@@ -1830,7 +2535,10 @@ async function loadIntegrations() {
     try {
         const resp = await fetch('/api/integrations/telegram');
         const d = await resp.json();
-        document.getElementById('tg-status-text').textContent = d.connected ? 'Ulangan' : 'Ulanmagan';
+        const tgState = document.getElementById('tg-status-text');
+        tgState.textContent = d.connected ? 'Ulangan' : 'Ulanmagan';
+        /* Yorliq rangi ham holatga ergashsin, faqat matn emas. */
+        tgState.classList.toggle('is-on', !!d.connected);
         document.getElementById('tg-connected').style.display = d.connected ? 'block' : 'none';
         document.getElementById('tg-disconnected').style.display = d.connected ? 'none' : 'block';
         if (d.connected) {
@@ -2084,6 +2792,18 @@ async function loadSidebarPlan() {
 // ════════════════════════════════════════════════════════
 const ROLE_LABEL = { owner: 'Egasi', operator: 'Operator' };
 
+/**
+ * Sozlamalar bo'limi yuklovchisi.
+ *
+ * Telegram bloki Integratsiyalardan shu yerga ko'chirilgan, shuning uchun
+ * uning holatini ham shu yerda yuklaymiz - aks holda token maydoni bo'sh
+ * qolar va "Ulanmagan" deb ko'rsatilaverardi.
+ */
+async function loadSettingsTab() {
+    loadAccountSettings();
+    loadIntegrations();
+}
+
 async function loadStaff() {
     const card = document.getElementById('staff-card');
     const list = document.getElementById('staff-list');
@@ -2245,8 +2965,11 @@ async function loadBilling() {
                  + (d.can_auto_renew ? ' Hisobda mablag\' bor, tarif avtomatik yangilanadi.' : '');
         }
         document.getElementById('bill-sub').innerHTML = `
-            <div class="bill-sub-plan">${escapeHtml(d.plan_title)}</div>
-            <div class="bill-sub-state bill-${d.status}">${SUB_STATE[d.status] || d.status}</div>
+            <span class="bill-label">Joriy obuna</span>
+            <div class="bill-sub-row">
+                <span class="bill-sub-plan">${escapeHtml(d.plan_title)}</span>
+                <span class="bill-sub-state bill-${d.status}">${SUB_STATE[d.status] || d.status}</span>
+            </div>
             <p class="bill-sub-note">${escapeHtml(note)}</p>
             ${d.status === 'free' ? '' : `
             <label class="bill-renew">
@@ -2270,18 +2993,23 @@ async function loadBilling() {
             }
         });
 
+        const limit = (v, unit) => (v === null ? 'Cheksiz ' + unit : fmtNum(v) + ' ' + unit);
         document.getElementById('bill-plans').innerHTML = d.plans.map((p) => `
             <div class="bill-plan ${p.current ? 'is-current' : ''}">
+                ${p.current ? '<span class="bill-plan-ribbon">Joriy tarif</span>' : ''}
                 <h4>${escapeHtml(p.title)}</h4>
-                <div class="bill-plan-price">${fmtNum(p.price_uzs)} <small>so'm / ${p.duration_days} kun</small></div>
+                <div class="bill-plan-price">
+                    ${fmtNum(p.price_uzs)} <small>so'm / ${p.duration_days} kun</small>
+                </div>
                 <ul class="bill-plan-list">
-                    <li>${p.max_products === null ? 'Cheksiz' : fmtNum(p.max_products)} mahsulot</li>
-                    <li>${p.max_ai_messages_monthly === null ? 'Cheksiz' : fmtNum(p.max_ai_messages_monthly)} AI xabar / oy</li>
-                    <li>${p.max_operators === null ? 'Cheksiz' : fmtNum(p.max_operators)} operator</li>
+                    <li><span class="ico ico-circle-check"></span>${limit(p.max_products, 'mahsulot')}</li>
+                    <li><span class="ico ico-circle-check"></span>${limit(p.max_ai_messages_monthly, 'AI xabar / oy')}</li>
+                    <li><span class="ico ico-circle-check"></span>${limit(p.max_operators, 'operator')}</li>
                 </ul>
-                ${p.price_uzs > 0 ? `<button class="btn-primary" data-plan="${escapeHtml(p.name)}">
-                    ${p.current ? 'Muddatni uzaytirish' : 'Shu tarifni olish'}</button>`
-                  : '<span class="bill-plan-free">Boshlang\'ich tarif</span>'}
+                ${p.price_uzs > 0
+                    ? `<button class="${p.current ? 'bill-plan-btn is-current' : 'bill-plan-btn'}" data-plan="${escapeHtml(p.name)}">
+                        ${p.current ? 'Muddatni uzaytirish' : 'Shu tarifni olish'}</button>`
+                    : '<span class="bill-plan-free">Boshlang\'ich tarif</span>'}
             </div>`).join('');
 
         document.getElementById('bill-plans').querySelectorAll('[data-plan]').forEach((b) =>
@@ -2290,15 +3018,18 @@ async function loadBilling() {
         const tb = document.getElementById('bill-history');
         tb.innerHTML = d.history.length ? d.history.map((h) => {
             const [icon, label] = BILL_STATE[h.status] || ['', h.status];
+            const positive = h.amount >= 0;
             return `<tr>
-                <td>${escapeHtml(h.created_at || '')}</td>
-                <td>${escapeHtml(BILL_KIND[h.kind] || h.kind)}</td>
-                <td style="font-weight:700">${h.amount >= 0 ? '+' : ''}${fmtNum(h.amount)}</td>
-                <td>${escapeHtml(h.note || '—')}</td>
-                <td>${icon} ${label}</td>
+                <td style="padding:14px 20px; color:var(--text-muted); font-size:13.5px;">${escapeHtml(h.created_at || '')}</td>
+                <td style="padding:14px 20px; font-size:14px;">${escapeHtml(BILL_KIND[h.kind] || h.kind)}</td>
+                <td style="padding:14px 20px; color:var(--text-muted); font-size:13.5px;">${escapeHtml(h.note || '—')}</td>
+                <td style="padding:14px 20px; text-align:right; font-family:var(--font-mono); font-weight:600; color:${positive ? 'var(--primary-text)' : 'var(--text-main)'};">
+                    ${positive ? '+' : ''}${fmtNum(h.amount)} <span style="font-size:11px; color:var(--text-muted); font-weight:400;">so'm</span>
+                </td>
+                <td style="padding:14px 20px; font-size:13.5px; color:var(--text-muted);">${icon} ${label}</td>
             </tr>`;
         }).join('')
-          : '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:28px;">Hali to\'lov yo\'q.</td></tr>';
+          : '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:34px;">Hali to\'lov yo\'q.</td></tr>';
     } catch (e) {
         console.error('Hisobni yuklashda xatolik:', e);
     }

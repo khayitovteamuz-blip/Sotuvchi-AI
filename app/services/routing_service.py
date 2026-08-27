@@ -260,7 +260,7 @@ async def try_pair(
     if first:
         what = "Barcha bildirishnomalar shu yerga keladi."
     else:
-        what = ("Panelda *Integratsiyalar → Bildirishnomalar* bo'limidan "
+        what = ("Panelda *Sozlamalar → Boshqa ulanishlar → Integratsiyalar* ichidagi *Bildirishnomalar* jadvalidan "
                 "qaysi xabarlar shu yerga kelishini tanlang.")
     return (
         f"✅ *Ulandi!*\n\n"
