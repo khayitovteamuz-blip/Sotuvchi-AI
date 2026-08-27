@@ -25,8 +25,8 @@ from app.api.bot_webhook import router as bot_router
 from app.api.chat_api import router as chat_router
 from app.api.inbox_api import router as inbox_router
 from app.api.integrations_api import router as integrations_router
-from app.api.platform_api import auth_router as platform_auth_router
-from app.api.platform_api import router as platform_router
+from app.api.platform import auth_router as platform_auth_router
+from app.api.platform import router as platform_router
 from app.api.users_api import router as users_router
 from app.core.config import settings
 from app.db.base import AsyncSessionLocal, engine
