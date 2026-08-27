@@ -6,11 +6,13 @@ must call one of these tools, and every value they return is read straight from
 the tenant's Postgres rows. That is the guardrail.
 
 Tools:
-  search_product   — find products in THIS tenant's catalog
-  check_stock      — authoritative availability + quantity
-  create_order     — persist a real order (requires name + phone)
-  calc_delivery    — delivery cost/time from tenant settings
-  handoff_to_human — escalate to an operator (pauses the AI)
+  search_product     — find products in THIS tenant's catalog
+  check_stock        — authoritative availability + quantity
+  create_order       — persist a real order (requires name + phone)
+  calc_delivery      — delivery cost/time from tenant settings
+  handoff_to_human   — escalate to an operator (pauses the AI)
+  decline_off_topic  — marks a reply as an off-topic refusal (no side effect;
+                       lets ai_agent count and, on the 2nd in a row, go quiet)
 """
 import logging
 import re
@@ -149,6 +151,16 @@ TOOL_SPECS: List[Dict[str, Any]] = [
         },
         "required": ["reason"],
     },
+    {
+        "name": "decline_off_topic",
+        "description": (
+            "Mijoz do'kon bilan bog'liq bo'lmagan savol berganda (umumiy bilim, ob-havo, "
+            "matematika, siyosat va h.k.) rad javobi berishdan OLDIN MAJBURIY chaqiring. "
+            "Hech narsani o'zgartirmaydi — faqat bu holatni tizimga bildiradi."
+        ),
+        "properties": {},
+        "required": [],
+    },
 ]
 
 _GEMINI_TYPES = {
@@ -247,6 +259,11 @@ async def execute_tool(
             return await _create_order(session, tenant_id, conversation, args)
         if name == "handoff_to_human":
             return await _handoff(session, tenant_id, conversation, args.get("reason", ""))
+        if name == "decline_off_topic":
+            # A marker, not an action — see ai_agent._track_off_topic, which
+            # reads tool_trace for this name to count and, on the second one
+            # in a row, suppress the reply instead of resending it.
+            return {"noted": True}
         return {"error": f"Noma'lum funksiya: {name}"}
     except Exception as e:
         logger.exception(f"Tool {name} failed")

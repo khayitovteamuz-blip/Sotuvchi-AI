@@ -193,6 +193,13 @@ QAT'IY QOIDALAR (buzilishi mumkin emas):
    Aralash savolda (masalan "issiq ob-havoda qaysi krossovka mos keladi?")
    mahsulotga tegishli qismiga javob bering — ob-havo haqida emas, mos
    krossovka haqida gapiring.
+
+17a. MAVZUDAN CHIQISH JAVOBIDAN OLDIN — decline_off_topic FUNKSIYASINI CHAQIRING.
+   17-qoidaga ko'ra rad javobi berishdan OLDIN har doim decline_off_topic
+   funksiyasini chaqiring (argumentlarsiz). Bu funksiya hech narsani
+   o'zgartirmaydi — faqat tizimga "bu savol mavzudan tashqari edi" deb
+   bildiradi. Chaqirmasangiz, tizim buni bilmaydi. Do'kon mavzusidagi oddiy
+   javobda bu funksiyani chaqirmang.
 """
 
 
@@ -317,6 +324,11 @@ class AISalesAgent:
             session, tenant_id, conversation, cfg, tool_trace
         )
 
+        # 2-marta ketma-ket mavzudan tashqari savol — javob Inboxda ko'rinadi,
+        # lekin mijozga yuborilmaydi. Bloklash emas: mavzuga qaytishi bilan
+        # hisoblagich nolga tushadi va odatdagidek javob boradi.
+        suppress_send = self._track_off_topic(conversation, tool_trace)
+
         latency_ms = int((time.monotonic() - t0) * 1000)
         intent = self._intent_from_trace(tool_trace) or self._detect_intent(user_message)
 
@@ -325,7 +337,9 @@ class AISalesAgent:
             intent=intent, model_name=model_used, tokens=usage["total"],
             prompt_tokens=usage["prompt"], output_tokens=usage["output"],
             latency_ms=latency_ms,
-            meta={"tools": tool_trace} if tool_trace else None,
+            meta=({"tools": tool_trace} if tool_trace else {}) | (
+                {"suppressed": "off_topic"} if suppress_send else {}
+            ) or None,
         )
 
         # recommend whatever the model actually looked up
@@ -344,6 +358,7 @@ class AISalesAgent:
             recommended_products=recommended[:3],
             order_draft=None,  # orders are persisted by the tool; see meta/tool_trace
             photos=photos,
+            suppress_send=suppress_send,
         )
 
     # ─── Gemini tool-calling loop ─────────────────────────────────────────────
@@ -768,6 +783,27 @@ class AISalesAgent:
         return trace + [{"name": "handoff_to_human",
                          "args": {"reason": "auto-handoff-after-failures"},
                          "result": result}]
+
+    # Suppress starting on the 2nd consecutive off-topic turn — the 1st still
+    # gets the redirect reply (rule 17), same "one warning first" shape as
+    # profanity.py, but without profanity.py's permanent block: any on-topic
+    # turn resets this to 0 and replies resume immediately.
+    _OFF_TOPIC_SUPPRESS_AT = 2
+
+    @staticmethod
+    def _track_off_topic(conversation: Conversation, trace: List[Dict[str, Any]]) -> bool:
+        """True if this turn's reply must not reach the customer.
+
+        Relies on the model calling decline_off_topic (guardrails rule 17a)
+        rather than matching the reply text, which is worded differently every
+        time and would make this detection unreliable.
+        """
+        declined = any(t["name"] == "decline_off_topic" for t in trace)
+        if not declined:
+            conversation.off_topic_streak = 0
+            return False
+        conversation.off_topic_streak = (conversation.off_topic_streak or 0) + 1
+        return conversation.off_topic_streak >= AISalesAgent._OFF_TOPIC_SUPPRESS_AT
 
     async def _enforce_promised_handoff(self, session, tenant_id, conversation, reply_text, trace):
         """Execute a handoff the model promised in text but never called."""

@@ -85,6 +85,11 @@ class ChatResponse(BaseModel):
     order_draft: Optional[Order] = None
     # Product images the agent chose to show; the channel decides how to deliver
     photos: List[Dict[str, Any]] = []
+    # True on the 2nd+ consecutive off-topic question in a row: reply_text is
+    # still generated and stored (so Inbox shows what the AI would have said),
+    # but the channel must NOT deliver it to the customer. See
+    # ai_agent._track_off_topic.
+    suppress_send: bool = False
 
 
 class SystemSettings(BaseModel):

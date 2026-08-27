@@ -551,6 +551,11 @@ class TelegramBotService:
         resp = await ai_agent.generate_response(
             session, tenant, conv, text, user_name, media=media
         )
+        if resp.suppress_send:
+            # 2-marta ketma-ket mavzudan tashqari savol — Inboxda ko'rinadi
+            # (generate_response saqlab qo'ygan), lekin mijozga yuborilmaydi.
+            logger.info("Mavzudan chiqish, javob yuborilmadi: tenant=%s conv=%s", tenant.id, conv.id)
+            return
         await self.send_message(token, chat_id, resp.reply_text)
         await self._send_requested_photos(session, tenant, token, chat_id, resp)
 

@@ -591,6 +591,11 @@ class Conversation(Base):
     assigned_user_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     handoff_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     fail_streak: Mapped[int] = mapped_column(Integer, default=0)  # consecutive "don't know" -> auto handoff
+    # Ketma-ket mavzudan tashqari xabarlar soni. 2 va undan ko'p bo'lsa AI shu
+    # xabarga javob yubormaydi (lekin Inboxda ko'rinadi) — chat yopilmaydi,
+    # bloklanmaydi, mijoz mavzuga qaytishi bilan darhol nolga tushadi. abuse_count
+    # dan farqli o'laroq bu doimiy jazo emas, faqat bir marta jim turish.
+    off_topic_streak: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # Haqoratli xabarlar soni. 1 -> ogohlantirildi, 2+ -> bloklangan.
     # Suhbatda turadi, mijozda emas: blok shu kanaldagi shu chatga tegishli,
     # va operator uni panelda bir bosishda bekor qila oladi.

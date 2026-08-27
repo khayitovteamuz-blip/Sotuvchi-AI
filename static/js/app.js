@@ -2301,7 +2301,12 @@ async function sendTestMessage() {
             body: JSON.stringify({ session_id: testSessionId, message: text, user_name: 'Test mijoz' })
         });
         const data = await resp.json();
-        testMessages.push({ sender: 'assistant', text: data.reply_text, created_at: '' });
+        // Haqiqiy mijoz bu javobni olmaydi — sinov oynasi ham shuni ko'rsatishi
+        // kerak, aks holda "nega mijozga bormadi" deb chalkashib qoladi.
+        const text = data.suppress_send
+            ? '_(bu javob mijozga yuborilmadi — ketma-ket mavzudan chiqish)_'
+            : data.reply_text;
+        testMessages.push({ sender: 'assistant', text, created_at: '' });
         renderMessages('test-messages', testMessages);
     } catch (e) {
         toast('AI javob bermadi', true);
