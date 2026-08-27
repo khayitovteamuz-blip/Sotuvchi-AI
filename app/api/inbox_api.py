@@ -54,6 +54,8 @@ async def get_conversation(conv_id: str, user: User = Depends(require_auth), ses
             "customer_phone": conv.customer_phone, "external_id": conv.external_id,
             "assigned_user_name": conv.assigned_user_name,
             "handoff_reason": conv.handoff_reason,
+            "blocked": bool(conv.blocked_at),
+            "abuse_count": conv.abuse_count or 0,
         },
         "messages": [
             {"sender": m.sender, "text": m.text, "model_name": m.model_name,
@@ -104,6 +106,25 @@ async def delete_conversation(conv_id: str, user: User = Depends(require_auth), 
     await session.delete(conv)   # messages cascade
     await session.commit()
     return {"status": "success"}
+
+
+@router.post("/conversations/{conv_id}/unblock")
+async def unblock_conversation(conv_id: str, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    """Haqorat uchun qo'yilgan blokni bekor qilish.
+
+    Hisoblagich ham nolga qaytariladi: aks holda mijoz blokdan chiqqan zahoti
+    bitta so'z bilan qayta bloklanardi va "bir marta ogohlantirish" qoidasi
+    faqat birinchi safar ishlagan bo'lardi.
+    """
+    conv = await repo.get_conversation(session, user.tenant_id, conv_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Suhbat topilmadi.")
+    conv.blocked_at = None
+    conv.abuse_count = 0
+    if conv.status == "closed":
+        conv.status = "ai"
+    await session.commit()
+    return {"status": "success", "conversation_status": conv.status}
 
 
 @router.post("/conversations/{conv_id}/status")

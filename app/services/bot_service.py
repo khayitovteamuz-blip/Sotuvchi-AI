@@ -6,6 +6,7 @@ at /api/bot/webhook/{tenant_id}; replies are sent with that tenant's token.
 """
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import httpx
@@ -34,6 +35,28 @@ def _is_markup_error(data: dict) -> bool:
 # instructions written before this change, and a command that quietly stops
 # working looks like a broken bot.
 PAIR_COMMANDS = ("/ulash", "/operator", "/guruh")
+
+
+def _not_a_receipt_text(lang: Optional[str], name: str) -> str:
+    """Fixed wording for "that image is not a payment slip".
+
+    Deterministic on purpose: this message protects a payment, so it must say
+    the same thing every time regardless of what the model would rather sell.
+    """
+    if (lang or "uz") == "ru":
+        return (f"{name}, спасибо! 🙏 Но это фото не похоже на чек об оплате.\n\n"
+                "Пришлите, пожалуйста, чёткий скриншот чека из банковского приложения — "
+                "чтобы были видны сумма и дата.\n\n"
+                "Ваш заказ не отменён, он ждёт оплату.")
+    if lang == "en":
+        return (f"{name}, thank you! 🙏 That photo does not look like a payment receipt.\n\n"
+                "Please send a clear screenshot of the receipt from your banking app, "
+                "with the amount and date visible.\n\n"
+                "Your order is still open and waiting for payment.")
+    return (f"{name}, rahmat! 🙏 Lekin bu rasm to'lov chekiga o'xshamadi.\n\n"
+            "Iltimos, bank ilovangizdan chekning aniq rasmini yuboring — "
+            "summa va sana ko'rinib tursin.\n\n"
+            "Buyurtmangiz bekor qilinmadi, to'lov kutilmoqda.")
 
 
 def _is_pair_command(text: str) -> bool:
@@ -369,7 +392,7 @@ class TelegramBotService:
             await self.send_message(
                 token, chat_id,
                 reply or "❌ Kod noto'g'ri yoki eskirgan.\n"
-                         "Paneldagi *Integratsiyalar* bo'limidan yangi kod oling."
+                         "Panelda *Sozlamalar → Boshqa ulanishlar → Integratsiyalar* bo'limidan yangi kod oling."
             )
             return
 
@@ -392,6 +415,13 @@ class TelegramBotService:
         if uname and conv.customer_username != uname:
             conv.customer_username = uname
             await session.commit()
+
+        # Bloklangan suhbat — hech qanday javob yo'q, hatto /start ga ham.
+        # Jim turish ataylab: har xabarga "siz bloklangansiz" deb javob berish
+        # haqoratlayotgan odamga o'yin beradi va u davom etaveradi.
+        if conv.blocked_at:
+            logger.info("Bloklangan suhbatdan xabar: tenant=%s conv=%s", tenant.id, conv.id)
+            return
 
         if text == "/start":
             greeting = cfg.greeting_message or (
@@ -422,7 +452,22 @@ class TelegramBotService:
             await session.commit()
             # If a payment is pending for this chat, the slip goes to the team now
             from app.services import group_service
-            await group_service.attach_payment_slip(session, tenant, conv.id, file_id)
+            slip = await group_service.attach_payment_slip(session, tenant, conv.id, file_id)
+            # Not a receipt: the team never sees it, and the customer is told
+            # directly. This reply is fixed text, not model output — the same
+            # instruction handed to the model was ignored twice in testing, and
+            # it kept pitching products at someone who owes money. A message
+            # that guards a payment cannot depend on the model's mood.
+            if slip.get("not_receipt"):
+                await self.send_message(
+                    token, chat_id, _not_a_receipt_text(cfg.ai_language, user_name)
+                )
+                await repo.add_message(session, tenant.id, conv, "user", text or "📷 [rasm yubordi]")
+                await repo.add_message(
+                    session, tenant.id, conv, "assistant",
+                    _not_a_receipt_text(cfg.ai_language, user_name),
+                )
+                return
 
         # Photo / voice: customers here often show a product or just talk.
         # Gemini reads both, so hand the bytes straight to the agent.
@@ -441,6 +486,58 @@ class TelegramBotService:
         if not text and not media:
             return  # sticker, location, etc. — nothing to act on
 
+        # Haqorat: birinchisiga ogohlantirish, ikkinchisiga blok. Bu qaror
+        # ham kod darajasida — model kayfiyatiga qarab bir mijozni kechirib,
+        # boshqasini bloklab qo'yishi mumkin emas.
+        from app.services import profanity
+        if profanity.hits(text):
+            conv.abuse_count = (conv.abuse_count or 0) + 1
+            first = conv.abuse_count == 1
+            reply = (profanity.warning_text(cfg.ai_language) if first
+                     else profanity.block_text(cfg.ai_language))
+            if not first:
+                conv.blocked_at = datetime.now(timezone.utc)
+                conv.status = "closed"
+            await repo.add_message(session, tenant.id, conv, "user", text)
+            await repo.add_message(session, tenant.id, conv, "assistant", reply)
+            await session.commit()
+            await self.send_message(token, chat_id, reply)
+            if not first:
+                # Blok — pul yo'qotilishi mumkin bo'lgan qaror, jamoa buni
+                # ko'rib, kerak bo'lsa paneldan bekor qilsin.
+                from app.services import notify_service
+                await notify_service.notify_blocked(session, tenant, cfg, conv)
+            logger.warning("Haqorat (%s-marta): tenant=%s conv=%s%s",
+                           conv.abuse_count, tenant.id, conv.id,
+                           " — BLOKLANDI" if not first else "")
+            return
+
+        # Manipulyatsiya urinishi modelga umuman bormaydi. Sabab: promptdagi
+        # qoida model *ko'pincha* bajaradigan maslahat, kafolat emas — sinovda
+        # u aniq ko'rsatmani ikki marta e'tiborsiz qoldirgan. Bu yerda javob
+        # kod darajasida, ya'ni har safar bir xil.
+        from app.services import guard
+        threat = guard.detect(text)
+        if threat:
+            reply = guard.reply_for(threat, cfg.ai_language)
+            await repo.add_message(session, tenant.id, conv, "user", text)
+            await repo.add_message(session, tenant.id, conv, "assistant", reply)
+            await self.send_message(token, chat_id, reply)
+
+            reason = guard.handoff_reason(threat)
+            # Bir suhbatda bir marta: qayta-qayta urinish jamoani ko'mib
+            # tashlamasin va ular kanalga befarq bo'lib qolmasin.
+            if reason and conv.status != "operator":
+                conv.status = "operator"
+                conv.handoff_reason = reason
+                await session.commit()
+                from app.services import notify_service
+                await notify_service.notify_handoff(session, tenant, cfg, conv, reason)
+            else:
+                await session.commit()
+            logger.warning("Manipulyatsiya urinishi (%s): tenant=%s conv=%s", threat, tenant.id, conv.id)
+            return
+
         resp = await ai_agent.generate_response(
             session, tenant, conv, text, user_name, media=media
         )
@@ -457,7 +554,7 @@ class TelegramBotService:
             await self.send_message(
                 token, chat_id,
                 "Foydalanish: `/ulash <kod>`\n"
-                "Kodni paneldagi *Integratsiyalar* bo'limidan oling."
+                "Kodni panelda *Sozlamalar → Boshqa ulanishlar → Integratsiyalar* bo'limidan oling."
             )
             return
 
@@ -466,7 +563,7 @@ class TelegramBotService:
         await self.send_message(
             token, chat_id,
             reply or "❌ Kod noto'g'ri yoki eskirgan.\n"
-                     "Paneldagi *Integratsiyalar* bo'limidan yangi kod oling."
+                     "Panelda *Sozlamalar → Boshqa ulanishlar → Integratsiyalar* bo'limidan yangi kod oling."
         )
 
     async def _extract_media(self, token: str, msg: dict):

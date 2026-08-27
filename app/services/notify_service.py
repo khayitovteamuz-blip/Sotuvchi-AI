@@ -73,6 +73,34 @@ async def notify_customer_waiting(
     return await routing_service.send(session, tenant, cfg, "customer_waiting", body)
 
 
+async def notify_blocked(
+    session: AsyncSession,
+    tenant: Tenant,
+    cfg: TenantSettings,
+    conversation: Conversation,
+) -> bool:
+    """Haqorat uchun bloklangan suhbat haqida jamoaga xabar.
+
+    Alohida marshrut kaliti ochilmadi: blok — "odam qarab chiqsin" turkumidagi
+    hodisa, ya'ni `handoff` bilan bir manzilga boradi. Yangi kalit har bir
+    do'kondan panelda qayta sozlashni talab qilardi va sozlanmaguncha xabar
+    hech qayerga bormasdi.
+    """
+    customer = conversation.customer_name or "Mijoz"
+    channel = CHANNEL_LABEL.get(conversation.channel, conversation.channel)
+    handle = f" (@{conversation.customer_username})" if conversation.customer_username else ""
+    text = (
+        "🚫 *Suhbat bloklandi*\n\n"
+        f"👤 Mijoz: *{customer}*{handle}\n"
+        f"📱 Kanal: {channel}\n"
+        "❓ Sabab: haqoratli muloqot — bir marta ogohlantirilgan, "
+        "takrorlangan\n\n"
+        "Bot bu chatga endi javob bermaydi.\n"
+        "➡️ Xato deb hisoblasangiz, panelda *Inbox* dan blokni bekor qiling."
+    )
+    return await routing_service.send(session, tenant, cfg, "handoff", text)
+
+
 async def notify_subscription(
     session: AsyncSession, tenant: Tenant, plan, stage: int
 ) -> bool:

@@ -41,6 +41,12 @@ class Settings:
     # versus 12+ here. Override per tenant in AI Agent → Prompt.
     GEMINI_CHAT_MODEL: str = os.getenv("GEMINI_CHAT_MODEL", "gemini-3.5-flash-lite")
     EMBED_MODEL: str = os.getenv("EMBED_MODEL", "text-embedding-004")
+    # Small, cheap model: column mapping is a one-shot classification, not a
+    # conversation, so the flagship model would be money spent for nothing.
+    IMPORT_MAP_MODEL: str = os.getenv("IMPORT_MAP_MODEL", "gemini-3.5-flash-lite")
+    # To'lov chekini o'qiydigan model. Vision kerak, lekin vazifa oddiy:
+    # rasm chekmi va undagi summa qancha.
+    SLIP_CHECK_MODEL: str = os.getenv("SLIP_CHECK_MODEL", "gemini-3.5-flash")
     EMBED_DIM: int = int(os.getenv("EMBED_DIM", 768))
 
     # Telegram

@@ -564,6 +564,11 @@ class Conversation(Base):
     assigned_user_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     handoff_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     fail_streak: Mapped[int] = mapped_column(Integer, default=0)  # consecutive "don't know" -> auto handoff
+    # Haqoratli xabarlar soni. 1 -> ogohlantirildi, 2+ -> bloklangan.
+    # Suhbatda turadi, mijozda emas: blok shu kanaldagi shu chatga tegishli,
+    # va operator uni panelda bir bosishda bekor qila oladi.
+    abuse_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    blocked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     unread_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

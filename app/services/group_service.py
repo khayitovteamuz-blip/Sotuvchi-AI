@@ -15,6 +15,7 @@ import logging
 import secrets
 from typing import Optional
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import repo
@@ -23,6 +24,11 @@ from app.services import routing_service
 from app.services.bot_service import bot_service
 
 logger = logging.getLogger("group_service")
+
+# Chek xulosasi: attach_payment_slip yozadi, send_order_receipt o'qiydi.
+# Ikkalasi bir so'rov ichida ketma-ket ishlaydi, shuning uchun bazaga ustun
+# qo'shish shart emas - bu xabar matnining bir qismi, saqlanadigan holat emas.
+_SLIP_VERDICT: dict = {}
 
 # panel key -> (tenant id column, tenant title column, human label)
 GROUP_KINDS = {
@@ -75,6 +81,12 @@ async def send_order_receipt(session: AsyncSession, tenant: Tenant, order: Order
         text += "🗺 Lokatsiya biriktirilgan\n"
     text += "\n⏳ _To'lov kutilmoqda_"
 
+    # AI xulosasi tugmaning ustida turadi: tasdiqlayotgan odam nimani
+    # tasdiqlayotganini bilishi kerak.
+    verdict = _SLIP_VERDICT.get(order.id)
+    if verdict:
+        text += f"\n\n{verdict}"
+
     keyboard = {"inline_keyboard": [[
         {"text": "✅ To'lov tasdiqlandi", "callback_data": f"confirm:{order.id}"}
     ]]}
@@ -118,13 +130,16 @@ async def send_order_receipt(session: AsyncSession, tenant: Tenant, order: Order
 async def attach_payment_slip(
     session: AsyncSession, tenant: Tenant, conversation_id: str, file_id: str
 ) -> bool:
-    """Customer sent a payment slip: put it in front of the team.
+    """Customer sent a photo while an order is awaiting payment.
+
+    Returns {"posted": bool, "not_receipt": str|None}. `not_receipt` carries the
+    reason the image was rejected, so the caller can tell the customer instead
+    of silently dropping it.
 
     The order is created before the customer pays, so the first receipt has no
     slip. When the photo arrives we retire that message's button and repost the
     receipt as the photo itself — one order, one live button, slip attached.
     """
-    from sqlalchemy import select
 
     res = await session.execute(
         select(Order)
@@ -138,10 +153,48 @@ async def attach_payment_slip(
     )
     order = res.scalar_one_or_none()
     if not order:
-        return False          # a photo unrelated to any pending order
+        # No pending order: this is an ordinary photo, the agent handles it.
+        return {"posted": False, "not_receipt": None}
+
+    # Bir chek ikki buyurtmaga ishlatilmasin: bir xil rasm qayta yuborilsa,
+    # jamoa buni ko'rishi kerak.
+    dup = await session.execute(
+        select(Order).where(
+            Order.tenant_id == tenant.id,
+            Order.payment_photo_file_id == file_id,
+            Order.id != order.id,
+        ).limit(1)
+    )
+    reused = dup.scalar_one_or_none()
 
     order.payment_photo_file_id = file_id
     await session.commit()
+
+    # Rasmga qarab, xulosani chek xabari bilan birga jo'natamiz. Tekshiruv
+    # qaror qabul qilmaydi — tugmani baribir odam bosadi.
+    verdict, check = None, None
+    try:
+        from app.services import slip_check
+        data = await bot_service.download_file(tenant.telegram_bot_token, file_id)
+        if data:
+            check = await slip_check.inspect(data)
+            verdict = slip_check.verdict_line(check, float(order.total_amount or 0))
+    except Exception as e:                    # noqa: BLE001 - never block the sale
+        logger.info("Chek tekshiruvi o'tkazilmadi: %s", e)
+
+    # Rasm chek bo'lmasa, jamoaga umuman bormaydi: guruhni mahsulot suratlari
+    # bilan to'ldirish ularni chinakam chekka befarq qiladi. Buni mijozning
+    # o'ziga aytamiz - xato uning tomonida va tuzatish ham unda.
+    if check is not None and not check.get("is_receipt"):
+        order.payment_photo_file_id = None
+        await session.commit()
+        return {"posted": False, "not_receipt": check.get("reason") or "chekka o'xshamaydi"}
+
+    if reused:
+        warn = f"🚨 *Bu chek allaqachon ishlatilgan* — `{reused.id}`"
+        verdict = f"{warn}\n{verdict}" if verdict else warn
+
+    _SLIP_VERDICT[order.id] = verdict
 
     # Retire the old button so only the slip version is actionable
     old_chat = order.receipt_chat_id or tenant.orders_group_id
@@ -154,7 +207,8 @@ async def attach_payment_slip(
         )
         order.receipt_message_id = None
 
-    return await send_order_receipt(session, tenant, order)
+    posted = await send_order_receipt(session, tenant, order)
+    return {"posted": posted, "not_receipt": None}
 
 
 # ─── Confirmation from the group ──────────────────────────────────────────────
