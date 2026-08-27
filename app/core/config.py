@@ -82,6 +82,11 @@ class Settings:
     # Fill this only for a separate front-end or an embedded chat widget.
     EXTRA_CORS_ORIGINS: str = os.getenv("EXTRA_CORS_ORIGINS", "")
 
+    # How long a chat message's raw text stays in the `messages` table before
+    # scripts/retention.py deletes it. Conversations and orders are kept
+    # forever regardless — only the transcript ages out. <= 0 disables it.
+    MESSAGE_RETENTION_DAYS: int = int(os.getenv("MESSAGE_RETENTION_DAYS", 365))
+
     # ─── Object storage ───────────────────────────────────────────────────────
     # Uploaded product photos. Left unset, files go to the container's disk —
     # which managed hosts replace on every deploy, so the shop's pictures are

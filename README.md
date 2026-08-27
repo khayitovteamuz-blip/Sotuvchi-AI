@@ -161,6 +161,23 @@ sanaydi va o'sha bazani o'chiradi — ishlaydigan bazaga tegmaydi:
 ./scripts/restore-test.sh
 ```
 
+## Xabarlar muddati (retention)
+
+`messages` jadvali chegarasiz o'sadi. `scripts/retention.py` belgilangan
+kundan (`MESSAGE_RETENTION_DAYS`, standart 365) eski xabar matnini o'chiradi
+— suhbat va buyurtmalar o'zi tegilmaydi, faqat xom yozishma eskiradi.
+
+```bash
+.venv/bin/python -m scripts.retention              # o'chiradi
+RETENTION_DRY_RUN=1 .venv/bin/python -m scripts.retention   # faqat sanaydi
+```
+
+Kunlik cron (backup'dan keyin):
+
+```
+0 4 * * * cd /app && .venv/bin/python -m scripts.retention >> /var/log/sotuvchi-retention.log 2>&1
+```
+
 ---
 
 ## Testlar
