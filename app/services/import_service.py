@@ -7,8 +7,10 @@ So: accept their file as-is. Column headers are matched loosely across Uzbek,
 Russian and English, bad rows are reported instead of aborting the whole
 import, and re-importing updates existing products rather than duplicating.
 """
+import asyncio
 import csv
 import io
+import json
 import logging
 import re
 import uuid
@@ -27,9 +29,44 @@ MAX_ROWS = 5000
 COLUMN_ALIASES: Dict[str, str] = {}
 
 
+
+# Cyrillic -> Latin, so "Наименование" and "Nomi" reach the same alias table.
+# Longer sequences first: "щ" must win before "ш".
+_CYR = [
+    ("щ", "sh"), ("ш", "sh"), ("ч", "ch"), ("ц", "ts"), ("ю", "yu"), ("я", "ya"),
+    ("ж", "j"), ("х", "x"), ("ъ", ""), ("ь", ""), ("ы", "i"), ("э", "e"),
+    ("ё", "yo"), ("а", "a"), ("б", "b"), ("в", "v"), ("г", "g"), ("д", "d"),
+    ("е", "e"), ("з", "z"), ("и", "i"), ("й", "y"), ("к", "k"), ("л", "l"),
+    ("м", "m"), ("н", "n"), ("о", "o"), ("п", "p"), ("р", "r"), ("с", "s"),
+    ("т", "t"), ("у", "u"), ("ф", "f"), ("қ", "q"), ("ғ", "g"), ("ҳ", "h"),
+    ("ў", "o"),
+]
+
+
+def translit(s: str) -> str:
+    """Cyrillic text to a Latin form, for matching only (not for display)."""
+    out = s
+    for cyr, lat in _CYR:
+        out = out.replace(cyr, lat)
+    return out
+
+
+def _norm_header(h: Any) -> str:
+    """Fold a header to a comparable form: case, quotes, spaces, script."""
+    s = str(h or "").strip().lower()
+    for ch in "ʻʼ‘’`´'\"«»":
+        s = s.replace(ch, "")
+    s = s.replace("\u00a0", " ")
+    s = translit(s)
+    s = re.sub(r"[^\w\s]+", " ", s)      # punctuation -> space
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def _register(field: str, *names: str) -> None:
+    """Register header spellings. Each is folded the same way an incoming
+    header is, so a Cyrillic alias and its Latin form land on one key."""
     for n in names:
-        COLUMN_ALIASES[n] = field
+        COLUMN_ALIASES[_norm_header(n)] = field
 
 
 _register("name", "nomi", "nom", "mahsulot", "mahsulot nomi", "maxsulot", "maxsulot nomi",
@@ -47,32 +84,54 @@ _register("currency", "valyuta", "currency", "valuta", "валюта")
 _register("image_url", "rasm", "rasm url", "surat", "image", "image url", "photo",
           "picture", "фото", "изображение")
 
-
-def _norm_header(h: Any) -> str:
-    s = str(h or "").strip().lower()
-    for ch in "ʻʼ‘’`´'\"":
-        s = s.replace(ch, "")
-    return re.sub(r"\s+", " ", s)
+# "1.5 mln", "250 ming", "3 млн" — shorthand a price list often uses.
+_SCALE = [
+    (("mlrd", "milliard", "млрд", "миллиард"), 1_000_000_000),
+    (("mln", "million", "млн", "миллион"), 1_000_000),
+    (("ming", "тыс", "тысяч", "min", "k"), 1_000),
+]
 
 
 def _parse_price(v: Any) -> Optional[float]:
-    """Accept 15 200 000 / 15,200,000 / 15200000.50 / "15 200 000 so'm"."""
+    """Accept the shapes a real price list uses.
+
+    15 200 000 · 15,200,000 · 15.200.000 · 15'200'000 · 15200000.50
+    "15 200 000 so'm" · "1.5 mln" · "250 ming" · "3 млн" · "1 500 000 UZS"
+    """
     if v is None:
         return None
     if isinstance(v, (int, float)):
         return float(v)
-    s = str(v).strip()
+
+    s = str(v).strip().lower().replace("\u00a0", " ")
     if not s:
         return None
-    s = re.sub(r"[^\d,.\-]", "", s)          # drop currency words and spaces
-    if "," in s and "." in s:                 # 1,234.56 -> 1234.56
-        s = s.replace(",", "")
-    elif s.count(",") == 1 and len(s.split(",")[-1]) <= 2:
-        s = s.replace(",", ".")               # 1234,56 -> 1234.56
+
+    # Multiplier written as a word, e.g. "1.5 mln"
+    mult = 1
+    for words, factor in _SCALE:
+        if any(re.search(rf"(?<![a-z]){w}(?![a-z])", s) for w in words):
+            mult = factor
+            for w in words:
+                s = re.sub(rf"(?<![a-z]){w}(?![a-z])", " ", s)
+            break
+
+    s = re.sub(r"[^\d,.\'\s-]", " ", s)      # drop currency words
+    s = s.replace("'", "").replace(" ", "")   # 15'200'000 / 15 200 000
+
+    if "," in s and "." in s:
+        # The rightmost separator is the decimal one: 1.234,56 and 1,234.56
+        s = s.replace("." if s.rfind(",") > s.rfind(".") else ",", "")
+        s = s.replace(",", ".")
+    elif s.count(",") == 1 and len(s.split(",")[-1]) in (1, 2):
+        s = s.replace(",", ".")               # 1234,56
+    elif s.count(".") > 1 or (s.count(".") == 1 and len(s.split(".")[-1]) == 3):
+        s = s.replace(".", "")                # 15.200.000 is grouping, not decimal
     else:
         s = s.replace(",", "")
+
     try:
-        return float(s)
+        return float(s) * mult
     except ValueError:
         return None
 
@@ -100,18 +159,65 @@ def read_rows(filename: str, content: bytes) -> Tuple[List[str], List[List[Any]]
 
 
 def _read_xlsx(content: bytes) -> Tuple[List[str], List[List[Any]]]:
+    """Read the sheet and pick the header row.
+
+    `read_only=False` on purpose: read-only mode does not expose embedded
+    images, and a price list that carries its photos inside the file is exactly
+    the case we want to support. The 10 MB upload cap keeps this affordable.
+    """
     import openpyxl
-    wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     ws = wb.active
-    rows = []
+
+    rows: List[List[Any]] = []
     for row in ws.iter_rows(values_only=True):
         rows.append(list(row))
-        if len(rows) > MAX_ROWS + 1:
+        if len(rows) > MAX_ROWS + HEADER_SCAN_ROWS:
             break
+
+    images = _extract_xlsx_images(ws)
     wb.close()
     if not rows:
         raise ValueError("Fayl bo'sh.")
-    return [str(h or "") for h in rows[0]], rows[1:]
+
+    h = find_header_row(rows)
+    headers = [str(x or "") for x in rows[h]]
+    body = rows[h + 1:]
+
+    # Images are anchored to absolute sheet rows; re-base them onto body rows.
+    if images:
+        _PENDING_IMAGES.clear()
+        for abs_row, blobs in images.items():
+            idx = abs_row - (h + 1)
+            if 0 <= idx < len(body):
+                _PENDING_IMAGES[idx] = blobs
+    return headers, body
+
+
+# Images pulled out of the last-read workbook, keyed by body-row index.
+# Module state is not elegant, but read_rows() returns (headers, rows) and is
+# called from several places; widening that signature would ripple further
+# than this feature is worth.
+_PENDING_IMAGES: Dict[int, List[bytes]] = {}
+
+
+def _extract_xlsx_images(ws) -> Dict[int, List[bytes]]:
+    """Map sheet row number -> image bytes anchored to that row."""
+    found: Dict[int, List[bytes]] = {}
+    for img in getattr(ws, "_images", []) or []:
+        try:
+            anchor = getattr(img, "anchor", None)
+            frm = getattr(anchor, "_from", None)
+            if frm is None:
+                continue
+            row = frm.row                     # 0-based in the anchor
+            data = img._data() if callable(getattr(img, "_data", None)) else None
+            if not data:
+                continue
+            found.setdefault(row, []).append(data)
+        except Exception as e:                # noqa: BLE001 - a bad image must not stop the import
+            logger.info("Rasmni o'qib bo'lmadi: %s", e)
+    return found
 
 
 def _read_csv(content: bytes) -> Tuple[List[str], List[List[Any]]]:
@@ -135,10 +241,93 @@ def _read_csv(content: bytes) -> Tuple[List[str], List[List[Any]]]:
     reader = csv.reader(io.StringIO(text), dialect)
     # strict=False on purpose: the range IS the cap — a file with more
     # rows than MAX_ROWS must stop, not raise.
-    rows = [r for _, r in zip(range(MAX_ROWS + 1), reader, strict=False)]
+    rows = [r for _, r in zip(range(MAX_ROWS + HEADER_SCAN_ROWS), reader, strict=False)]
     if not rows:
         raise ValueError("Fayl bo'sh.")
-    return rows[0], rows[1:]
+    _PENDING_IMAGES.clear()
+    h = find_header_row(rows)
+    return rows[h], rows[h + 1:]
+
+
+# How many leading rows to scan when hunting for the real header. Price lists
+# often start with a title, a date, a blank line — the header is rarely row 1.
+HEADER_SCAN_ROWS = 12
+
+
+def _score_header(cells: List[Any]) -> int:
+    """How many cells in this row look like known column names."""
+    return sum(1 for c in cells if COLUMN_ALIASES.get(_norm_header(c)))
+
+
+def find_header_row(rows: List[List[Any]]) -> int:
+    """Index of the row that is most likely the header.
+
+    Scoring beats "take row 1": a file that opens with "PRAYS LIST 2026" and a
+    blank line would otherwise map its title as the product name and import
+    one broken row per file.
+    """
+    best_i, best_score = 0, -1
+    for i, row in enumerate(rows[:HEADER_SCAN_ROWS]):
+        if not row:
+            continue
+        score = _score_header(row)
+        filled = sum(1 for c in row if str(c or "").strip())
+        # A header row has several named columns and few empty gaps.
+        if score > best_score or (score == best_score and filled > sum(1 for c in rows[best_i] if str(c or "").strip())):
+            best_i, best_score = i, score
+    return best_i if best_score > 0 else 0
+
+
+async def ai_map_columns(
+    headers: List[str], sample_rows: List[List[Any]]
+) -> Dict[str, int]:
+    """Ask the model to map columns when the alias table could not.
+
+    Only runs as a fallback, and only for the fields still missing. A price
+    list can use any wording ("qiymati", "sotuv summasi", "цена за шт"), and
+    hard-coding every variant is a losing game.
+    """
+    from app.core.config import settings
+    if not settings.GEMINI_API_KEY:
+        return {}
+
+    preview = [
+        [str(c)[:40] if c is not None else "" for c in (row or [])[: len(headers)]]
+        for row in sample_rows[:3]
+    ]
+    prompt = (
+        "Quyida mahsulotlar jadvalining ustun sarlavhalari va bir necha qator "
+        "namunasi berilgan. Har bir ustun qaysi maydonga to'g'ri kelishini aniqla.\n\n"
+        f"Sarlavhalar: {headers}\n"
+        f"Namuna qatorlar: {preview}\n\n"
+        "Faqat JSON qaytar, boshqa hech narsa yozma. Kalitlar shulardan bo'lsin: "
+        "name, price, category, description, stock_quantity, id, currency, image_url. "
+        "Qiymat — ustun indeksi (0 dan boshlab). Mos ustun yo'q bo'lsa, kalitni "
+        'umuman qo\'shma. Masalan: {"name": 0, "price": 2}'
+    )
+
+    try:
+        from google import genai
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        resp = await asyncio.to_thread(
+            client.models.generate_content,
+            model=settings.IMPORT_MAP_MODEL,
+            contents=prompt,
+        )
+        text = (resp.text or "").strip()
+        text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.M).strip()
+        raw = json.loads(text)
+    except Exception as e:                      # noqa: BLE001 - fallback must never break the import
+        logger.info("AI ustun tanish ishlamadi: %s", e)
+        return {}
+
+    allowed = {"name", "price", "category", "description",
+               "stock_quantity", "id", "currency", "image_url"}
+    out: Dict[str, int] = {}
+    for k, v in (raw or {}).items():
+        if k in allowed and isinstance(v, int) and 0 <= v < len(headers):
+            out[k] = v
+    return out
 
 
 def map_columns(headers: List[str]) -> Dict[str, int]:
@@ -151,6 +340,22 @@ def map_columns(headers: List[str]) -> Dict[str, int]:
     return mapping
 
 
+MAX_IMAGES_PER_ROW = 5
+
+
+def _store_image(tenant_id: str, blob: bytes) -> Optional[str]:
+    """Save one embedded image and return its URL, or None if unusable."""
+    try:
+        from app.services import storage_service
+        ext, content_type = storage_service.sniff(blob)
+        if not ext:
+            return None
+        return storage_service.save_image(tenant_id, blob, ext, content_type)
+    except Exception as e:                    # noqa: BLE001 - one bad image must not fail the row
+        logger.info("Rasmni saqlab bo'lmadi: %s", e)
+        return None
+
+
 # ─── Import ───────────────────────────────────────────────────────────────────
 async def import_products(
     session: AsyncSession,
@@ -160,14 +365,26 @@ async def import_products(
     dry_run: bool = False,
 ) -> Dict[str, Any]:
     headers, rows = read_rows(filename, content)
+    row_images = dict(_PENDING_IMAGES)      # snapshot: the next read clears it
     mapping = map_columns(headers)
+    ai_used = False
+
+    # The alias table covers the common wordings. When it cannot find the two
+    # required columns, let the model read the headers and a few sample rows —
+    # that is what makes an arbitrary price list importable.
+    if "name" not in mapping or "price" not in mapping:
+        guessed = await ai_map_columns(headers, rows)
+        if guessed:
+            ai_used = True
+            for field, idx in guessed.items():
+                mapping.setdefault(field, idx)
 
     if "name" not in mapping or "price" not in mapping:
         return {
             "success": False,
-            "error": "Faylda 'Nomi' va 'Narxi' ustunlari topilmadi.",
+            "error": "Faylda mahsulot nomi va narx ustunlari topilmadi.",
             "found_columns": [h for h in headers if h],
-            "expected": "Nomi, Narxi, Kategoriya, Tavsif, Qoldiq (yoki inglizcha/ruscha nomlari)",
+            "expected": "Nomi, Narxi, Kategoriya, Tavsif, Qoldiq (o'zbek, rus yoki ingliz tilida)",
         }
 
     def cell(row: List[Any], field: str) -> Any:
@@ -183,7 +400,7 @@ async def import_products(
     by_id = {p.id: p for p in existing}
     by_name = {p.name.strip().lower(): p for p in existing}
 
-    added, updated, skipped = 0, 0, 0
+    added, updated, skipped, embedded_saved = 0, 0, 0, 0
     errors: List[Dict[str, Any]] = []
     seen_categories = set()
 
@@ -210,7 +427,20 @@ async def import_products(
         description = str(cell(row, "description") or "").strip()
         qty = _parse_int(cell(row, "stock_quantity"), 0)
         currency = str(cell(row, "currency") or "UZS").strip().upper() or "UZS"
-        image_url = str(cell(row, "image_url") or "").strip() or None
+        # A cell can hold several links: "a.jpg, b.jpg" or newline-separated.
+        raw_img = str(cell(row, "image_url") or "").strip()
+        urls = [u.strip() for u in re.split(r"[,;\n|]+", raw_img) if u.strip().startswith("http")]
+
+        # Images embedded in the sheet itself win: they are the shop's own
+        # photos, while a link may point anywhere and can rot.
+        for blob in row_images.get(n - 2, [])[:MAX_IMAGES_PER_ROW]:
+            saved = _store_image(tenant_id, blob)
+            if saved:
+                urls.insert(0, saved)
+                embedded_saved += 1
+
+        urls = list(dict.fromkeys(urls))[:MAX_IMAGES_PER_ROW]
+        image_url = urls[0] if urls else None
         raw_id = str(cell(row, "id") or "").strip()
 
         target = by_id.get(raw_id) if raw_id else by_name.get(name.lower())
@@ -225,16 +455,16 @@ async def import_products(
                 target.description = description
             target.stock_quantity = qty
             target.in_stock = qty > 0
-            if image_url:
+            if urls:
                 target.image_url = image_url
-                target.image_urls = [image_url]
+                target.image_urls = urls
             updated += 1
         else:
             pid = raw_id or f"PROD-{uuid.uuid4().hex[:8].upper()}"
             p = Product(
                 id=pid, tenant_id=tenant_id, name=name, category=category,
                 price=price, currency=currency, description=description,
-                image_url=image_url, image_urls=[image_url] if image_url else [],
+                image_url=image_url, image_urls=urls,
                 in_stock=qty > 0, stock_quantity=qty,
             )
             session.add(p)
@@ -266,6 +496,8 @@ async def import_products(
     return {
         "success": True,
         "dry_run": dry_run,
+        "ai_mapping": ai_used,
+        "images_saved": embedded_saved,
         "added": added,
         "updated": updated,
         "skipped": skipped,
@@ -289,3 +521,56 @@ def build_template_csv() -> str:
         "AirPods Pro 2 (USB-C),Aksessuarlar,2950000,15,Shovqinni bekor qilish funksiyasi bilan,\n"
         "MacBook Air M3 15-inch,Noutbuklar,18900000,5,M3 protsessor va 18 soat batareya,\n"
     )
+
+
+# ─── Export ───────────────────────────────────────────────────────────────────
+EXPORT_COLUMNS = [
+    ("id", "ID"),
+    ("name", "Nomi"),
+    ("category", "Kategoriya"),
+    ("price", "Narxi"),
+    ("currency", "Valyuta"),
+    ("stock_quantity", "Qoldiq"),
+    ("description", "Tavsif"),
+    ("image_url", "Rasm"),
+]
+
+
+def build_export_xlsx(products: List[Product]) -> bytes:
+    """Catalog as .xlsx, shaped so it can be edited and imported straight back.
+
+    Same column names the importer recognises: edit the file, upload it, and
+    the ID column makes it an update rather than a second copy of the catalog.
+    """
+    import openpyxl
+    from openpyxl.styles import Font
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Katalog"
+
+    ws.append([label for _, label in EXPORT_COLUMNS])
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+
+    for p in products:
+        urls = p.image_urls or ([p.image_url] if p.image_url else [])
+        ws.append([
+            p.id,
+            p.name,
+            p.category or "",
+            float(p.price or 0),
+            p.currency or "UZS",
+            int(p.stock_quantity or 0),
+            p.description or "",
+            ", ".join(u for u in urls if u),
+        ])
+
+    for col, width in zip("ABCDEFGH", (18, 40, 20, 14, 10, 10, 46, 40), strict=True):
+        ws.column_dimensions[col].width = width
+    ws.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    wb.close()
+    return buf.getvalue()

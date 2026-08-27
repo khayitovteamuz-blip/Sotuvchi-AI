@@ -2,6 +2,7 @@
 Admin API — all endpoints are tenant-scoped via the current user's tenant_id.
 Data lives in Postgres (see app/db/repo.py).
 """
+from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile
@@ -281,14 +282,24 @@ async def import_products(
     if len(content) > MAX_IMPORT_BYTES:
         raise HTTPException(status_code=400, detail="Fayl 10 MB dan katta.")
 
-    tenant = await tenant_service.get_tenant(session, user.tenant_id)
+    # Read the id into a plain string BEFORE anything touches the session.
+    # The dry run below ends in session.rollback(), which expires every ORM
+    # object loaded in this session — including the `user` that require_auth
+    # returned. Reading user.tenant_id after that triggers a lazy refresh
+    # outside the async context and dies with
+    #   "greenlet_spawn has not been called; can't call await_only() here"
+    # which surfaces as a 500 and makes the import look broken for every file.
+    tenant_id = user.tenant_id
+    filename = file.filename or ""
+
     try:
         # Parse once as a dry run to learn how many rows are new, check the
         # tariff against that, and only then write. Checking after the import
         # would leave the rows in place and turn the limit into a suggestion.
         preview = await import_service.import_products(
-            session, user.tenant_id, file.filename or "", content, dry_run=True
+            session, tenant_id, filename, content, dry_run=True
         )
+        tenant = await tenant_service.get_tenant(session, tenant_id)
         if preview.get("success") and preview.get("added"):
             try:
                 await quota_service.check_products(session, tenant, adding=preview["added"])
@@ -298,7 +309,7 @@ async def import_products(
         if dry_run:
             return preview
         return await import_service.import_products(
-            session, user.tenant_id, file.filename or "", content, dry_run=False
+            session, tenant_id, filename, content, dry_run=False
         )
     except HTTPException:
         raise
@@ -321,6 +332,24 @@ async def auto_categorize(
     )
 
 
+@router.get("/products/export")
+async def export_products(
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+):
+    """Download the whole catalog as .xlsx, in the shape the importer reads."""
+    # repo returns ORM rows; the `Product` imported here is the Pydantic schema,
+    # so the query has to go through repo rather than select(Product).
+    products = await repo.list_products(session, user.tenant_id)
+    data = import_service.build_export_xlsx(products)
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="katalog-{stamp}.xlsx"'},
+    )
+
+
 @router.get("/products/import-template")
 async def import_template(user: User = Depends(require_auth)):
     """Download a correctly-shaped starter file."""
@@ -340,6 +369,21 @@ async def get_analytics(
     session: AsyncSession = Depends(get_session),
 ):
     return await repo.analytics(session, user.tenant_id, period)
+
+
+@router.get("/analytics/series")
+async def get_analytics_series(
+    span: str = Query("oy", description="kun (bugun, soatlar) | oy (kunlar) | yil (oylar)"),
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+):
+    """Dashboard grafigi uchun oylik dinamika.
+
+    Grafik ilgari `CHART_DATA` dagi qo'lda yozilgan raqamlarni chizardi —
+    chiroyli, lekin hech narsani anglatmaydigan. Endi haqiqiy ma'lumot.
+    """
+    return await repo.activity_series(
+        session, user.tenant_id, span if span in ("kun", "oy", "yil") else "oy")
 
 
 @router.get("/customers")

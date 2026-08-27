@@ -588,6 +588,8 @@ async def list_conversations(session: AsyncSession, tenant_id: str, status: Opti
             "assigned_user_name": c.assigned_user_name,
             "handoff_reason": c.handoff_reason,
             "waiting_for_operator": waiting,
+            "blocked": bool(c.blocked_at),
+            "abuse_count": c.abuse_count or 0,
         })
     return out
 
@@ -797,6 +799,78 @@ async def analytics(session: AsyncSession, tenant_id: str, period: str = periods
     out["previous"] = prev
     out["growth"] = {k: periods.growth(out[k], prev[k]) for k in prev if k in out}
     return out
+
+
+# ─── Faoliyat dinamikasi (dashboard grafigi) ─────────────────────────────────
+UZ_MONTHS = ["Yan", "Fev", "Mar", "Apr", "May", "Iyn",
+             "Iyl", "Avg", "Sen", "Okt", "Noy", "Dek"]
+
+# span -> (tashqi oraliq, ustun birligi, o'lchov nomi)
+_SPANS = {
+    "oy": ("month", "day", "kun"),      # shu oy, kunlar bo'yicha
+    "yil": ("year", "month", "oy"),     # shu yil, oylar bo'yicha
+}
+
+
+async def activity_series(session: AsyncSession, tenant_id: str, span: str = "oy") -> dict:
+    """Suhbat va buyurtma dinamikasi — dashboard grafigi uchun.
+
+    Uchala ko'rinish ham "hozirgacha" ni chizadi, kelajakdagi bo'sh ustunlarni
+    emas: oyning yarmida turib oxirigacha nol ustunlar o'sishni pasayish bo'lib
+    ko'rsatardi.
+
+    Vaqt mintaqasi: `created_at` timestamptz va sessiya UTC da ishlaydi, ya'ni
+    `date_trunc` UTC chegarasida kesadi. Do'kon UTC+5 da, shuning uchun ustun
+    ham, taqqoslanadigan ustun ham avval siljitiladi — aks holda mahalliy
+    00:00-05:00 oralig'idagi har bir suhbat oldingi kunga yozilardi.
+
+    Bo'sh oraliqlar `generate_series` orqali qaytariladi: ularni tashlab
+    yuborish grafikdagi uzilishni yashirar va o'sishni haqiqatdagidan
+    tekisroq ko'rsatardi.
+    """
+    parent, unit, unit_name = _SPANS.get(span, _SPANS["oy"])
+    off = int(settings.TIMEZONE_OFFSET_HOURS)
+
+    rows = (
+        await session.execute(
+            text(f"""
+                WITH b AS (
+                    SELECT generate_series(
+                        date_trunc('{parent}', now() + interval '{off} hours'),
+                        date_trunc('{unit}',   now() + interval '{off} hours'),
+                        '1 {unit}'
+                    ) AS bucket
+                )
+                SELECT b.bucket,
+                       (SELECT count(*) FROM conversations c
+                         WHERE c.tenant_id = :t
+                           AND c.created_at + interval '{off} hours' >= b.bucket
+                           AND c.created_at + interval '{off} hours' <  b.bucket + interval '1 {unit}') AS convs,
+                       (SELECT count(*) FROM orders o
+                         WHERE o.tenant_id = :t
+                           AND o.created_at + interval '{off} hours' >= b.bucket
+                           AND o.created_at + interval '{off} hours' <  b.bucket + interval '1 {unit}') AS orders
+                FROM b ORDER BY b.bucket
+            """),
+            {"t": tenant_id},
+        )
+    ).all()
+
+    labels, convs, orders = [], [], []
+    for bucket, n_conv, n_ord in rows:
+        labels.append(str(bucket.day) if unit == "day" else UZ_MONTHS[bucket.month - 1])
+        convs.append(int(n_conv))
+        orders.append(int(n_ord))
+
+    # Fokus — oxirgi ustun, ya'ni bugungi kun (yillik ko'rinishda shu oy).
+    # `generate_series` hozirgacha yuritilgani uchun oxirgi ustun har doim
+    # joriy davr bo'ladi. Ilgari eng baland ustun ajratilardi, lekin do'kon
+    # egasi grafikka "bugun qanday ketyapti?" deb qaraydi — o'tgan haftadagi
+    # eng yaxshi kunni emas.
+    return {"labels": labels, "values": convs, "orders": orders,
+            "focus": len(labels) - 1 if labels else None,
+            "span": span if span in _SPANS else "oy",
+            "unit": unit_name}
 
 
 # ─── Customers (aggregated from orders) ───────────────────────────────────────
