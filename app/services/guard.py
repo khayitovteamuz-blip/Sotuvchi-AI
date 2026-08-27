@@ -31,19 +31,38 @@ _AUTHORITY = [
     r"\bя\s+(твой|ваш)?\s*(начальник|админ|владелец|директор|разработчик)",
     r"\bкак\s+админ\s+(приказыв|требу)",
     r"\bi(?:'m|\s+am)\s+(your\s+)?(boss|admin|owner|developer|manager|supervisor)",
+    # Xodim/ishchi da'vosi. Rol so'zi pattern1'dagi umumiy ro'yxatga QO'SHILMAYDI
+    # ataylab: "men sotuvchi bilan gaplashmoqchiman" kabi haqli so'rov "men" +
+    # bo'sh joy + rol so'zi shakliga to'g'ri keladi va yolg'on pozitiv beradi
+    # ("sotuvchi" shu sabab umuman ro'yxatga qo'shilmagan). Bu yerda esa fe'l
+    # ("ishlayman") yoki -man qo'shimchasi orqali aniq DA'VO talab qilinadi,
+    # oddiy "X bilan gaplashmoqchiman" so'rovi bilan grammatik jihatdan mos
+    # kelmaydi.
+    r"\bmen\s+(shu\s+|bu\s+)?(do'?kon|joy)da\s+ish(?:layman|layapman)\b",
+    r"\b(shu\s+)?(do'?kon|kompaniya|firma)(?:ning)?\s*xodim(?:i)?man\b",
+    r"\bя\s+(здесь\s+)?работаю\b",
+    r"\bя\s+(ваш\s+)?сотрудник\b",
+    r"\bi\s+work\s+(here|at\s+this)\b",
+    r"\bi(?:'m|\s+am)\s+(a\s+)?staff\b",
 ]
 
 # ─── Ko'rsatmani bekor qilishga urinish ───────────────────────────────────────
 _OVERRIDE = [
-    r"(oldingi|avvalgi|barcha)\s+\w*\s*(ko'?rsatma|qoida|instruksiya)\w*\s+\w*\s*unut",
+    r"(oldingi|avvalgi|barcha)\s+\w*\s*(xabar|ko'?rsatma|qoida|instruksiya)\w*"
+    r"\s+\w*\s*(unut|hisobga\s+olma|e'?tiborsiz\s+qoldir)",
     r"qoidalar(ing|ingni|ni)?\s+unut",
-    r"\bsen\s+endi\s+\w+\s*(emassan|bo'?lasan)",
+    # {0,2}: "sen endi mening yordamchim emassan" kabi ikki so'zli holatlarni
+    # ham ushlaydi — asl naqsh faqat bitta so'zga ruxsat berardi.
+    r"\bsen\s+endi\s+(?:\w+\s+){0,2}\w*\s*(emassan|bo'?lasan)",
     r"(system|tizim)\s*prompt",
     r"(test|developer|dev)\s*(rejim|mode|режим)",
     r"\bjailbreak\b|\bDAN\s+mode\b",
     r"(забудь|игнорируй)\s+\w*\s*(инструкц|правил|предыдущ)",
     r"ignore\s+(all\s+)?(previous|prior|above)\s+instruction",
     r"\byou\s+are\s+now\b",
+    r"\bты\s+теперь\b",                 # "you are now" ning ruscha muqobili
+    r"\bпритворись\b",                  # "pretend" ning ruscha muqobili
+    r"\b(pretend|imagine)\s+(you\s+)?(are|have)\s+no\s+(rule|restriction|limit)",
 ]
 
 _AUTHORITY_RE = [re.compile(p, re.I) for p in _AUTHORITY]
