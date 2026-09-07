@@ -95,8 +95,6 @@ class ChatResponse(BaseModel):
 class SystemSettings(BaseModel):
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
     system_prompt: str
-    ai_provider: str = "gemini"  # gemini, anthropic, demo
-    model_name: str = "gemini-2.5-flash"
     temperature: float = 0.7
     bot_enabled: bool = True
     sheets_sync_enabled: bool = True

@@ -27,36 +27,21 @@ class Settings:
         "postgresql+asyncpg://ibro@localhost:5432/sotuvchi_ai",
     )
 
-    # AI Keys. Each provider the panel offers needs its own key here — a business
-    # can only be switched to a model whose key is present, so an empty value
-    # means that choice is refused with a reason rather than silently ignored.
-    AI_PROVIDER: str = os.getenv("AI_PROVIDER", "gemini")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 
-    # Gemini models.
-    # flash-lite is the default: a sales turn costs 2+ API calls (tool round +
-    # final answer), and the free tier gives gemini-2.5-flash only ~5 req/min
-    # versus 12+ here. Override per tenant in AI Agent → Prompt.
-    GEMINI_CHAT_MODEL: str = os.getenv("GEMINI_CHAT_MODEL", "gemini-3.5-flash-lite")
-    # "text-embedding-004" (the old default here) 404s — Gemini retired it.
-    # gemini-embedding-001 supports a configurable output_dimensionality, set
-    # to EMBED_DIM below so it matches the fixed-width pgvector column
-    # (kb_chunks.embedding) without a migration.
-    EMBED_MODEL: str = os.getenv("EMBED_MODEL", "gemini-embedding-001")
+    # The one model every tenant's chat runs on — no per-tenant choice, no
+    # other provider. "flash" is the balanced tier: cheap and fast enough for
+    # a sales turn (2+ API calls: tool round + final answer) without the
+    # quality drop of "lite". Change here to move every tenant at once.
+    GEMINI_CHAT_MODEL: str = os.getenv("GEMINI_CHAT_MODEL", "gemini-3.5-flash")
     # Small, cheap model: column mapping is a one-shot classification, not a
     # conversation, so the flagship model would be money spent for nothing.
     IMPORT_MAP_MODEL: str = os.getenv("IMPORT_MAP_MODEL", "gemini-3.5-flash-lite")
     # To'lov chekini o'qiydigan model. Vision kerak, lekin vazifa oddiy:
     # rasm chekmi va undagi summa qancha.
     SLIP_CHECK_MODEL: str = os.getenv("SLIP_CHECK_MODEL", "gemini-3.5-flash")
-    EMBED_DIM: int = int(os.getenv("EMBED_DIM", 768))
 
     # Telegram
-    TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    TELEGRAM_WEBHOOK_URL: str = os.getenv("TELEGRAM_WEBHOOK_URL", "")
-
     # Public base URL for inbound webhooks (Telegram). Empty on localhost — needs a
     # tunnel (ngrok/cloudflared) or a deployed domain for Telegram to reach us.
     PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "")
@@ -90,6 +75,9 @@ class Settings:
     # scripts/retention.py deletes it. Conversations and orders are kept
     # forever regardless — only the transcript ages out. <= 0 disables it.
     MESSAGE_RETENTION_DAYS: int = int(os.getenv("MESSAGE_RETENTION_DAYS", 365))
+    TELEGRAM_UPDATE_RETENTION_DAYS: int = int(
+        os.getenv("TELEGRAM_UPDATE_RETENTION_DAYS", 30)
+    )
 
     # ─── Object storage ───────────────────────────────────────────────────────
     # Uploaded product photos. Left unset, files go to the container's disk —
@@ -116,19 +104,15 @@ class Settings:
     # logged — losing the key would lock every business out of its own bot.
     ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "")
 
-    # Google Sheets
-    GOOGLE_SHEETS_SPREADSHEET_ID: str = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
-    GOOGLE_SHEETS_CREDENTIALS_FILE: str = os.getenv("GOOGLE_SHEETS_CREDENTIALS_FILE", "service_account.json")
-
-    DEFAULT_SYSTEM_PROMPT: str = """Siz "Sotuvchi AI" deb nomlangan professional, samimiy va tajribali o'zbek AI sotuvchi konsulantisiz.
-Sizning maqsadingiz mijozlar bilan muloqot qilish, ularning ehtiyojlarini aniqlash, mos mahsulotlarni tavsiya qilish va buyurtmani rasmiylashtirishdir.
-
-QOIDALAR:
-1. Muloqotni har doim o'zbek tilida, xushmuomala va samimiy tarzda olib boring.
-2. Har bir savolga aniq, tushunarli va mahsulot afzalliklarini ko'rsatgan holda javob bering.
-3. Katalogdagi mahsulotlar narxi va xususiyatlarini aniq aytib bering.
-4. Mijoz xarid qilishga qiziqsa, uning ismi, telefon raqami va yetkazib berish manzilini so'rab oling.
-5. Har doim muloqot oxirida mijozga qiziqarli savol yoki taklif bering (masalan: "Ushbu model sizga ma'qul keldimi? Buyurtma beramizmi?").
+    # First person, plain language — matching what the panel's placeholder
+    # promises ("Masalan: Biz premium elektronika sotamiz..."). The behavior
+    # rules that used to live here (stay in Uzbek, never invent a price, ask
+    # for name/phone before an order) are enforced separately and unconditionally
+    # by the platform-level guardrails in ai_agent.py — repeating them here as
+    # a numbered list read like a technical instruction manual, not "about
+    # your store", and risked drifting out of sync with the real rules.
+    DEFAULT_SYSTEM_PROMPT: str = """Biz mijozlarga sifatli mahsulot va yaxshi xizmat ko'rsatishga harakat qilamiz.
+Ohangimiz do'stona va samimiy — xuddi tanish sotuvchi bilan gaplashgandek.
 """
 
     def cors_origins(self) -> List[str]:

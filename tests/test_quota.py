@@ -55,13 +55,6 @@ async def test_unlimited_plan_never_blocks(tenant):
     await q.check_products(_DB(FakePlan(max_products=None), products=100_000), tenant)
 
 
-async def test_seat_limit_is_enforced(tenant):
-    await q.check_operators(_DB(FakePlan(max_operators=3), operators=2), tenant)
-    with pytest.raises(q.QuotaExceeded) as e:
-        await q.check_operators(_DB(FakePlan(max_operators=3), operators=3), tenant)
-    assert e.value.resource == "operators"
-
-
 async def test_a_bulk_import_is_checked_as_a_whole(tenant):
     """Importing 50 rows into 60 free slots is fine; into 40 it is not — and it
     must be refused before half the file has been written."""

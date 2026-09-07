@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Computed,
     DateTime,
@@ -16,6 +17,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -25,7 +27,6 @@ from sqlalchemy import (
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from pgvector.sqlalchemy import Vector
 
 from app.core.config import settings
 from app.db.base import Base
@@ -121,15 +122,10 @@ class Plan(Base):
 
     name: Mapped[str] = mapped_column(String(32), primary_key=True)  # start | business | pro
     title: Mapped[str] = mapped_column(String(64))
-    price_uzs: Mapped[float] = mapped_column(Float, default=0.0)
+    price_uzs: Mapped[float] = mapped_column(Numeric(18, 2, asdecimal=False), default=0.0)
     max_products: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     max_ai_messages_monthly: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     max_operators: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    # Highest AI model cost tier this tariff buys: lite | flash | pro (see
-    # app/services/ai_models.py: TIER_ORDER). Defaults to "pro" (unrestricted)
-    # so a tariff row nobody has configured yet does not suddenly block a
-    # tenant that was already working — the restriction is opt-in per plan.
-    max_model_tier: Mapped[str] = mapped_column(String(16), default="pro", server_default="pro")
     # A tariff lasts this long from the day it is bought. Data, not a constant,
     # so a promotional period needs no deploy.
     duration_days: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
@@ -150,7 +146,7 @@ class Payment(Base):
     tenant_id: Mapped[str] = mapped_column(
         ForeignKey("tenants.id", ondelete="CASCADE"), index=True
     )
-    amount: Mapped[float] = mapped_column(Float)
+    amount: Mapped[float] = mapped_column(Numeric(18, 2, asdecimal=False))
     kind: Mapped[str] = mapped_column(String(24))       # topup | subscription | adjustment
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -189,6 +185,9 @@ class Tenant(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     business_name: Mapped[str] = mapped_column(String(255))
+    # The shop's own logo — shown in its own sidebar and in /boshqaruv's
+    # tenant list/profile, so a business is recognisable at a glance in both.
+    logo_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     plan: Mapped[str] = mapped_column(String(32), default="start")  # start | business | pro
@@ -205,7 +204,9 @@ class Tenant(Base):
     # ── Billing ──
     # Balance in UZS. Top-ups land here only after an admin confirms the
     # transfer actually arrived; a business cannot credit itself.
-    balance: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    balance: Mapped[float] = mapped_column(
+        Numeric(18, 2, asdecimal=False), default=0.0, server_default="0"
+    )
     subscription_expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -246,6 +247,26 @@ class Tenant(Base):
     group_pairing_code: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
 
     users: Mapped[List["User"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+
+
+class TelegramUpdate(Base):
+    """Durable idempotency record shared by every webhook worker."""
+
+    __tablename__ = "telegram_updates"
+
+    tenant_id: Mapped[str] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True
+    )
+    update_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), default="processing", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    processed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 # ─── User (a person who logs in: owner or operator) ───────────────────────────
@@ -317,8 +338,6 @@ class TenantSettings(Base):
         ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True
     )
     system_prompt: Mapped[str] = mapped_column(Text, default=settings.DEFAULT_SYSTEM_PROMPT)
-    ai_provider: Mapped[str] = mapped_column(String(32), default="gemini")
-    model_name: Mapped[str] = mapped_column(String(64), default=settings.GEMINI_CHAT_MODEL)
     temperature: Mapped[float] = mapped_column(Float, default=0.7)
     bot_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     sheets_sync_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -336,9 +355,15 @@ class TenantSettings(Base):
     # Structured fields, not free text, because delivery cost must be a number
     # the calc_delivery tool can use — not a sentence the model interprets.
     delivery_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    delivery_fee_city: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    delivery_fee_regions: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    free_delivery_from: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    delivery_fee_city: Mapped[Optional[float]] = mapped_column(
+        Numeric(18, 2, asdecimal=False), nullable=True
+    )
+    delivery_fee_regions: Mapped[Optional[float]] = mapped_column(
+        Numeric(18, 2, asdecimal=False), nullable=True
+    )
+    free_delivery_from: Mapped[Optional[float]] = mapped_column(
+        Numeric(18, 2, asdecimal=False), nullable=True
+    )
     delivery_days_city: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     delivery_days_regions: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     payment_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -353,8 +378,6 @@ class TenantSettings(Base):
     operator_chat_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     operator_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     pairing_code: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
-    notify_on_handoff: Mapped[bool] = mapped_column(Boolean, default=True)
-    notify_on_order: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Which alerts go where: {"order": ["-1001234"], "handoff": ["555", "-100999"]}
     # A list because one event can legitimately reach two places — an escalation
@@ -386,7 +409,7 @@ class Product(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
     category: Mapped[str] = mapped_column(String(128), default="")
-    price: Mapped[float] = mapped_column(Float, default=0.0)
+    price: Mapped[float] = mapped_column(Numeric(18, 2, asdecimal=False), default=0.0)
     currency: Mapped[str] = mapped_column(String(8), default="UZS")
     description: Mapped[str] = mapped_column(Text, default="")
     image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -477,7 +500,9 @@ class Customer(Base):
     # sorted by them, and a sort over a live aggregate of every order does not
     # survive a catalogue that grows.
     orders_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    total_spent: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    total_spent: Mapped[float] = mapped_column(
+        Numeric(18, 2, asdecimal=False), default=0.0, server_default="0"
+    )
 
     # What the shop knows that the system does not: "prefers evening delivery".
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -509,6 +534,15 @@ class CustomerIdentity(Base):
 # ─── Orders ───────────────────────────────────────────────────────────────────
 class Order(Base):
     __tablename__ = "orders"
+    __table_args__ = (
+        Index(
+            "uq_orders_tenant_source_update",
+            "tenant_id",
+            "source_update_id",
+            unique=True,
+            postgresql_where=text("source_update_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
@@ -522,7 +556,9 @@ class Order(Base):
     customer_phone: Mapped[str] = mapped_column(String(64))
     telegram_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     conversation_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
-    total_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    # Telegram retries must resolve to the same order, never a second sale.
+    source_update_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    total_amount: Mapped[float] = mapped_column(Numeric(18, 2, asdecimal=False), default=0.0)
     status: Mapped[str] = mapped_column(String(32), default="Yangi")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     delivery_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -558,7 +594,7 @@ class OrderItem(Base):
     product_id: Mapped[str] = mapped_column(String(64))
     product_name: Mapped[str] = mapped_column(String(255))
     quantity: Mapped[int] = mapped_column(Integer, default=1)
-    unit_price: Mapped[float] = mapped_column(Float, default=0.0)
+    unit_price: Mapped[float] = mapped_column(Numeric(18, 2, asdecimal=False), default=0.0)
 
     order: Mapped["Order"] = relationship(back_populates="items")
 
@@ -638,32 +674,3 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
-
-
-# ─── Knowledge Base (RAG via pgvector) ────────────────────────────────────────
-class KbDocument(Base):
-    __tablename__ = "kb_documents"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
-    title: Mapped[str] = mapped_column(String(255))
-    content: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    chunks: Mapped[List["KbChunk"]] = relationship(
-        back_populates="document", cascade="all, delete-orphan"
-    )
-
-
-class KbChunk(Base):
-    __tablename__ = "kb_chunks"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    kb_document_id: Mapped[str] = mapped_column(
-        ForeignKey("kb_documents.id", ondelete="CASCADE"), index=True
-    )
-    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
-    content: Mapped[str] = mapped_column(Text)
-    embedding: Mapped[Optional[list]] = mapped_column(Vector(settings.EMBED_DIM), nullable=True)
-
-    document: Mapped["KbDocument"] = relationship(back_populates="chunks")

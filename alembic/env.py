@@ -1,7 +1,7 @@
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -40,14 +40,6 @@ def include_object(obj, name, type_, reflected, compare_to):
     return True
 
 
-def render_item(type_, obj, autogen_context):
-    """Teach autogenerate how to render the pgvector Vector type."""
-    if type_ == "type" and obj.__class__.__module__.startswith("pgvector"):
-        autogen_context.imports.add("import pgvector.sqlalchemy")
-        return f"pgvector.sqlalchemy.Vector(dim={getattr(obj, 'dim', None)})"
-    return False
-
-
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
@@ -56,7 +48,6 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
-        render_item=render_item,
         include_object=include_object,
     )
     with context.begin_transaction():
@@ -64,14 +55,18 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    # Rolling deploys may start several containers at once. Take the lock inside
+    # Alembic's migration transaction; PostgreSQL releases it automatically when
+    # the transaction commits.
+    lock_id = 7_364_895_201
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
         compare_type=True,
-        render_item=render_item,
         include_object=include_object,
     )
     with context.begin_transaction():
+        connection.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": lock_id})
         context.run_migrations()
 
 
