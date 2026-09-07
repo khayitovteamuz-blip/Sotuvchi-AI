@@ -33,11 +33,7 @@ DEFAULT_DELIVERY_DAYS_CITY = "1-2 kun"
 DEFAULT_DELIVERY_DAYS_REGIONS = "2-4 kun"
 
 
-# ─── Tool specs (one source, three renderings) ────────────────────────────────
-# Written as plain JSON Schema because Gemini, Claude and ChatGPT each want a
-# different wrapper around the same thing. Keeping one list means a tool can
-# never exist for one provider and be quietly missing on another — the moment
-# the shop switches model, the guardrails switch with it.
+# ─── Tool specs ───────────────────────────────────────────────────────────────
 TOOL_SPECS: List[Dict[str, Any]] = [
     {
         "name": "search_product",
@@ -200,37 +196,6 @@ def tool_declarations() -> List[types.Tool]:
         )
         for s in TOOL_SPECS
     ])]
-
-
-def _json_schema(spec: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "type": "object",
-        "properties": spec["properties"],
-        "required": spec.get("required", []),
-    }
-
-
-def anthropic_tools() -> List[Dict[str, Any]]:
-    """Claude form: the schema lives under `input_schema`."""
-    return [
-        {"name": s["name"], "description": s["description"], "input_schema": _json_schema(s)}
-        for s in TOOL_SPECS
-    ]
-
-
-def openai_tools() -> List[Dict[str, Any]]:
-    """ChatGPT form: a `function` envelope with the schema under `parameters`."""
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": s["name"],
-                "description": s["description"],
-                "parameters": _json_schema(s),
-            },
-        }
-        for s in TOOL_SPECS
-    ]
 
 
 # ─── Executors (the only source of truth) ─────────────────────────────────────
@@ -472,15 +437,9 @@ async def _calc_delivery(session, tenant_id: str, region: str, order_amount: Opt
 
 
 async def _search_knowledge(session, tenant_id: str, question: str) -> Dict[str, Any]:
-    """Answer policy questions from the tenant's own Knowledge Base.
-
-    Two sources, merged: the fixed settings fields (payment_info, faq, etc. —
-    always short, always the first thing filled in) and, on top of them,
-    uploaded documents searched by embedding similarity (kb_service) — for
-    the longer free-text policies a dropdown field can't hold. The document
-    search is best-effort: no key, no documents, or a failed embed call just
-    means that half returns nothing, not an error.
-    """
+    """Answer policy questions from the tenant's own Knowledge Base — the
+    fixed settings fields (payment_info, faq, etc.), always short, always
+    the first thing filled in."""
     cfg = await repo.get_settings(session, tenant_id)
 
     sections = {
@@ -493,10 +452,7 @@ async def _search_knowledge(session, tenant_id: str, question: str) -> Dict[str,
     }
     filled = {k: v for k, v in sections.items() if (v or "").strip()}
 
-    from app.services import kb_service
-    doc_hits = await kb_service.search(session, tenant_id, question, limit=3)
-
-    if not filled and not doc_hits:
+    if not filled:
         return {
             "found": False,
             "message": ("Bilimlar bazasi bo'sh. Javobni o'ylab topmang — "
@@ -507,10 +463,7 @@ async def _search_knowledge(session, tenant_id: str, question: str) -> Dict[str,
     # Return the whole fixed KB when nothing matches: it is short, and a
     # policy answer is worse than useless if it's the wrong section.
     hits = {k: v for k, v in filled.items() if k in q or any(w in (v or "").lower() for w in q.split() if len(w) > 3)}
-    result: Dict[str, Any] = {"found": True, "knowledge": hits or filled}
-    if doc_hits:
-        result["documents"] = doc_hits
-    return result
+    return {"found": True, "knowledge": hits or filled}
 
 
 MAX_ORDER_LINES = 20
@@ -576,16 +529,22 @@ async def _create_order(session, tenant_id: str, conversation, args: Dict[str, A
 
     currency = (await repo.get_product(session, tenant_id, items[0]["product_id"])).currency
 
-    order = await repo.create_order(
-        session, tenant_id,
-        customer_name=name,
-        customer_phone=phone,
-        items=items,
-        telegram_id=conversation.external_id if conversation.channel == "telegram" else None,
-        conversation_id=conversation.id,
-        delivery_address=args.get("delivery_address"),
-        notes="AI Sotuvchi (tool-calling) orqali yaratildi",
-    )
+    try:
+        order, created = await repo.create_order(
+            session, tenant_id,
+            customer_name=name,
+            customer_phone=phone,
+            items=items,
+            telegram_id=conversation.external_id if conversation.channel == "telegram" else None,
+            conversation_id=conversation.id,
+            delivery_address=args.get("delivery_address"),
+            notes="AI Sotuvchi (tool-calling) orqali yaratildi",
+            source_update_id=getattr(conversation, "source_update_id", None),
+        )
+    except ValueError as exc:
+        # Stock is rechecked under a row lock inside create_order. A friendly
+        # tool result lets the model ask the customer to choose an alternative.
+        return {"success": False, "error": str(exc)}
     # keep the customer on the conversation for the Inbox
     if not conversation.customer_phone:
         conversation.customer_phone = phone
@@ -596,10 +555,12 @@ async def _create_order(session, tenant_id: str, conversation, args: Dict[str, A
     # One notification per order: the receipt carries the customer, the
     # items, the total AND the confirm button. A separate "new order"
     # ping fired one line above this and said the same thing.
-    await _post_order_receipt(session, tenant_id, order)
+    if created:
+        await _post_order_receipt(session, tenant_id, order)
 
     return {
         "success": True,
+        "already_created": not created,
         "order_id": order.id,
         "total_amount": order.total_amount,
         "currency": currency,
