@@ -126,7 +126,7 @@ async def notify_subscription(
             + (f"\nTarif narxi: {price}" if price else "")
         )
     else:
-        kun = {7: "7 kun", 3: "3 kun", 1: "1 kun"}.get(stage, f"{stage} kun")
+        kun = {3: "3 kun"}.get(stage, f"{stage} kun")
         text = (
             "🟡 *Tarif muddati tugayapti*\n\n"
             f"*{tenant.business_name}* — {title}\n"

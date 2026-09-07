@@ -146,8 +146,10 @@ def _parse_int(v: Any, default: int = 0) -> int:
 
 
 # ─── File readers ─────────────────────────────────────────────────────────────
-def read_rows(filename: str, content: bytes) -> Tuple[List[str], List[List[Any]]]:
-    """Return (headers, rows) from an .xlsx/.xls or .csv upload."""
+def read_rows(
+    filename: str, content: bytes
+) -> Tuple[List[str], List[List[Any]], Dict[int, List[bytes]]]:
+    """Return headers, rows and row-indexed embedded images."""
     lower = (filename or "").lower()
     if lower.endswith((".xlsx", ".xlsm")):
         return _read_xlsx(content)
@@ -158,7 +160,9 @@ def read_rows(filename: str, content: bytes) -> Tuple[List[str], List[List[Any]]
     raise ValueError("Faqat .xlsx yoki .csv fayllar qabul qilinadi.")
 
 
-def _read_xlsx(content: bytes) -> Tuple[List[str], List[List[Any]]]:
+def _read_xlsx(
+    content: bytes,
+) -> Tuple[List[str], List[List[Any]], Dict[int, List[bytes]]]:
     """Read the sheet and pick the header row.
 
     `read_only=False` on purpose: read-only mode does not expose embedded
@@ -185,20 +189,12 @@ def _read_xlsx(content: bytes) -> Tuple[List[str], List[List[Any]]]:
     body = rows[h + 1:]
 
     # Images are anchored to absolute sheet rows; re-base them onto body rows.
-    if images:
-        _PENDING_IMAGES.clear()
-        for abs_row, blobs in images.items():
-            idx = abs_row - (h + 1)
-            if 0 <= idx < len(body):
-                _PENDING_IMAGES[idx] = blobs
-    return headers, body
-
-
-# Images pulled out of the last-read workbook, keyed by body-row index.
-# Module state is not elegant, but read_rows() returns (headers, rows) and is
-# called from several places; widening that signature would ripple further
-# than this feature is worth.
-_PENDING_IMAGES: Dict[int, List[bytes]] = {}
+    row_images = {
+        abs_row - (h + 1): blobs
+        for abs_row, blobs in images.items()
+        if 0 <= abs_row - (h + 1) < len(body)
+    }
+    return headers, body, row_images
 
 
 def _extract_xlsx_images(ws) -> Dict[int, List[bytes]]:
@@ -220,7 +216,9 @@ def _extract_xlsx_images(ws) -> Dict[int, List[bytes]]:
     return found
 
 
-def _read_csv(content: bytes) -> Tuple[List[str], List[List[Any]]]:
+def _read_csv(
+    content: bytes,
+) -> Tuple[List[str], List[List[Any]], Dict[int, List[bytes]]]:
     text = None
     for enc in ("utf-8-sig", "utf-8", "cp1251", "latin-1"):
         try:
@@ -244,9 +242,8 @@ def _read_csv(content: bytes) -> Tuple[List[str], List[List[Any]]]:
     rows = [r for _, r in zip(range(MAX_ROWS + HEADER_SCAN_ROWS), reader, strict=False)]
     if not rows:
         raise ValueError("Fayl bo'sh.")
-    _PENDING_IMAGES.clear()
     h = find_header_row(rows)
-    return rows[h], rows[h + 1:]
+    return rows[h], rows[h + 1:], {}
 
 
 # How many leading rows to scan when hunting for the real header. Price lists
@@ -364,8 +361,7 @@ async def import_products(
     content: bytes,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
-    headers, rows = read_rows(filename, content)
-    row_images = dict(_PENDING_IMAGES)      # snapshot: the next read clears it
+    headers, rows, row_images = read_rows(filename, content)
     mapping = map_columns(headers)
     ai_used = False
 

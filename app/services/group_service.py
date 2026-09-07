@@ -216,7 +216,14 @@ async def confirm_order(
     session: AsyncSession, tenant: Tenant, order_id: str, who: str
 ) -> tuple:
     """Mark an order confirmed. Returns (ok, message-for-the-tapper)."""
-    order = await session.get(Order, order_id)
+    order = (
+        await session.execute(
+            select(Order)
+            .where(Order.id == order_id, Order.tenant_id == tenant.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
     if not order or order.tenant_id != tenant.id:
         return False, "Buyurtma topilmadi"
 
