@@ -41,11 +41,30 @@ TRIAL_DAYS = 14
 GRACE_DAYS = 3
 
 # Warnings are sent this many days before the end, then once at expiry.
-DUNNING_STAGES = (7, 3, 1, 0)
+DUNNING_STAGES = (3, 0)
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def _lock(session: AsyncSession, model, row_id: str, fallback):
+    """Reload a row under a database lock when backed by a real session.
+
+    The small fallback keeps the pure, database-free unit tests useful while
+    production paths get serializable balance/subscription mutations.
+    """
+    if not hasattr(session, "execute"):
+        return fallback
+    row = (
+        await session.execute(
+            select(model)
+            .where(model.id == row_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    return row or fallback
 
 
 def is_free(plan: Optional[Plan]) -> bool:
@@ -211,6 +230,7 @@ async def extend(session: AsyncSession, tenant: Tenant, days: int, note: str,
     Recorded in the ledger like everything else, at zero, so the extension is
     visible next to the payments rather than being an unexplained date change.
     """
+    tenant = await _lock(session, Tenant, tenant.id, tenant)
     base = tenant.subscription_expires_at
     now = _now()
     if base is None or base < now:
@@ -283,8 +303,10 @@ async def confirm_topup(
     session: AsyncSession, payment: Payment, tenant: Tenant, admin_email: str
 ) -> None:
     """Credit the balance. Guarded so a double-click cannot pay twice."""
+    payment = await _lock(session, Payment, payment.id, payment)
     if payment.status != "pending":
         raise ValueError("Bu to'lov allaqachon ko'rib chiqilgan.")
+    tenant = await _lock(session, Tenant, tenant.id, tenant)
     payment.status = "confirmed"
     payment.confirmed_at = _now()
     payment.confirmed_by = admin_email
@@ -293,6 +315,7 @@ async def confirm_topup(
 
 
 async def reject_topup(session: AsyncSession, payment: Payment, admin_email: str) -> None:
+    payment = await _lock(session, Payment, payment.id, payment)
     if payment.status != "pending":
         raise ValueError("Bu to'lov allaqachon ko'rib chiqilgan.")
     payment.status = "rejected"
@@ -309,6 +332,7 @@ async def adjust_balance(
     Written as a ledger row like everything else so the balance always adds up
     from its history.
     """
+    tenant = await _lock(session, Tenant, tenant.id, tenant)
     payment = Payment(
         id=f"pay-{uuid.uuid4().hex[:12]}",
         tenant_id=tenant.id,
@@ -331,6 +355,7 @@ async def buy_plan(session: AsyncSession, tenant: Tenant, plan: Plan) -> dict:
     Time is added to whatever is left rather than replacing it — renewing early
     must not cost the customer the days they already paid for.
     """
+    tenant = await _lock(session, Tenant, tenant.id, tenant)
     price = float(plan.price_uzs or 0)
     if price > float(tenant.balance or 0):
         raise ValueError(

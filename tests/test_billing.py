@@ -88,11 +88,8 @@ def test_free_is_decided_by_price_not_name():
 
 @pytest.mark.parametrize("left,expected", [
     (30, None),   # too early to warn
-    (7, 7),
-    (6.5, 7),
-    (3, 3),       # both 7 and 3 match — the customer needs to hear "three"
-    (1, 1),
-    (0.5, 1),
+    (3, 3),
+    (2.5, 3),
     (0, 0),       # the period has ended
 ])
 def test_which_warning_is_due(left, expected):
@@ -100,12 +97,11 @@ def test_which_warning_is_due(left, expected):
 
 
 def test_stage_only_moves_forward():
-    """Reminders count down. Having sent the 3-day notice, the 7-day one must
-    not be sent again on the next request — and expiry is checked constantly."""
+    """Reminders count down. Having sent the 3-day notice, it must not be sent
+    again on the next request — and expiry is checked constantly."""
     t = FakeTenant(dunning_stage=3)
-    for candidate in (7, 3):
-        assert candidate >= t.dunning_stage, "would re-send an older warning"
-    assert 1 < t.dunning_stage, "the 1-day warning is still ahead"
+    assert 3 >= t.dunning_stage, "would re-send an older warning"
+    assert 0 < t.dunning_stage, "the 0-day warning is still ahead"
 
 
 # ─── buy_plan arithmetic ──────────────────────────────────────────────────────

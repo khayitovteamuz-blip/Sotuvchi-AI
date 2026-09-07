@@ -1,4 +1,4 @@
-"""Tariffs — limits, price, and the AI model tier they buy."""
+"""Tariffs — limits and price."""
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.platform_auth import require_platform_admin
 from app.db.base import get_session
 from app.db.models import Plan, PlatformAdmin, Tenant
-from app.services import ai_models, audit_service
+from app.services import audit_service
 
 router = APIRouter()
 
@@ -29,7 +29,6 @@ async def list_plans(session: AsyncSession = Depends(get_session)):
             "max_products": p.max_products,
             "max_ai_messages_monthly": p.max_ai_messages_monthly,
             "max_operators": p.max_operators,
-            "max_model_tier": p.max_model_tier,
             "is_active": p.is_active,
             "tenants": counts.get(p.name, 0),
         }
@@ -45,7 +44,6 @@ class PlanPatch(BaseModel):
     max_products: Optional[int] = None
     max_ai_messages_monthly: Optional[int] = None
     max_operators: Optional[int] = None
-    max_model_tier: Optional[str] = None  # lite | flash | pro — see ai_models.TIER_ORDER
     unlimited: Optional[list[str]] = None  # fields to explicitly clear
 
 
@@ -61,15 +59,9 @@ async def update_plan(
     if not plan:
         raise HTTPException(status_code=404, detail="Tarif topilmadi.")
 
-    if patch.max_model_tier is not None and patch.max_model_tier not in ai_models.TIER_ORDER:
-        raise HTTPException(
-            status_code=400,
-            detail=f"max_model_tier {ai_models.TIER_ORDER} dan biri bo'lishi kerak.",
-        )
-
     changes = {}
     for field in ("title", "price_uzs", "max_products", "max_ai_messages_monthly",
-                  "max_operators", "max_model_tier"):
+                  "max_operators"):
         new = getattr(patch, field)
         if new is not None and new != getattr(plan, field):
             changes[field] = {"from": getattr(plan, field), "to": new}

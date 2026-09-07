@@ -4,8 +4,8 @@
 # Without this a deploy ships new code against an old schema, and the first
 # request that touches a new column fails in production rather than here.
 #
-# Alembic runs inside a transaction on Postgres, so if two instances start at
-# once one applies the migration and the other finds the version already set.
+# alembic/env.py takes a PostgreSQL advisory lock, so rolling deploys serialize
+# migration writers instead of racing on the same schema revision.
 # Set RUN_MIGRATIONS=false to take this over manually (e.g. a release phase).
 set -e
 

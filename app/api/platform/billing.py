@@ -147,9 +147,3 @@ async def extend_subscription(
         {"days": patch.days, "note": patch.note}, request,
     )
     return await billing_service.summary(session, tenant)
-
-
-@router.get("/tenants/{tenant_id}/payments")
-async def tenant_payments(tenant_id: str, session: AsyncSession = Depends(get_session)):
-    await get_tenant_or_404(session, tenant_id)
-    return await billing_service.history(session, tenant_id)
