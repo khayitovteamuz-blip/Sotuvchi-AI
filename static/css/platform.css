@@ -411,7 +411,9 @@ tbody tr.row:hover { background: var(--panel-2); }
     width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
     display: grid; place-items: center; font-size: 12.5px; font-weight: 800;
     background: var(--panel-3); color: var(--fg-2); border: 1px solid var(--line-2);
+    overflow: hidden;
 }
+.biz-av img { width: 100%; height: 100%; object-fit: cover; }
 tr.sig-alert .biz-av { background: rgba(255, 107, 91, 0.16); color: var(--red); border-color: transparent; }
 tr.sig-warn  .biz-av { background: rgba(242, 174, 60, 0.16); color: var(--amber); border-color: transparent; }
 tr.sig-off { opacity: 0.55; }
@@ -460,6 +462,14 @@ tr.sig-off { opacity: 0.55; }
     padding: 20px 32px; border-bottom: 1px solid var(--line);
     background: var(--panel); flex-shrink: 0;
 }
+.drawer-av {
+    width: 44px; height: 44px; border-radius: 11px; flex-shrink: 0;
+    display: grid; place-items: center; font-size: 16px; font-weight: 800;
+    background: var(--panel-3); color: var(--fg-2); border: 1px solid var(--line-2);
+    overflow: hidden;
+}
+.drawer-av img { width: 100%; height: 100%; object-fit: cover; }
+.drawer-av:empty { display: none; }
 .drawer-head h2 { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; }
 .drawer-head p { font-family: var(--mono); font-size: 11.5px; color: var(--fg-3); margin-top: 4px; }
 .drawer-x {

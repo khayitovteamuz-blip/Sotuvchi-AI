@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Response, UploadFile
-from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,11 +15,10 @@ from app.core.auth import (require_auth, require_auth_unpaid_ok,
 from app.core.config import BASE_DIR
 from app.db import repo
 from app.db.base import get_session
-from app.db.models import Plan, User
+from app.db.models import Plan, Tenant, User
 from app.models.schema import Category, DashboardStats, Order, Product, SystemSettings
 from app.services import (billing_service, categorize_service, import_service,
-                          kb_service, quota_service, storage_service, tenant_service)
-from app.services.sheets_service import sheets_service
+                          quota_service, routing_service, storage_service, tenant_service)
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
@@ -57,14 +55,20 @@ async def get_onboarding(user: User = Depends(require_auth), session: AsyncSessi
     )
     ai_configured = bool((cfg.greeting_message or "").strip()) or kb_filled
 
+    # A destination is "connected" once at least one chat is paired — checked
+    # against the real routing table, not tenant.orders_group_id (a column no
+    # current pairing flow ever writes to, which used to leave this step
+    # permanently stuck on "not done" no matter how correctly it was set up).
+    has_destination = bool(await routing_service.channels(session, user.tenant_id))
+
     steps = [
         {"key": "bot", "title": "Telegram botni ulang", "done": bool(tenant.telegram_bot_token),
-         "tab": "tab-integrations"},
+         "tab": "tab-settings"},
         {"key": "catalog", "title": "Katalogni to'ldiring", "done": product_count > 0,
          "tab": "tab-products"},
         {"key": "ai", "title": "AI'ni sozlang — salomlashish yoki bilimlar bazasi",
          "done": ai_configured, "tab": "tab-ai-agent"},
-        {"key": "group", "title": "Bildirishnoma guruhini ulang", "done": bool(tenant.orders_group_id),
+        {"key": "group", "title": "Bildirishnoma guruhini ulang", "done": has_destination,
          "tab": "tab-integrations"},
     ]
     return {"steps": steps, "all_done": all(s["done"] for s in steps)}
@@ -250,50 +254,6 @@ async def save_settings(settings_data: SystemSettings, user: User = Depends(requ
     return await repo.save_settings(session, user.tenant_id, settings_data.model_dump())
 
 
-# ─── Knowledge Base documents (RAG) ────────────────────────────────────────────
-# The fixed fields above (payment_info, faq, ...) are the first source
-# search_knowledge reads; these are free-text documents for the policies a
-# few short fields can't hold — a full return-policy page, a long price list
-# of delivery rules, an FAQ dump. See app/services/kb_service.py.
-MAX_KB_DOC_CHARS = 200_000
-
-
-class KbDocumentIn(BaseModel):
-    title: str
-    content: str
-
-
-@router.get("/kb/documents")
-async def list_kb_documents(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
-    return await kb_service.list_documents(session, user.tenant_id)
-
-
-@router.post("/kb/documents")
-async def upload_kb_document(
-    data: KbDocumentIn, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)
-):
-    if not data.content.strip():
-        raise HTTPException(status_code=400, detail="Hujjat matni bo'sh.")
-    if len(data.content) > MAX_KB_DOC_CHARS:
-        raise HTTPException(status_code=400, detail=f"Matn {MAX_KB_DOC_CHARS:,} belgidan oshmasin.")
-    # Chunking + embedding is the AI-cost part of this endpoint.
-    if not rate_limit.allow(f"kb_upload:{user.tenant_id}", max_calls=10, window_seconds=300):
-        raise HTTPException(status_code=429, detail="Juda ko'p so'rov. Bir necha daqiqadan so'ng urinib ko'ring.")
-    doc = await kb_service.ingest_document(session, user.tenant_id, data.title, data.content)
-    docs = await kb_service.list_documents(session, user.tenant_id)
-    return next((d for d in docs if d["id"] == doc.id), {"id": doc.id, "title": doc.title})
-
-
-@router.delete("/kb/documents/{doc_id}")
-async def delete_kb_document(
-    doc_id: str, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)
-):
-    ok = await kb_service.delete_document(session, user.tenant_id, doc_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Hujjat topilmadi.")
-    return {"status": "success"}
-
-
 # ─── Image Upload ─────────────────────────────────────────────────────────────
 UPLOADS_DIR = BASE_DIR / "static" / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -337,10 +297,18 @@ async def upload_image(file: UploadFile = File(...), user: User = Depends(requir
     return {"status": "success", "image_url": url}
 
 
-@router.get("/storage")
-async def storage_status(user: User = Depends(require_auth)):
-    """Whether uploaded pictures actually survive a deploy."""
-    return storage_service.status()
+@router.put("/profile/logo")
+async def set_logo(
+    logo_url: str = Body("", embed=True),
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+):
+    """Point the business at an already-uploaded image (see /upload), or clear
+    it with an empty string. /boshqaruv shows the same logo — one field, two panels."""
+    tenant = await session.get(Tenant, user.tenant_id)
+    tenant.logo_url = logo_url.strip() or None
+    await session.commit()
+    return {"status": "success", "logo_url": tenant.logo_url}
 
 
 # ─── Catalog import (Excel / CSV) ─────────────────────────────────────────────
@@ -511,12 +479,7 @@ async def set_customer_note(
 @router.get("/integrations/status")
 async def get_integrations_status(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     tenant = await tenant_service.get_tenant(session, user.tenant_id)
-    s = await repo.get_settings(session, user.tenant_id)
-    sheets = sheets_service.status()
     return {
-        "google_sheets": sheets["connected"],
-        "google_sheets_reason": sheets["reason"],
         "telegram_bot": bool(tenant and tenant.telegram_bot_token),
         "telegram_bot_username": tenant.telegram_bot_username if tenant else None,
-        "ai_provider": s.ai_provider,
     }

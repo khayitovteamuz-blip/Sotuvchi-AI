@@ -54,6 +54,50 @@ function showAppDashboard(tenant) {
         currentTenant = tenant;
         document.getElementById('tenant-biz-name').textContent = tenant.business_name || '—';
         document.getElementById('tenant-email').textContent = tenant.email || '—';
+        renderTenantLogo(tenant.logo_url);
+    }
+}
+
+/** Shows the uploaded logo if there is one, else the building emoji. */
+function renderTenantLogo(url) {
+    const img = document.getElementById('tenant-logo-img');
+    const fallback = document.getElementById('tenant-logo-fallback');
+    if (!img || !fallback) return;
+    if (url) {
+        img.src = url;
+        img.style.display = 'block';
+        fallback.style.display = 'none';
+    } else {
+        img.style.display = 'none';
+        fallback.style.display = '';
+    }
+}
+
+async function uploadTenantLogo(event) {
+    const file = event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+        const res = await fetch('/api/admin/upload', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') throw new Error(data.detail || 'Yuklanmadi');
+
+        const r = await fetch('/api/admin/profile/logo', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ logo_url: data.image_url }),
+        });
+        const saved = await r.json();
+        if (!r.ok) throw new Error(saved.detail || 'Saqlanmadi');
+
+        renderTenantLogo(saved.logo_url);
+        if (currentTenant) currentTenant.logo_url = saved.logo_url;
+        toast('Logotip yangilandi');
+    } catch (e) {
+        toast(e.message || 'Logotipni yuklab bo\'lmadi', true);
     }
 }
 
@@ -124,8 +168,8 @@ async function doRegister() {
         errEl.style.display = 'block';
         return;
     }
-    if (password.length < 6) {
-        errEl.textContent = 'Parol kamida 6 ta belgidan iborat bo\'lishi kerak.';
+    if (password.length < 8) {
+        errEl.textContent = 'Parol kamida 8 ta belgidan iborat bo\'lishi kerak.';
         errEl.style.display = 'block';
         return;
     }
@@ -179,21 +223,46 @@ let currentTenant = null;
 
 /** Boot everything after auth: nav + the data the default screen (Inbox) needs. */
 function bootApp() {
-    if (!navReady) { initNavigation(); initCustomerSearch(); initStaff(); navReady = true; }
+    if (!navReady) { initNavigation(); initCustomerSearch(); navReady = true; }
     loadCategories();     // needed by the product modal's category select
     loadProducts();
     loadSettings();
     loadSidebarPlan();
     startInboxPolling();
+    checkNotificationRoute();
     restoreActiveTab();
 }
 
-/** Reopen the section the operator was last on; Inbox is the first-visit default. */
+/** Warn — on every tab, not just Integratsiyalar — when the bot is connected
+ *  but nothing is paired to receive alerts: the AI still creates orders in
+ *  that state, it just tells nobody. Independent of the onboarding card's
+ *  dismiss state on purpose — that card can be closed permanently, this risk
+ *  can't be. */
+async function checkNotificationRoute() {
+    const banner = document.getElementById('no-route-banner');
+    if (!banner) return;
+    try {
+        const data = await (await fetch('/api/admin/onboarding')).json();
+        const bot = data.steps.find((s) => s.key === 'bot');
+        const group = data.steps.find((s) => s.key === 'group');
+        banner.style.display = (bot && bot.done && group && !group.done) ? 'flex' : 'none';
+    } catch (e) {
+        // A failed check should not itself alarm the owner.
+    }
+}
+
+/** Reopen the section the operator was last on. First visit ever (nothing
+ *  saved yet) lands on Dashboard instead of Inbox — that's the only screen
+ *  showing the "Boshlash uchun" setup checklist, and a brand-new account's
+ *  Inbox has no conversations to show anyway. Once any tab is chosen it's
+ *  remembered, so this only affects the very first login. */
 function restoreActiveTab() {
     const saved = localStorage.getItem('sotuvchi_active_tab');
     const navItem = saved && document.querySelector(`.nav-item[data-tab="${saved}"]`);
     if (navItem) {
         navItem.click();   // click also loads that tab's data and sets the header
+    } else if (typeof activateTab === 'function') {
+        activateTab('tab-overview');
     } else {
         loadInbox();
     }
@@ -227,7 +296,7 @@ const TAB_META = {
     'tab-customers':    { title: 'Mijozlar', sub: 'Kim nima olgan va qachon yozgan', btn: false, load: loadCustomers },
     'tab-integrations': { title: 'Integratsiyalar', sub: 'Telegram bot va operator bildirishnomasi', btn: false, load: loadIntegrations },
     'tab-billing':      { title: 'Hisobim', sub: 'Balans, tarif va to\'lovlar', btn: false, load: loadBilling },
-    'tab-settings':     { title: 'Sozlamalar', sub: 'Biznes profili, Telegram bot va xodimlar', btn: false, load: loadSettingsTab }
+    'tab-settings':     { title: 'Sozlamalar', sub: 'Biznes profili va Telegram bot', btn: false, load: loadSettingsTab }
 };
 
 function initNavigation() {
@@ -236,7 +305,6 @@ function initNavigation() {
     const headerTitle = document.getElementById('page-title');
     const headerSubtitle = document.getElementById('page-subtitle');
     const headerActionGroup = document.getElementById('header-action-group');
-    const dashboardActionGroup = document.getElementById('dashboard-action-group');
 
     /* Bo'limni ochish menyu elementidan ajratilgan. Sabab: menyu Stitch
        dizayniga qisqartirilgach, ba'zi bo'limlarga (Integratsiyalar,
@@ -261,7 +329,6 @@ function initNavigation() {
             if (headerSubtitle) headerSubtitle.textContent = meta.sub;
             // Show/hide action groups based on active tab
             if (headerActionGroup) headerActionGroup.style.display = meta.btn ? 'flex' : 'none';
-            if (dashboardActionGroup) dashboardActionGroup.style.display = (targetTab === 'tab-overview') ? 'flex' : 'none';
             const mobileTitle = document.getElementById('mobile-page-title');
             if (mobileTitle) mobileTitle.textContent = meta.title;
             if (typeof meta.load === 'function') meta.load();
@@ -308,9 +375,6 @@ async function loadCategories() {
     try {
         const resp = await fetch('/api/admin/categories');
         currentCategories = await resp.json();
-
-        const badge = document.getElementById('categories-count-text');
-        if (badge) badge.textContent = `${currentCategories.length} ta kategoriya`;
         populateCategoryDropdown();
     } catch (e) {
         console.error('Kategoriyalarni yuklashda xatolik:', e);
@@ -597,7 +661,6 @@ async function loadDashboardStats() {
            bosqichlarini ko'rsatadi va bunday sanoq API da hali yo'q.
            Shuning uchun bu blok mavjud HAQIQIY ma'lumotni ko'rsatadi. */
         const bs = an.by_status || {};
-        const total = (bs.ai ?? 0) + (bs.operator ?? 0) + (bs.closed ?? 0);
         const statusHTML = `
             <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px; display:flex; flex-direction:column; justify-content:space-between; height:100px;">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -629,21 +692,11 @@ async function loadDashboardStats() {
                     <div style="font-family:var(--font-display); font-size:20px; font-weight:700; color:var(--text-main);">${bs.closed ?? 0}</div>
                 </div>
             </div>
-            <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px; display:flex; flex-direction:column; justify-content:space-between; height:100px;">
-                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                    <div style="width:8px; height:8px; border-radius:50%; background:var(--status-shipped);"></div>
-                    <span class="ico ico-messages-square" style="font-size:16px; color:var(--text-muted);"></span>
-                </div>
-                <div>
-                    <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Jami suhbat</div>
-                    <div style="font-family:var(--font-display); font-size:20px; font-weight:700; color:var(--text-main);">${total}</div>
-                </div>
-            </div>
         `;
         document.getElementById('dashboard-status-bars').innerHTML = statusHTML;
 
         renderRecentOrders(data.recent_orders);
-        loadActivityChart();
+        loadActivitySummary();
         renderUsagePanel(data);   // "Tarif sarfi" bloki: ilgari hech qachon chaqirilmasdi
     } catch (e) {
         console.error('Stats yuklashda xatolik:', e);
@@ -697,131 +750,28 @@ function dismissOnboarding() {
 }
 
 // ════════════════════════════════════════════════════════
-// AI FAOLIYATI CHART
+// AI FAOLIYATI — shu oy uchun jami ko'rsatkichlar
 // ════════════════════════════════════════════════════════
-let chartPeriod = 'oy';
-
-/* Bazadan kelgan dinamika. Ilgari bu yerda qo'lda yozilgan namunaviy
-   raqamlar turardi — grafik chiroyli chizilardi, lekin hech narsani
-   anglatmasdi va haqiqiy ko'rsatkichdek ko'rinardi. */
-let chartData = null;
-
-/** Tanlangan ustun indeksi. null - hech biri tanlanmagan. */
-let chartPicked = null;
-
-function setChartPeriod(period) {
-    if (chartPeriod === period) return;
-    chartPeriod = period;
-    chartPicked = null;                    // davr almashsa tanlov ma'nosini yo'qotadi
-    document.querySelectorAll('.chart-toggle button')
-        .forEach(b => b.classList.toggle('is-on', b.id === 'chart-btn-' + period));
-    loadActivityChart();
-}
-
-/** Grafik ma'lumotini bazadan olish.
- *
- *  Ilgari bu yerda "yuklanyapti bo'lsa qaytib ket" qorovuli turardi. U poyga
- *  yaratardi: bo'limlar orasida tez o'tilganda ikkinchi chaqiruv tashlanar,
- *  ekranda esa skelet qolib ketardi. Endi eng oxirgi so'rov g'olib bo'ladi —
- *  kechikib kelgan javob yangisining ustiga yozilmaydi. */
-let chartReq = 0;
-async function loadActivityChart() {
-    const req = ++chartReq;
+async function loadActivitySummary() {
+    const el = document.getElementById('ai-activity-summary');
+    if (!el) return;
     try {
-        const resp = await fetch('/api/admin/analytics/series?span=' + chartPeriod);
-        if (!resp.ok) throw new Error('series');
-        const data = await resp.json();
-        if (req !== chartReq) return;          // eskirgan javob
-        chartData = data;
+        const d = await (await fetch('/api/admin/analytics/series?span=oy')).json();
+        const convs = d.values.reduce((a, v) => a + v, 0);
+        const today = d.focus != null ? d.values[d.focus] : 0;
+        // "Bu oy buyurtma" ataylab yo'q: u yuqoridagi "Shu Oy Buyurtmalar"
+        // KPI kartochkasi bilan bir xil raqamni takrorlar edi.
+        el.innerHTML = [
+            ['Bu oy suhbat', convs],
+            ['Bugun suhbat', today],
+        ].map(([label, val]) => `
+            <div class="activity-tile">
+                <div class="activity-tile-value">${fmtNum(val)}</div>
+                <div class="activity-tile-label">${label}</div>
+            </div>`).join('');
     } catch (e) {
-        if (req !== chartReq) return;
-        chartData = null;
+        el.innerHTML = '<div class="chart-empty">Ma\'lumotni yuklab bo\'lmadi</div>';
     }
-    renderActivityChart();
-}
-
-/**
- * Ustunni tanlash. Bir bosilganda tanlanadi, ikkinchi marta bosilganda
- * bekor qilinadi - saytdagi boshqa filtrlar bilan bir xil xulq.
- */
-function pickChartBar(index) {
-    chartPicked = chartPicked === index ? null : index;
-    renderActivityChart();
-}
-
-/**
- * AI faoliyati grafigi.
- *
- * Ustunlar `div` emas, `button`: ular bosiladi, shuning uchun klaviatura
- * bilan ham o'tish va tanlash mumkin bo'lishi kerak.
- *
- * Ko'rish darajalari: tanlangan ustun > eng baland ustun > qolganlari.
- * Tanlov bo'lganda eng balandning ajratilishi so'nadi, aks holda ekranda
- * ikkita "asosiy" ustun paydo bo'lardi.
- */
-function renderActivityChart() {
-    const barsEl = document.getElementById('ai-chart-bars');
-    const labelsEl = document.getElementById('ai-chart-labels');
-    if (!barsEl || !labelsEl) return;
-
-    const d = chartData;
-    if (!d) {
-        barsEl.innerHTML = '<div class="chart-empty">Ma\'lumotni yuklab bo\'lmadi</div>';
-        labelsEl.innerHTML = '';
-        return;
-    }
-    /* Hech qanday faoliyat bo'lmasa bo'sh ustunlar chizilmaydi: nol balandlikdagi
-       yigirmata tayoqcha buzuq grafikka o'xshaydi, sabab esa oddiy — hali
-       suhbat bo'lmagan. */
-    if (!d.values.some(v => v > 0)) {
-        const where = d.span === 'yil' ? 'bu yilda' : 'bu oyda';
-        barsEl.innerHTML = `<div class="chart-empty">${where} hali suhbat bo'lmagan</div>`;
-        labelsEl.innerHTML = '';
-        return;
-    }
-
-    const max = Math.max(...d.values, 1);
-    const hasPick = chartPicked !== null;
-    /* Yorliqqa birlik qo'shiladi: "11" o'zi kunmi yoki oymi — bilib bo'lmaydi.
-       Oy nomlari o'zi tushunarli, ularga qo'shimcha shart emas. */
-    const suffix = d.span === 'yil' ? '' : '-kun';
-    /* Fokus — bugungi kun (yillik ko'rinishda shu oy). Ustun tanlanganda
-       fokus so'nadi: aks holda ekranda ikkita "asosiy" ustun turardi. */
-    const focus = d.focus;
-
-    barsEl.innerHTML = d.values.map((v, i) => {
-        const isFocus = i === focus;
-        /* Nolga teng kun ham ko'rinib tursin: 0% balandlik ustunni butunlay
-           yo'qotib, o'sha kunni sanoqdan tushib qolgandek ko'rsatardi.
-           Bugungi ustun esa hech bo'lmasa sezilarli bo'lsin — u fokusda, va
-           ko'rinmaydigan fokus fokus emas. */
-        const pct = v === 0 ? (isFocus ? 6 : 2) : Math.max(4, Math.round((v / max) * 100));
-        const isPicked = chartPicked === i;
-        const strong = isPicked || (!hasPick && isFocus);
-        const cls = ['chart-bar'];
-        if (strong) cls.push('is-strong');
-        if (isPicked) cls.push('is-picked');
-        if (v === 0 && !strong) cls.push('is-zero');
-        const ords = (d.orders || [])[i] || 0;
-        const bugun = isFocus ? (d.span === 'yil' ? ' · shu oy' : ' · bugun') : '';
-        const tip = `${d.labels[i]}${suffix}${bugun} · ${fmtNum(v)} suhbat · ${fmtNum(ords)} buyurtma`;
-        return `<button type="button" class="${cls.join(' ')}" style="height:${pct}%;"
-                    onclick="pickChartBar(${i})"
-                    aria-pressed="${isPicked}"
-                    aria-label="${tip}">
-                    <span class="chart-tip">${tip}</span>
-                </button>`;
-    }).join('');
-
-    /* Kunlik ko'rinishda ustun ko'p: har bir raqamni yozsak ular bir-biriga
-       tegib ketadi. Shuning uchun oraliq yorliqlar tashlanadi, lekin ustunlar
-       o'z joyida qoladi — bo'sh `div` o'rinni ushlab turadi. */
-    const step = d.labels.length > 12 ? Math.ceil(d.labels.length / 8) : 1;
-    labelsEl.innerHTML = d.labels.map((l, i) => {
-        const strong = chartPicked === i || (!hasPick && i === focus);
-        const show = strong || i % step === 0 || i === d.labels.length - 1;
-        return `<div class="chart-label${strong ? ' is-strong' : ''}">${show ? l : ''}</div>`;
-    }).join('');
 }
 
 /** Google Sheets state. The card used to read "tez orada" while the integration
@@ -876,71 +826,53 @@ async function renderUsagePanel(data) {
         <div class="cost-row cost-row--lead"><span>Tarif</span><b>${escapeHtml(u.plan_title || u.plan)}</b></div>
         ${row('AI xabar, shu oy', u.ai_messages)}
         ${row('Mahsulot', u.products)}
-        ${row('Operator', u.operators)}
         <div class="cost-row"><span>AI yopgan savdo</span><b>${fmtNum(data.ai_order_count)} ta</b></div>
         <p class="cost-hint">Limit tugasa AI javob bermay qo'yadi va suhbat operatorga uzatiladi.</p>`;
 }
 
+const RECENT_ORDERS_AVATAR_COLORS = ['#388BFD', '#A371F7', '#00b87c', '#f59e0b', '#f0883e', '#e11d48'];
+
 function renderRecentOrders(orders) {
     const tbody = document.getElementById('recent-orders-tbody');
     if (!tbody) return;
-    tbody.innerHTML = '';
 
     if (!orders || orders.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:32px; color:var(--text-muted);">Hali buyurtmalar kelib tushmagan.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="ro-empty">Hali buyurtmalar kelib tushmagan.</td></tr>';
         return;
     }
 
     const monthNames = ['Yan', 'Fev', 'Mar', 'Apr', 'May', 'Iyun', 'Iyul', 'Avg', 'Sen', 'Okt', 'Noy', 'Dek'];
 
-    orders.forEach((o, idx) => {
+    tbody.innerHTML = orders.map((o, idx) => {
         const d = new Date(o.created_at);
-        const day = isNaN(d) ? '' : d.getDate();
-        const month = isNaN(d) ? '' : monthNames[d.getMonth()];
-        const hh = isNaN(d) ? '' : d.getHours().toString().padStart(2, '0');
-        const mm = isNaN(d) ? '' : d.getMinutes().toString().padStart(2, '0');
-        const dateStr = isNaN(d) ? (o.created_at || '—') : `${day} ${month}, ${hh}:${mm}`;
+        const dateStr = isNaN(d)
+            ? (o.created_at || '—')
+            : `${d.getDate()} ${monthNames[d.getMonth()]}, ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
 
-        // Avatar color palette
-        const COLORS = ['#388BFD','#A371F7','#00b87c','#f59e0b','#f0883e','#e11d48'];
-        const avatarColor = COLORS[idx % COLORS.length];
+        const avatarColor = RECENT_ORDERS_AVATAR_COLORS[idx % RECENT_ORDERS_AVATAR_COLORS.length];
         const initials = (o.customer_name || 'MI').substring(0, 2).toUpperCase();
+        const shortId = '#INV-' + String(o.id).replace(/[^0-9]/g, '').substring(0, 4).padStart(4, '0');
+        const [statusColor, statusBg] = orderStatusColors(o.status);
 
-        // Short invoice ID
-        const shortId = '#INV-' + String(o.id).replace(/[^0-9]/g,'').substring(0, 4).padStart(4,'0');
-
-        // Status pill
-        let sc = 'var(--text-muted)', sb = 'var(--surface)';
-        const st = (o.status || '').toLowerCase();
-        if (st.includes('yangi') || st === 'new') { sc = 'var(--status-new)'; sb = 'var(--status-new-bg)'; }
-        else if (st.includes('tasdiq') || st === 'confirmed') { sc = 'var(--status-confirmed)'; sb = 'var(--status-confirmed-bg)'; }
-        else if (st.includes('yolda') || st.includes("yo'lda") || st === 'shipped') { sc = 'var(--status-shipped)'; sb = 'var(--status-shipped-bg)'; }
-        else if (st.includes('yetkazildi') || st === 'delivered') { sc = 'var(--status-delivered)'; sb = 'var(--status-delivered-bg)'; }
-        else if (st.includes('bekor') || st === 'cancelled') { sc = 'var(--accent-danger)'; sb = 'rgba(252,121,120,0.1)'; }
-
-        const amount = fmtNum(o.total_amount) + " so'm";
-
-        const tr = document.createElement('tr');
-        tr.style.borderBottom = '1px solid var(--border)';
-        tr.innerHTML = `
-            <td style="padding:14px 0;">
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <div style="width:32px; height:32px; border-radius:6px; background:${avatarColor}22; color:${avatarColor}; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; font-family:var(--font-mono); flex-shrink:0;">${initials}</div>
-                    <span style="font-weight:500; font-size:15px; color:var(--text-main);">${escapeHtml(o.customer_name || '—')}</span>
+        return `
+        <tr>
+            <td class="ro-id">${shortId}</td>
+            <td>
+                <div class="ro-customer">
+                    <span class="ro-avatar" style="--av:${avatarColor}">${initials}</span>
+                    <span class="ro-name">${escapeHtml(o.customer_name || '—')}</span>
                 </div>
             </td>
-            <td style="padding:14px 0; color:var(--text-muted); font-family:var(--font-mono); font-size:13px;">${shortId}</td>
-            <td style="padding:14px 0; color:var(--text-muted); font-size:13px;">${dateStr}</td>
-            <td style="padding:14px 0; text-align:right; font-family:var(--font-mono); font-weight:600; color:var(--text-main);">${amount}</td>
-            <td style="padding:14px 0 14px 16px;">
-                <span style="display:inline-flex; align-items:center; gap:5px; padding:5px 12px; border-radius:100px; background:${sb}; border:1px solid ${sc}44; color:${sc}; font-size:13px; font-weight:600;">
-                    <span style="width:5px; height:5px; border-radius:50%; background:${sc};"></span>
-                    ${escapeHtml(o.status || '—')}
+            <td class="col-phone ro-phone">${escapeHtml(o.customer_phone || '—')}</td>
+            <td class="ro-amount">${fmtNum(o.total_amount)} <small>so'm</small></td>
+            <td>
+                <span class="ro-status" style="--sc:${statusColor}; --sb:${statusBg}">
+                    <span class="ro-status-dot"></span>${escapeHtml(o.status || '—')}
                 </span>
             </td>
-        `;
-        tbody.appendChild(tr);
-    });
+            <td class="col-date ro-date">${dateStr}</td>
+        </tr>`;
+    }).join('');
 }
 
 // Load Products
@@ -995,8 +927,7 @@ function filterByCategory(name) {
 
 function renderProductsTable() {
     const gridEl = document.getElementById('products-grid-view');
-    const tbody = document.getElementById('products-tbody');
-    if (!gridEl && !tbody) return;
+    if (!gridEl) return;
 
     const q = (document.getElementById('product-search')?.value || '').trim().toLowerCase();
     let list = currentProducts;
@@ -1072,54 +1003,6 @@ function renderProductsTable() {
                 </div>`;
             }).join('');
         }
-    }
-
-    // --- TABLE VIEW ---
-    if (tbody) {
-        if (list.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:36px; color:var(--text-muted);">
-                ${currentProducts.length === 0
-                    ? 'Katalog bo\'sh.'
-                    : 'Ushbu shartlarga mos mahsulot topilmadi.'}
-            </td></tr>`;
-            return;
-        }
-
-        tbody.innerHTML = list.map(p => {
-            const img = (p.image_urls && p.image_urls[0]) || p.image_url || '';
-            const qty = p.stock_quantity || 0;
-            const state = !p.in_stock || qty <= 0
-                ? '<span style="color:#ef4444; font-size:12px; font-weight:600;">Tugagan</span>'
-                : qty <= 3
-                    ? '<span style="color:#f59e0b; font-size:12px; font-weight:600;">Kam qoldi</span>'
-                    : '<span style="color:#00b87c; font-size:12px; font-weight:600;">Mavjud</span>';
-
-            const imgTd = img
-                ? `<img src="${escapeHtml(img)}" alt="" style="width:40px; height:40px; object-fit:cover; border-radius:6px;" onerror="this.src='/static/images/logo.svg'">`
-                : `<div style="width:40px; height:40px; background:var(--surface); border-radius:6px; display:flex; align-items:center; justify-content:center;"><span class="ico ico-package" style="font-size:20px; color:var(--text-muted);"></span></div>`;
-
-            return `<tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:12px 16px;">${imgTd}</td>
-                <td style="padding:12px 16px;">
-                    <strong style="color:var(--text-main); font-weight:600;">${escapeHtml(p.name)}</strong>
-                    <div style="font-size:12px; color:var(--text-muted);">${escapeHtml(p.description || '')}</div>
-                </td>
-                <td style="padding:12px 16px; color:var(--text-muted); font-size:13px;">${escapeHtml(p.category || '—')}</td>
-                <td style="padding:12px 16px; text-align:right; font-family:var(--font-mono); font-weight:600; color:var(--text-main);">${fmtNum(p.price)} <small style="font-weight:400; color:var(--text-muted);">${escapeHtml(p.currency||"so'm")}</small></td>
-                <td style="padding:12px 16px; text-align:center; font-family:var(--font-mono); font-weight:600;">${fmtNum(qty)}</td>
-                <td style="padding:12px 16px; text-align:center;">${state}</td>
-                <td style="padding:12px 16px; text-align:center;">
-                    <div style="display:flex; gap:6px; justify-content:center;">
-                        <button onclick="openEditProductModal('${p.id}')" title="Tahrirlash" style="background:var(--surface); border:1px solid var(--border); border-radius:6px; color:var(--text-main); width:30px; height:30px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
-                            <span class="ico ico-square-pen" style="font-size:16px;"></span>
-                        </button>
-                        <button onclick="deleteProduct('${p.id}')" title="O'chirish" style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.2); border-radius:6px; color:#ef4444; width:30px; height:30px; display:flex; align-items:center; justify-content:center; cursor:pointer;">
-                            <span class="ico ico-trash-2" style="font-size:16px;"></span>
-                        </button>
-                    </div>
-                </td>
-            </tr>`;
-        }).join('');
     }
 }
 
@@ -1473,7 +1356,7 @@ function renderOrdersTable() {
                     <span style="font-weight:500; font-size:15px; color:var(--text-main);">${escapeHtml(o.customer_name || '—')}</span>
                 </div>
             </td>
-            <td style="padding:16px 20px; color:var(--text-muted); font-size:14px;">${dateStr}</td>
+            <td class="col-date" style="padding:16px 20px; color:var(--text-muted); font-size:14px;">${dateStr}</td>
             <td style="padding:16px 20px; text-align:right; font-family:var(--font-mono); font-size:14.5px; font-weight:600; color:var(--text-main);">${fmtNum(o.total_amount)} <span style="font-size:11px; color:var(--text-muted); font-weight:400;">so'm</span></td>
             <td style="padding:14px 20px;">
                 <span style="display:inline-flex; align-items:center; gap:5px; padding:5px 12px; border-radius:100px; background:${sb}; border:1px solid ${sc}44; color:${sc}; font-size:13px; font-weight:600;">
@@ -1673,7 +1556,7 @@ const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.v
 
 // Settings the simplified panel does not expose. Kept here so saving the
 // visible fields never silently resets them.
-let hiddenSettings = { ai_provider: 'gemini', model_name: 'gemini-3.5-flash-lite', auto_handoff_after: 3 };
+let hiddenSettings = { auto_handoff_after: 3 };
 
 async function loadSettings() {
     try {
@@ -1681,15 +1564,8 @@ async function loadSettings() {
         const data = await resp.json();
 
         hiddenSettings = {
-            ai_provider: data.ai_provider || 'gemini',
             auto_handoff_after: data.auto_handoff_after || 3
         };
-
-        setVal('ai-model', data.model_name || 'gemini-3.5-flash-lite');
-        const temp = data.temperature ?? 0.7;
-        setVal('ai-temp', temp);
-        const tempOut = document.getElementById('ai-temp-value');
-        if (tempOut) tempOut.textContent = Number(temp).toFixed(1);
 
         setVal('setting-prompt', data.system_prompt);
         setVal('ai-name', data.ai_name || 'Sotuvchi AI');
@@ -1710,86 +1586,8 @@ async function loadSettings() {
         setVal('kb-hours', data.working_hours);
         setVal('kb-faq', data.faq);
         renderKbStatus(data);
-        loadKbDocuments();
     } catch (e) {
         console.error('Sozlamalarni yuklashda xatolik:', e);
-    }
-}
-
-// ─── Bilimlar bazasi hujjatlari (RAG) ──────────────────────────────────────
-async function loadKbDocuments() {
-    const list = document.getElementById('kb-doc-list');
-    if (!list) return;
-    try {
-        const docs = await (await fetch('/api/admin/kb/documents')).json();
-        if (!docs.length) {
-            list.innerHTML = '<p class="kb-doc-empty">Hali hujjat yuklanmagan.</p>';
-            return;
-        }
-        list.innerHTML = docs.map((d) => `
-            <div class="kb-doc-item">
-                <div>
-                    <div class="kb-doc-item-title">${escapeHtml(d.title)}</div>
-                    <div class="kb-doc-item-meta">${d.chunks} bo'lak · ${d.chars.toLocaleString('ru-RU')} belgi · ${d.created_at || ''}</div>
-                </div>
-                <button class="chat-icon-btn is-danger" title="O'chirish" onclick="deleteKbDocument('${d.id}')">
-                    <span class="ico ico-x"></span>
-                </button>
-            </div>`).join('');
-    } catch (e) {
-        console.error('Hujjatlarni yuklashda xatolik:', e);
-    }
-}
-
-document.getElementById('kb-doc-file')?.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-        document.getElementById('kb-doc-content').value = reader.result;
-        if (!document.getElementById('kb-doc-title').value.trim()) {
-            document.getElementById('kb-doc-title').value = file.name.replace(/\.(txt|md)$/i, '');
-        }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-});
-
-async function uploadKbDocument() {
-    const title = document.getElementById('kb-doc-title').value.trim();
-    const content = document.getElementById('kb-doc-content').value.trim();
-    if (!content) { toast('Hujjat matni bo\'sh', true); return; }
-
-    const btn = document.getElementById('kb-doc-upload-btn');
-    btn.disabled = true;
-    btn.textContent = 'Yuklanmoqda...';
-    try {
-        const resp = await fetch('/api/admin/kb/documents', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: title || 'Nomsiz hujjat', content }),
-        });
-        if (!resp.ok) throw new Error((await resp.json()).detail || 'Xatolik');
-        document.getElementById('kb-doc-title').value = '';
-        document.getElementById('kb-doc-content').value = '';
-        toast('Hujjat qo\'shildi');
-        loadKbDocuments();
-    } catch (e) {
-        toast(e.message || 'Hujjatni yuklab bo\'lmadi', true);
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Qo\'shish';
-    }
-}
-
-async function deleteKbDocument(id) {
-    if (!confirm('Bu hujjatni o\'chirishni tasdiqlaysizmi?')) return;
-    try {
-        const resp = await fetch(`/api/admin/kb/documents/${id}`, { method: 'DELETE' });
-        if (!resp.ok) throw new Error((await resp.json()).detail || 'Xatolik');
-        loadKbDocuments();
-    } catch (e) {
-        toast(e.message || 'O\'chirib bo\'lmadi', true);
     }
 }
 
@@ -1797,8 +1595,9 @@ async function deleteKbDocument(id) {
 function renderKbStatus(d) {
     const el = document.getElementById('kb-status');
     if (!el) return;
-    const fields = [d.delivery_fee_city, d.payment_info, d.warranty_info,
-                    d.return_policy, d.working_hours, d.faq];
+    const fields = [d.delivery_fee_city, d.delivery_fee_regions, d.free_delivery_from,
+                    d.delivery_days_city, d.delivery_days_regions, d.delivery_info,
+                    d.payment_info, d.warranty_info, d.return_policy, d.working_hours, d.faq];
     const filled = fields.filter(v => v !== null && v !== undefined && v !== '').length;
     el.classList.remove('is-ok', 'is-warn');
     if (filled === fields.length) {
@@ -1813,6 +1612,19 @@ function renderKbStatus(d) {
     }
 }
 
+/** Drops 3 example Q&As into the FAQ box for the owner to edit/delete rather
+ *  than have to remember the "S: / J:" convention from a placeholder alone.
+ *  Appends after whatever is already there instead of overwriting it. */
+function insertFaqTemplate() {
+    const el = document.getElementById('kb-faq');
+    if (!el) return;
+    const sample = "S: Ish vaqtingiz qanday?\nJ: Har kuni 9:00 - 19:00\n\n"
+        + "S: To'lovni qanday amalga oshiraman?\nJ: Naqd yoki kartaga o'tkazma orqali\n\n"
+        + "S: Yetkazib berish qancha vaqt oladi?\nJ: Toshkent bo'ylab 1-2 kun";
+    el.value = el.value.trim() ? `${el.value.trim()}\n\n${sample}` : sample;
+    el.focus();
+}
+
 async function saveSettings() {
     const gv = (id) => { const el = document.getElementById(id); return el ? el.value : null; };
     const num = (v) => (v === null || v === '' ? null : parseFloat(v));
@@ -1822,8 +1634,6 @@ async function saveSettings() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 ...hiddenSettings,
-                model_name: gv('ai-model') || 'gemini-3.5-flash-lite',
-                temperature: num(gv('ai-temp')) ?? 0.7,
                 system_prompt: gv('setting-prompt') || '',
                 ai_name: gv('ai-name'),
                 ai_tone: gv('ai-tone'),
@@ -2011,6 +1821,12 @@ function filterInbox(status, btn) {
     renderInboxList();
 }
 
+/** Mobile only: the list and chat panes stack on top of each other there, so
+ *  opening a conversation hides the list — this is the way back to it. */
+function closeMobileChat() {
+    document.querySelector('.inbox-layout')?.classList.remove('is-chat-open');
+}
+
 async function openConversation(convId) {
     activeConvId = convId;
     try {
@@ -2020,6 +1836,7 @@ async function openConversation(convId) {
 
         document.getElementById('inbox-empty').style.display = 'none';
         document.getElementById('inbox-chat-active').style.display = 'flex';
+        document.getElementById('inbox-chat-active').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
         const c = data.conversation;
         const initials = (c.customer_name || 'MI').substring(0, 2).toUpperCase();
@@ -2027,7 +1844,9 @@ async function openConversation(convId) {
 
         /* Amallar ikonka tugmalarida: sarlavha tinch qolsin, lekin operator
            uchun kerakli to'rtta amal ham joyida bo'lsin. */
+        document.querySelector('.inbox-layout')?.classList.add('is-chat-open');
         document.getElementById('inbox-chat-header').innerHTML = `
+            <button class="chat-icon-btn inbox-back-btn" onclick="closeMobileChat()" title="Ro'yxatga qaytish" aria-label="Ro'yxatga qaytish">←</button>
             <div class="chat-who">
                 <div class="chat-avatar">${initials}<span class="conv-channel">${CHANNEL_ICON[c.channel] || '💬'}</span></div>
                 <div class="chat-who-text">
@@ -2538,11 +2357,11 @@ async function loadCustomers(q = '') {
                 <td><strong>${escapeHtml(c.customer_name)}</strong>${
                     c.telegram_username ? `<span class="cell-sub">@${escapeHtml(c.telegram_username)}</span>` : ''}</td>
                 <td class="cell-nowrap">${escapeHtml(c.customer_phone) || '<span class="cell-dim">—</span>'}</td>
-                <td>${c.channels.map((ch) =>
+                <td class="col-channel">${c.channels.map((ch) =>
                     `<span class="chip">${escapeHtml(CH_LABEL[ch] || ch)}</span>`).join(' ')}</td>
                 <td class="cell-num">${fmtNum(c.order_count)}</td>
                 <td class="cell-num">${c.ltv ? fmtNum(c.ltv) + ' <small>so\'m</small>' : '<span class="cell-dim">—</span>'}</td>
-                <td class="cell-nowrap cell-date">${escapeHtml(c.last_seen_at || '—')}</td>
+                <td class="col-lastactive cell-nowrap cell-date">${escapeHtml(c.last_seen_at || '—')}</td>
             </tr>`).join('');
 
         tbody.querySelectorAll('[data-cust]').forEach((tr) =>
@@ -2840,7 +2659,6 @@ async function loadAccountSettings() {
         setVal('set-biz-name', currentTenant.business_name);
         setVal('set-email', currentTenant.email);
         setVal('set-plan', PLAN_LABEL[currentTenant.plan] || currentTenant.plan || 'Start');
-        await loadStaff();
     } catch (e) {
         console.error('Hisob sozlamalarini yuklashda xatolik:', e);
     }
@@ -2908,11 +2726,6 @@ async function loadSidebarPlan() {
     }
 }
 
-// ════════════════════════════════════════════════════════
-// XODIMLAR — the seats the tariff has always been selling
-// ════════════════════════════════════════════════════════
-const ROLE_LABEL = { owner: 'Egasi', operator: 'Operator' };
-
 /**
  * Sozlamalar bo'limi yuklovchisi.
  *
@@ -2923,130 +2736,6 @@ const ROLE_LABEL = { owner: 'Egasi', operator: 'Operator' };
 async function loadSettingsTab() {
     loadAccountSettings();
     loadIntegrations();
-}
-
-async function loadStaff() {
-    const card = document.getElementById('staff-card');
-    const list = document.getElementById('staff-list');
-    if (!list) return;
-
-    const resp = await fetch('/api/admin/users');
-    if (resp.status === 403) {
-        // Operators do not manage colleagues — hide the whole card rather than
-        // show a section every action inside it would refuse.
-        card.style.display = 'none';
-        return;
-    }
-    card.style.display = '';
-    if (!resp.ok) {
-        list.innerHTML = '<p class="settings-note">Xodimlar ro\'yxatini yuklab bo\'lmadi.</p>';
-        return;
-    }
-
-    const d = await resp.json();
-    const lim = d.limit;
-    document.getElementById('staff-limit').textContent =
-        `${lim.used} / ${lim.limit === null ? '∞' : lim.limit} o'rin band`
-        + (lim.limit !== null && lim.used >= lim.limit
-            ? ' — yangi xodim uchun yuqoriroq tarif kerak.' : '');
-
-    list.innerHTML = d.users.map((u) => `
-        <div class="staff-row">
-            <div class="staff-who">
-                <b>${escapeHtml(u.full_name || u.email)}</b>
-                <span>${escapeHtml(u.email)}</span>
-            </div>
-            <span class="chip">${escapeHtml(ROLE_LABEL[u.role] || u.role)}</span>
-            ${u.is_active ? '' : '<span class="chip">o\'chirilgan</span>'}
-            <div class="staff-acts">
-                <button class="btn-mini" data-edit="${escapeHtml(u.id)}">Tahrirlash</button>
-                <button class="btn-mini danger" data-del="${escapeHtml(u.id)}"
-                        data-name="${escapeHtml(u.full_name || u.email)}">O'chirish</button>
-            </div>
-        </div>`).join('');
-
-    list.querySelectorAll('[data-edit]').forEach((b) =>
-        b.addEventListener('click', () => {
-            const u = d.users.find((x) => x.id === b.dataset.edit);
-            openStaffModal(u);
-        }));
-
-    list.querySelectorAll('[data-del]').forEach((b) =>
-        b.addEventListener('click', async () => {
-            if (!confirm(`"${b.dataset.name}" o'chirilsinmi? U endi panelga kira olmaydi.`)) return;
-            try {
-                const r = await fetch(`/api/admin/users/${b.dataset.del}`, { method: 'DELETE' });
-                if (!r.ok) throw new Error((await r.json()).detail || 'O\'chirilmadi');
-                toast('Xodim o\'chirildi');
-                await loadStaff();
-            } catch (e) { toast(e.message, true); }
-        }));
-}
-
-function openStaffModal(u = null) {
-    document.getElementById('staff-modal-title').textContent =
-        u ? 'Xodimni tahrirlash' : 'Xodim qo\'shish';
-    document.getElementById('staff-id').value = u ? u.id : '';
-    setVal('staff-name', u ? u.full_name : '');
-    setVal('staff-email', u ? u.email : '');
-    setVal('staff-password', '');
-    setVal('staff-role', u ? u.role : 'operator');
-    document.getElementById('staff-email').disabled = !!u;   // the login is the identity
-    document.getElementById('staff-pass-label').textContent =
-        u ? 'Yangi parol — bo\'sh qoldirsangiz o\'zgarmaydi' : 'Parol';
-    const err = document.getElementById('staff-err');
-    err.style.display = 'none';
-    document.getElementById('staff-modal').style.display = 'flex';
-}
-
-function closeStaffModal() {
-    document.getElementById('staff-modal').style.display = 'none';
-}
-
-async function saveStaff() {
-    const id = document.getElementById('staff-id').value;
-    const err = document.getElementById('staff-err');
-    const body = {
-        full_name: gv('staff-name'),
-        role: gv('staff-role'),
-    };
-    const password = gv('staff-password');
-    if (password) body.password = password;
-
-    let url = '/api/admin/users', method = 'POST';
-    if (id) {
-        url += `/${id}`;
-        method = 'PATCH';
-    } else {
-        body.email = gv('staff-email');
-        if (!password) {
-            err.textContent = 'Yangi xodim uchun parol majburiy.';
-            err.style.display = 'block';
-            return;
-        }
-    }
-
-    try {
-        const r = await fetch(url, {
-            method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        if (!r.ok) throw new Error((await r.json()).detail || 'Saqlanmadi');
-        closeStaffModal();
-        toast(id ? 'Xodim yangilandi' : 'Xodim qo\'shildi');
-        await loadStaff();
-    } catch (e) {
-        err.textContent = e.message;
-        err.style.display = 'block';
-    }
-}
-
-function initStaff() {
-    const add = document.getElementById('staff-add-btn');
-    const save = document.getElementById('staff-save');
-    if (add) add.addEventListener('click', () => openStaffModal(null));
-    if (save) save.addEventListener('click', saveStaff);
 }
 
 // ═══════════════ HISOBIM ═══════════════
@@ -3156,12 +2845,20 @@ async function loadBilling() {
     }
 }
 
-document.getElementById('bill-topup-btn')?.addEventListener('click', async () => {
-    const raw = prompt('Qancha summa o\'tkazdingiz? (so\'m)');
-    if (!raw) return;
-    const amount = Number(String(raw).replace(/\s/g, ''));
-    if (!amount || amount <= 0) return alert('Summa noto\'g\'ri.');
-    const note = prompt('Izoh (qaysi karta/ilova orqali?)') || '';
+document.getElementById('bill-topup-btn')?.addEventListener('click', () => {
+    document.getElementById('topup-amount').value = '';
+    document.getElementById('topup-note').value = '';
+    document.getElementById('topup-modal').style.display = 'flex';
+});
+
+function closeTopupModal() {
+    document.getElementById('topup-modal').style.display = 'none';
+}
+
+async function submitTopup() {
+    const amount = Number(document.getElementById('topup-amount').value);
+    if (!amount || amount <= 0) return toast('Summa noto\'g\'ri.', true);
+    const note = document.getElementById('topup-note').value.trim();
     try {
         const r = await fetch('/api/admin/billing/topup', {
             method: 'POST',
@@ -3170,11 +2867,12 @@ document.getElementById('bill-topup-btn')?.addEventListener('click', async () =>
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || 'Xatolik');
-        alert(d.message);
+        closeTopupModal();
+        toast(d.message);
         loadBilling();
         loadSidebarPlan();
-    } catch (e) { alert(e.message); }
-});
+    } catch (e) { toast(e.message, true); }
+}
 
 async function buyPlan(plan, balance) {
     if (!confirm('Tarif hisobingizdagi mablag\'dan yechiladi. Davom etamizmi?')) return;

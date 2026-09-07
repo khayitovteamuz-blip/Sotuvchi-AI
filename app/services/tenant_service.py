@@ -83,6 +83,7 @@ def safe_user_dict(user: User, tenant: Tenant) -> dict:
         "id": tenant.id,
         "user_id": user.id,
         "business_name": tenant.business_name,
+        "logo_url": tenant.logo_url,
         "email": user.email,
         "role": user.role,
         "plan": tenant.plan,
