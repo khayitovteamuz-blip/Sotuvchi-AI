@@ -27,7 +27,7 @@ from sqlalchemy import delete, func, select
 
 from app.core.config import settings
 from app.db.base import AsyncSessionLocal
-from app.db.models import Message
+from app.db.models import Message, TelegramUpdate
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("retention")
@@ -40,6 +40,9 @@ async def main() -> int:
         return 0
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    telegram_cutoff = datetime.now(timezone.utc) - timedelta(
+        days=max(1, settings.TELEGRAM_UPDATE_RETENTION_DAYS)
+    )
     dry_run = os.getenv("RETENTION_DRY_RUN") == "1"
 
     async with AsyncSessionLocal() as db:
@@ -49,18 +52,40 @@ async def main() -> int:
             )
         ).scalar_one()
 
-        if count == 0:
-            logger.info("%s dan eski xabar yo'q (chegara: %d kun).", cutoff.date(), days)
-            return 0
+        update_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(TelegramUpdate)
+                .where(
+                    TelegramUpdate.received_at < telegram_cutoff,
+                    TelegramUpdate.status.in_(("completed", "failed")),
+                )
+            )
+        ).scalar_one()
 
         if dry_run:
-            logger.info("[DRY RUN] %d ta xabar o'chirilgan bo'lardi (%s dan eski, %d kun).",
-                        count, cutoff.date(), days)
+            logger.info(
+                "[DRY RUN] %d ta xabar va %d ta Telegram update yozuvi o'chirilardi.",
+                count,
+                update_count,
+            )
             return 0
 
-        await db.execute(delete(Message).where(Message.created_at < cutoff))
+        if count:
+            await db.execute(delete(Message).where(Message.created_at < cutoff))
+        if update_count:
+            await db.execute(
+                delete(TelegramUpdate).where(
+                    TelegramUpdate.received_at < telegram_cutoff,
+                    TelegramUpdate.status.in_(("completed", "failed")),
+                )
+            )
         await db.commit()
-        logger.info("%d ta xabar o'chirildi (%s dan eski, %d kun).", count, cutoff.date(), days)
+        logger.info(
+            "%d ta xabar va %d ta Telegram update yozuvi o'chirildi.",
+            count,
+            update_count,
+        )
     return 0
 
 

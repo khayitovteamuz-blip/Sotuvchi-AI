@@ -83,6 +83,7 @@ async def list_tenants(session: AsyncSession = Depends(get_session)):
         out.append({
             "id": t.id,
             "business_name": t.business_name,
+            "logo_url": t.logo_url,
             "owner_email": owners.get(t.id),
             "owner_name": t.owner_name,
             "phone": t.phone,
@@ -117,6 +118,7 @@ async def tenant_detail(tenant_id: str, session: AsyncSession = Depends(get_sess
     return {
         "id": tenant.id,
         "business_name": tenant.business_name,
+        "logo_url": tenant.logo_url,
         "plan": tenant.plan,
         "is_active": tenant.is_active,
         "created_at": tenant.created_at.strftime("%Y-%m-%d %H:%M") if tenant.created_at else None,
@@ -147,8 +149,6 @@ async def tenant_detail(tenant_id: str, session: AsyncSession = Depends(get_sess
         ],
         "ai": {
             "system_prompt": cfg.system_prompt,
-            "ai_provider": cfg.ai_provider,
-            "model_name": cfg.model_name,
             "temperature": cfg.temperature,
             "bot_enabled": cfg.bot_enabled,
             "ai_name": cfg.ai_name,
@@ -267,47 +267,6 @@ async def force_disconnect_telegram(
     await session.commit()
     await audit_service.log(session, admin, "telegram_disconnect", tenant_id, request=request)
     return {"status": "success"}
-
-
-@router.get("/tenants/{tenant_id}/conversations")
-async def tenant_conversations(
-    tenant_id: str, session: AsyncSession = Depends(get_session)
-):
-    """Read a customer's chats when they report the bot misbehaving."""
-    await get_tenant_or_404(session, tenant_id)
-    return await repo.list_conversations(session, tenant_id)
-
-
-@router.get("/tenants/{tenant_id}/conversations/{conv_id}")
-async def tenant_conversation_detail(
-    tenant_id: str, conv_id: str, session: AsyncSession = Depends(get_session)
-):
-    await get_tenant_or_404(session, tenant_id)
-    conv = await repo.get_conversation(session, tenant_id, conv_id)
-    if not conv:
-        raise HTTPException(status_code=404, detail="Suhbat topilmadi.")
-    msgs = (
-        await session.execute(
-            select(Message).where(Message.conversation_id == conv_id).order_by(Message.id)
-        )
-    ).scalars().all()
-    return {
-        "id": conv.id,
-        "customer_name": conv.customer_name,
-        "status": conv.status,
-        "handoff_reason": conv.handoff_reason,
-        "messages": [
-            {
-                "sender": m.sender,
-                "text": m.text,
-                "model_name": m.model_name,
-                "tokens": m.tokens,
-                "latency_ms": m.latency_ms,
-                "created_at": m.created_at.strftime("%Y-%m-%d %H:%M"),
-            }
-            for m in msgs
-        ],
-    }
 
 
 # ─── Tenant lifecycle ─────────────────────────────────────────────────────────

@@ -183,7 +183,7 @@ Kunlik cron (backup'dan keyin):
 ## Testlar
 
 ```bash
-pytest              # 61 test, bazasiz — CI'da ham shunday ishlaydi
+python -m pytest    # bazasiz tezkor suite — CI'da ham shunday ishlaydi
 ruff check app main.py tests
 ```
 
@@ -192,6 +192,10 @@ obuna soati, tarif limitlari, shifrlash, rasm yuklash tekshiruvi — bir necha
 maydonning sof funksiyasi, ularni tekshirish uchun Postgres kerak emas.
 
 CI (`.github/workflows/ci.yml`) har push va PR'da ruff + pytest ishga tushiradi.
+
+Tizim chegaralari va yangi kanal/to'lov integratsiyalarini qanday qo'shish
+kerakligi [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) da. Amalga oshirish
+ketma-ketligi [docs/ROADMAP.md](docs/ROADMAP.md) da yuritiladi.
 
 ---
 

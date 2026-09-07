@@ -1,43 +1,19 @@
-"""Read-only order history and knowledge-base edits — the two things a
-support call most often needs from a tenant's data."""
+"""Knowledge-base edits — what a support call most often needs to fix on a
+tenant's data."""
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.platform.common import get_tenant_or_404
 from app.core.platform_auth import require_platform_admin
 from app.db import repo
 from app.db.base import get_session
-from app.db.models import Order, PlatformAdmin
+from app.db.models import PlatformAdmin
 from app.services import audit_service
 
 router = APIRouter()
-
-
-@router.get("/tenants/{tenant_id}/orders")
-async def tenant_orders(tenant_id: str, session: AsyncSession = Depends(get_session)):
-    await get_tenant_or_404(session, tenant_id)
-    rows = (
-        await session.execute(
-            select(Order).where(Order.tenant_id == tenant_id)
-            .order_by(Order.created_at.desc()).limit(50)
-        )
-    ).scalars().all()
-    return [
-        {
-            "id": o.id,
-            "customer_name": o.customer_name,
-            "customer_phone": o.customer_phone,
-            "total_amount": o.total_amount,
-            "status": o.status,
-            "from_ai": bool(o.conversation_id),
-            "created_at": o.created_at.strftime("%Y-%m-%d %H:%M") if o.created_at else None,
-        }
-        for o in rows
-    ]
 
 
 class KbPatch(BaseModel):
