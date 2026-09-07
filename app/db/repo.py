@@ -269,6 +269,13 @@ logger = logging.getLogger("repo")
 
 
 # ─── Categories ───────────────────────────────────────────────────────────────
+def _category_dict(c: Category, product_count: int = 0) -> dict:
+    return {
+        "id": c.id, "name": c.name, "icon": c.icon,
+        "image_url": c.image_url, "product_count": product_count,
+    }
+
+
 async def list_categories(session: AsyncSession, tenant_id: str) -> List[dict]:
     res = await session.execute(select(Category).where(Category.tenant_id == tenant_id))
     cats = list(res.scalars().all())
@@ -279,13 +286,7 @@ async def list_categories(session: AsyncSession, tenant_id: str) -> List[dict]:
     )
     counts = {(name or "").lower(): n for name, n in cres.all()}
 
-    out = []
-    for c in cats:
-        out.append({
-            "id": c.id, "name": c.name, "icon": c.icon,
-            "image_url": c.image_url, "product_count": counts.get(c.name.lower(), 0),
-        })
-    return out
+    return [_category_dict(c, counts.get(c.name.lower(), 0)) for c in cats]
 
 
 async def create_category(session: AsyncSession, tenant_id: str, data: dict) -> dict:
@@ -298,7 +299,7 @@ async def create_category(session: AsyncSession, tenant_id: str, data: dict) -> 
     )
     session.add(c)
     await session.commit()
-    return {"id": c.id, "name": c.name, "icon": c.icon, "image_url": c.image_url, "product_count": 0}
+    return _category_dict(c)
 
 
 async def update_category(session: AsyncSession, tenant_id: str, category_id: str, data: dict) -> Optional[dict]:
@@ -317,7 +318,7 @@ async def update_category(session: AsyncSession, tenant_id: str, category_id: st
         for p in pres.scalars().all():
             p.category = c.name
     await session.commit()
-    return {"id": c.id, "name": c.name, "icon": c.icon, "image_url": c.image_url, "product_count": 0}
+    return _category_dict(c)
 
 
 async def delete_category(session: AsyncSession, tenant_id: str, category_id: str) -> bool:
@@ -347,8 +348,69 @@ async def create_order(
     conversation_id: Optional[str] = None,
     delivery_address: Optional[str] = None,
     notes: Optional[str] = None,
-) -> Order:
-    total = sum(float(i["unit_price"]) * int(i.get("quantity", 1)) for i in items)
+    source_update_id: Optional[int] = None,
+) -> tuple[Order, bool]:
+    if source_update_id is not None:
+        existing = (
+            await session.execute(
+                select(Order).where(
+                    Order.tenant_id == tenant_id,
+                    Order.source_update_id == source_update_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing, False
+
+    # Reserve stock and create the order in one transaction. The AI performs a
+    # friendly stock check before calling us, but that check is only advisory:
+    # another customer can buy the last unit between the check and this write.
+    # Locking the product rows here makes this function the authoritative sales
+    # boundary and prevents overselling across workers.
+    requested: dict[str, int] = {}
+    for item in items:
+        product_id = str(item.get("product_id") or "").strip()
+        if not product_id:
+            raise ValueError("Buyurtmada mahsulot ID si yo'q.")
+        try:
+            quantity = max(1, int(item.get("quantity", 1)))
+        except (TypeError, ValueError):
+            quantity = 1
+        requested[product_id] = requested.get(product_id, 0) + quantity
+
+    locked_products: dict[str, Product] = {}
+    for product_id in sorted(requested):
+        product = (
+            await session.execute(
+                select(Product)
+                .where(Product.tenant_id == tenant_id, Product.id == product_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if product is None:
+            raise ValueError(f"'{product_id}' mahsuloti katalogda yo'q.")
+        quantity = requested[product_id]
+        if not product.in_stock or product.stock_quantity < quantity:
+            raise ValueError(
+                f"'{product.name}' omborda yetarli emas (qoldiq: {product.stock_quantity})."
+            )
+        locked_products[product_id] = product
+
+    reserved_items = []
+    for product_id, quantity in requested.items():
+        product = locked_products[product_id]
+        product.stock_quantity -= quantity
+        if product.stock_quantity == 0:
+            product.in_stock = False
+        reserved_items.append({
+            "product_id": product.id,
+            "product_name": product.name,
+            "quantity": quantity,
+            "unit_price": float(product.price),
+        })
+
+    total = sum(i["unit_price"] * i["quantity"] for i in reserved_items)
     order = Order(
         id=f"ORD-{uuid.uuid4().hex[:8].upper()}",
         tenant_id=tenant_id,
@@ -356,6 +418,7 @@ async def create_order(
         customer_phone=customer_phone,
         telegram_id=telegram_id,
         conversation_id=conversation_id,
+        source_update_id=source_update_id,
         total_amount=total,
         status="Yangi",
         delivery_address=delivery_address,
@@ -372,7 +435,7 @@ async def create_order(
             order.payment_photo_file_id = conv.last_photo_file_id
         if conv and conv.customer_username:
             order.customer_username = conv.customer_username
-    for i in items:
+    for i in reserved_items:
         order.items.append(OrderItem(
             product_id=i.get("product_id", ""),
             product_name=i.get("product_name", ""),
@@ -391,7 +454,7 @@ async def create_order(
         logger.warning(f"Customer link failed for order {order.id}: {e}")
 
     await session.commit()
-    return order
+    return order, True
 
 
 async def update_order_status(session: AsyncSession, tenant_id: str, order_id: str, status: str) -> Optional[Order]:
@@ -415,11 +478,6 @@ async def get_settings(session: AsyncSession, tenant_id: str) -> TenantSettings:
 
 async def save_settings(session: AsyncSession, tenant_id: str, data: dict) -> TenantSettings:
     s = await get_settings(session, tenant_id)
-    # ai_provider / model_name are deliberately NOT writable from here. Which
-    # model serves a shop is the platform operator's decision (it depends on
-    # which API keys the server holds), and the request schema carries defaults
-    # — a business panel that posted settings without them would have silently
-    # reset a Claude tenant back to Gemini.
     plain = ("system_prompt", "temperature",
              "bot_enabled", "sheets_sync_enabled", "ai_name", "ai_tone",
              "ai_language", "greeting_message", "auto_handoff_after")

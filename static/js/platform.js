@@ -210,11 +210,7 @@ async function loadPayments() {
             <td class="cell-dim">${esc(PAY_KIND[p.kind] || p.kind)}</td>
             <td class="num" style="font-weight:600">${sign}${fmt(p.amount)}</td>
             <td class="cell-dim">${esc(p.note || '—')}</td>
-            <td><span class="state ${cls}">${label}</span>${
-                t.sub_status === 'expired' ? ' <span class="state bad">Muddati tugagan</span>'
-                : t.sub_status === 'frozen' ? ' <span class="state idle">Muzlatilgan</span>' : ''}</td>
-            <td class="num">${fmt(t.balance)}<div class="cell-dim">${
-                t.days_left != null ? Math.round(t.days_left) + ' kun' : '—'}</div></td>
+            <td><span class="state ${cls}">${label}</span></td>
             <td style="text-align:right;white-space:nowrap">
                 ${p.status === 'pending' && p.kind === 'topup' ? `
                     <button class="btn btn-green" data-ok="${esc(p.id)}">Tasdiqlash</button>
@@ -530,7 +526,9 @@ function renderRows() {
         <tr class="row ${sig ? `sig-${sig}` : ''}" data-id="${esc(t.id)}">
             <td>
                 <div class="biz">
-                    <span class="biz-av">${esc(initials(t.business_name))}</span>
+                    <span class="biz-av">${t.logo_url
+                        ? `<img src="${esc(t.logo_url)}" alt="">`
+                        : esc(initials(t.business_name))}</span>
                     <div>
                         <div class="biz-name">${esc(t.business_name)}</div>
                         <div class="biz-mail">${esc(t.phone || t.owner_email || '—')}</div>
@@ -616,52 +614,6 @@ document.querySelectorAll('[data-grain]').forEach((b) => {
     });
 });
 
-// ═══ AI MODELLARI ═══
-// Filled from /ai/models each time a profile opens: availability depends on
-// what the server has a key for, so it cannot be baked into the page.
-let AI_PROVIDERS = [];
-
-const provider = (name) => AI_PROVIDERS.find((p) => p.name === (name || '').toLowerCase());
-
-function providerOptions(current) {
-    return AI_PROVIDERS.map((p) => {
-        const isCurrent = p.name === (current || '').toLowerCase();
-        // A provider with no key is shown but unpickable — the operator sees
-        // that Claude exists and why it can't be chosen yet.
-        const off = !p.available && !isCurrent;
-        return `<option value="${esc(p.name)}" ${isCurrent ? 'selected' : ''} ${off ? 'disabled' : ''}>${
-            esc(p.title)}${p.available ? '' : ' — kalit yo\'q'}</option>`;
-    }).join('');
-}
-
-const MODEL_TIER_ORDER = ['lite', 'flash', 'pro'];
-
-function modelOptions(providerName, current, maxTier) {
-    const p = provider(providerName) || AI_PROVIDERS[0];
-    if (!p) return '';
-    const maxIdx = MODEL_TIER_ORDER.indexOf(maxTier);
-    return p.models.map((m) => {
-        // A tier we don't recognise (custom/legacy model) is never blocked —
-        // matches the backend's tier_allowed() fail-open policy.
-        const idx = MODEL_TIER_ORDER.indexOf(m.tier);
-        const overTier = maxIdx >= 0 && idx >= 0 && idx > maxIdx && m.id !== current;
-        return `<option value="${esc(m.id)}" ${m.id === current ? 'selected' : ''} ${overTier ? 'disabled' : ''}>${
-            esc(m.title)}${overTier ? ' — tarifda yo\'q' : ''}</option>`;
-    }).join('');
-}
-
-function planTier(planName) {
-    return (PLANS.find((p) => p.name === planName) || {}).max_model_tier;
-}
-
-function providerNote(providerName) {
-    const p = provider(providerName);
-    if (!p) return '';
-    return p.available
-        ? 'Tanlangan model shu biznesning chatlariga javob beradi.'
-        : (p.reason || '');
-}
-
 // ═══ BIZNES KARTASI ═══
 function closeDrawer() {
     $('plat-drawer').hidden = true;
@@ -681,15 +633,12 @@ async function openTenant(id) {
     $('drawer-body').innerHTML = '<p class="empty">Yuklanmoqda</p>';
 
     const d = await api(`/api/platform/tenants/${id}`);
-    // Which models this business may be switched to, and which of them are
-    // actually reachable — the dropdown must not offer a dead choice.
-    const cat = await api('/api/platform/ai/models'
-        + `?provider=${encodeURIComponent(d.ai.ai_provider || '')}`
-        + `&model=${encodeURIComponent(d.ai.model_name || '')}`);
-    AI_PROVIDERS = cat.providers;
 
     $('drawer-title').textContent = d.business_name;
     $('drawer-sub').textContent = `${d.id} · ${d.created_at || ''}`;
+    $('drawer-av').innerHTML = d.logo_url
+        ? `<img src="${esc(d.logo_url)}" alt="">`
+        : esc(initials(d.business_name));
 
     const u = d.usage;
     const opts = PLANS.map((p) =>
@@ -762,11 +711,6 @@ async function openTenant(id) {
 
         <div class="block">
             <div class="block-t">AI sozlamalari</div>
-            <label class="field"><span>AI provayderi</span>
-                <select id="dr-provider">${providerOptions(d.ai.ai_provider)}</select></label>
-            <label class="field"><span>Model</span>
-                <select id="dr-model">${modelOptions(d.ai.ai_provider, d.ai.model_name, planTier(d.plan))}</select></label>
-            <p class="note" id="dr-model-note">${esc(providerNote(d.ai.ai_provider))}</p>
             <label class="field"><span>Temperature</span>
                 <input type="number" id="dr-temp" step="0.1" min="0" max="1" value="${d.ai.temperature}"></label>
             <label class="field"><span>Operatorga uzatishdan oldin</span>
@@ -853,18 +797,7 @@ async function openTenant(id) {
         patchTenant(id, { is_active: !d.is_active }, stopping ? 'Biznes to\'xtatildi' : 'Biznes faollashtirildi');
     });
 
-    // Switching provider swaps the model list under it — a Gemini model id
-    // left selected while the provider says Claude would be saved and then
-    // rejected, which reads as a bug rather than a mismatch.
-    $('dr-provider').addEventListener('change', () => {
-        const p = $('dr-provider').value;
-        $('dr-model').innerHTML = modelOptions(p, '', planTier(d.plan));
-        $('dr-model-note').textContent = providerNote(p);
-    });
-
     $('dr-save-ai').addEventListener('click', () => patchAi(id, {
-        ai_provider: $('dr-provider').value,
-        model_name: $('dr-model').value,
         temperature: parseFloat($('dr-temp').value),
         auto_handoff_after: parseInt($('dr-handoff').value, 10),
         system_prompt: $('dr-prompt').value,
@@ -1054,8 +987,6 @@ async function patchAi(id, body) {
 }
 
 // ═══ TARIFLAR ═══
-const MODEL_TIER_LABEL = { lite: 'Lite (eng arzon)', flash: 'Flash', pro: 'Pro (hammasi)' };
-
 async function loadPlans() {
     PLANS = await api('/api/platform/plans');
 
@@ -1087,12 +1018,6 @@ async function loadPlans() {
                 <input type="number" data-f="max_ai_messages_monthly" value="${p.max_ai_messages_monthly ?? ''}" placeholder="∞"></div>
             <div class="plan-line"><span>Operator</span>
                 <input type="number" data-f="max_operators" value="${p.max_operators ?? ''}" placeholder="∞"></div>
-            <div class="plan-line"><span>AI model darajasi</span>
-                <select data-f="max_model_tier">
-                    ${['lite', 'flash', 'pro'].map((t) =>
-                        `<option value="${t}" ${p.max_model_tier === t ? 'selected' : ''}>${MODEL_TIER_LABEL[t]}</option>`
-                    ).join('')}
-                </select></div>
             <div class="acts"><button class="btn btn-green" data-save="${esc(p.name)}">Saqlash</button></div>
             <p class="plan-note">Bo'sh maydon — cheksiz.</p>
         </div>`).join('');
@@ -1114,9 +1039,6 @@ async function savePlan(name) {
         } else {
             body[field] = Number(raw);
         }
-    });
-    card.querySelectorAll('select[data-f]').forEach((sel) => {
-        body[sel.dataset.f] = sel.value;
     });
     try {
         const r = await api(`/api/platform/plans/${name}`, { method: 'PATCH', body: JSON.stringify(body) });
