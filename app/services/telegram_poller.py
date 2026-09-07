@@ -66,6 +66,9 @@ class TelegramPoller:
         task = self._tasks.get(tenant_id)
         return bool(task and not task.done())
 
+    async def register_webhooks(self) -> dict:
+        return await register_webhooks()
+
     # ─── supervisor: keeps one loop per connected tenant ──────────────────────
     async def _supervise(self) -> None:
         while self._running:

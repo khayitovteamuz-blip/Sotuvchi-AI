@@ -160,7 +160,7 @@ def main() -> None:
     ws.append(header)
     for r in rows:
         ws.append(r)
-    for col, width in zip("ABCDEF", (38, 20, 14, 10, 52, 70)):
+    for col, width in zip("ABCDEF", (38, 20, 14, 10, 52, 70), strict=True):
         ws.column_dimensions[col].width = width
     ws.freeze_panes = "A2"
     xlsx_path = out_dir / "namuna-katalog-100.xlsx"

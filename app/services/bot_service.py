@@ -206,8 +206,6 @@ class TelegramBotService:
         if caption:
             payload["caption"] = caption[:1024]
             payload["parse_mode"] = "Markdown"
-        if reply_markup:
-            payload["reply_markup"] = json.dumps(reply_markup)
 
         local = _local_photo(photo)
         files = None
@@ -215,13 +213,16 @@ class TelegramBotService:
             payload["photo"] = photo
         else:
             files = {"photo": (local.name, local.read_bytes())}
+        if reply_markup:
+            # `files` posts as multipart form data, where reply_markup must be a
+            # JSON string; `json=` posts a real JSON body, where it must not be.
+            payload["reply_markup"] = json.dumps(reply_markup) if files else reply_markup
 
         try:
             async with httpx.AsyncClient(timeout=25.0) as client:
                 url = f"{TELEGRAM_API.format(token=token)}/sendPhoto"
                 resp = (await client.post(url, data=payload, files=files) if files
-                        else await client.post(url, json={**payload, "photo": photo,
-                                                          **({"reply_markup": reply_markup} if reply_markup else {})}))
+                        else await client.post(url, json=payload))
                 data = resp.json()
                 if not data.get("ok"):
                     logger.warning(f"sendPhoto failed: {str(data)[:180]}")
@@ -338,7 +339,9 @@ class TelegramBotService:
     async def handle_update(self, session: AsyncSession, tenant: Tenant, update: Dict[str, Any]):
         token = tenant.telegram_bot_token
         if "message" in update:
-            await self._handle_message(session, tenant, token, update["message"])
+            await self._handle_message(
+                session, tenant, token, update["message"], update.get("update_id")
+            )
         elif "channel_post" in update:
             # A channel is a one-way destination: the only thing worth reading
             # from one is the pairing command an admin posts there.
@@ -371,7 +374,7 @@ class TelegramBotService:
             session, tenant, cfg, chat_id, kind, title, code
         )
 
-    async def _handle_message(self, session, tenant, token, msg):
+    async def _handle_message(self, session, tenant, token, msg, source_update_id=None):
         chat_id = str(msg["chat"]["id"])
         user_name = msg.get("from", {}).get("first_name", "Mijoz")
         # A photo's text arrives as "caption", not "text"
@@ -549,7 +552,13 @@ class TelegramBotService:
             return
 
         resp = await ai_agent.generate_response(
-            session, tenant, conv, text, user_name, media=media
+            session,
+            tenant,
+            conv,
+            text,
+            user_name,
+            media=media,
+            source_update_id=source_update_id,
         )
         if resp.suppress_send:
             # 2-marta ketma-ket mavzudan tashqari savol — Inboxda ko'rinadi
