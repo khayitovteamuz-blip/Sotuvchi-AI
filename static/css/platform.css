@@ -533,6 +533,62 @@ tr.sig-off { opacity: 0.55; }
    field's own bottom margin instead of floating between two rows. */
 .note { margin-top: -6px; font-size: 11.5px; line-height: 1.6; color: var(--fg-3); }
 
+/* ═══ BIZNES PROFILI: holat qatori va tablar ═══
+   Bu ikkalasi drawer-head bilan bir xil qatlamda (flex-shrink:0) turadi —
+   suhbat pastga aylanganda ham "kim, qaysi holatda" doim ko'rinib tursin.
+   Tab tartibi ahamiyat tartibi: eng ko'p qaraladigan narsa (kontakt/tarif/
+   hisob) birinchi, "Xavfli hudud" oxirida va boshqacha rangda — bir bosishda
+   noto'g'ri joyga tegib ketish qiyinroq bo'lsin. */
+.drawer-subhead {
+    padding: 0 32px; background: var(--panel); border-bottom: 1px solid var(--line);
+    flex-shrink: 0; overflow-x: auto;
+}
+.drawer-status-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 14px 0; }
+.drawer-tabs { display: flex; }
+.drawer-tab {
+    padding: 10px 2px 12px; margin-right: 22px; font-size: 13.5px; font-weight: 600;
+    color: var(--fg-3); border-bottom: 2px solid transparent; white-space: nowrap;
+    transition: color var(--ease), border-color var(--ease);
+}
+.drawer-tab:hover { color: var(--fg-2); }
+.drawer-tab.active { color: var(--fg); border-bottom-color: var(--green); }
+.drawer-tab-danger { color: rgba(255, 107, 91, 0.75); }
+.drawer-tab-danger:hover { color: var(--red); }
+.drawer-tab-danger.active { color: var(--red); border-bottom-color: var(--red); }
+
+.tab-panel[hidden] { display: none; }
+
+.tab-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.tab-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+@media (max-width: 1080px) {
+    .tab-grid-3, .tab-grid-2 { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Bo'sh qoldirilgan bo'lim "hali hech kim to'ldirmagan" deb ochiq aytadi —
+   shunchaki bo'sh maydonlar ko'rsatishdan farqli o'laroq. */
+.card-incomplete { border-color: rgba(242, 174, 60, 0.3); }
+.card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.card-head .block-t { margin-bottom: 0; }
+.flag-warn {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--amber); background: rgba(242, 174, 60, 0.14); padding: 3px 8px; border-radius: 100px;
+}
+.empty-hint { font-size: 12.5px; color: var(--fg-3); line-height: 1.6; margin: 2px 0 16px; }
+
+/* "98 / 99" va "1 / 1000" so'z sifatida bir xil og'irlikda ko'rinadi —
+   chiziq esa "deyarli to'lgan"ni bo'linish qilmasdan darhol ko'rsatadi. */
+.usage { margin-bottom: 16px; }
+.usage-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
+.usage-row span { color: var(--fg-2); }
+.usage-track { height: 6px; border-radius: 100px; background: var(--panel-3); overflow: hidden; }
+.usage-fill { height: 100%; background: var(--green); border-radius: 100px; }
+.usage-fill.warn { background: var(--amber); }
+.usage-fill.bad { background: var(--red); }
+
+.row-acts { display: flex; gap: 6px; }
+
+.danger-panel .block { border-color: rgba(255, 107, 91, 0.28); max-width: 560px; }
+
 /* ═══ MODAL ═══ */
 .modal {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);

@@ -53,6 +53,39 @@ def _add_usage(usage: Dict[str, int], resp) -> None:
         pass
 
 
+def handoff_left_unanswered(trace: List[Dict[str, Any]]) -> bool:
+    """Did this turn hand the chat to a human that nobody was told about?
+
+    True only when a handoff really happened AND the alert reached no one —
+    an escalation into an empty room, where the customer is otherwise left
+    waiting on a chat the AI has already stopped answering.
+    """
+    return any(
+        t.get("name") == "handoff_to_human"
+        and not (t.get("result") or {}).get("operator_notified")
+        for t in (trace or [])
+    )
+
+
+def contact_fallback_text(phone: Optional[str], lang: Optional[str]) -> str:
+    """The "call us instead" line appended when no human was reached.
+
+    Fixed text, not model output, for the same reason the payment-slip refusal
+    is: this is the customer's only way out of a chat nobody is watching, and
+    an instruction the model follows *most* of the time is not good enough for
+    that. Empty when the business has set no number — inventing one, or
+    promising a call back that nobody will make, is worse than saying nothing.
+    """
+    phone = (phone or "").strip()
+    if not phone:
+        return ""
+    if (lang or "uz") == "ru":
+        return f"\n\n📞 Если нужно быстрее — позвоните нам: {phone}"
+    if lang == "en":
+        return f"\n\n📞 Need a faster answer? Call us: {phone}"
+    return f"\n\n📞 Tezroq javob kerak bo'lsa, shu raqamga qo'ng'iroq qiling: {phone}"
+
+
 # Fallback only — the real text lives in the platform_ai_settings table (one
 # row, id="global"; see repo.get_platform_ai_settings) so a platform admin can
 # tune it from /boshqaruv without a deploy. These constants exist purely so a
@@ -292,6 +325,12 @@ class AISalesAgent:
         tool_trace = await self._auto_handoff_on_repeated_failure(
             session, tenant_id, conversation, cfg, tool_trace
         )
+
+        # Uzatildi-yu, hech kimga xabar bormadi: mijozga aloqa raqamini shu
+        # yerda qo'shamiz. Yozilgan xabarga ham shu matn tushadi — Inboxda
+        # mijoz ko'rgan javobning aynan o'zi turishi kerak.
+        if handoff_left_unanswered(tool_trace):
+            reply_text += contact_fallback_text(cfg.contact_phone, cfg.ai_language)
 
         # 2-marta ketma-ket mavzudan tashqari savol — javob Inboxda ko'rinadi,
         # lekin mijozga yuborilmaydi. Bloklash emas: mavzuga qaytishi bilan

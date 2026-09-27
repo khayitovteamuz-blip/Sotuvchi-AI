@@ -235,6 +235,21 @@ class Tenant(Base):
     telegram_bot_username: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     telegram_webhook_secret: Mapped[Optional[str]] = mapped_column(EncryptedStr(512), nullable=True)
 
+    # ── Telegram Business ──
+    # The bot is connected from the owner's OWN Telegram app (Settings →
+    # Telegram Business → Chatbots), not from our panel — there is nothing to
+    # submit here, only what Telegram tells us via a business_connection
+    # update. Once set, AI replies are sent with this id so they appear to
+    # come from the owner's personal account, not the bot.
+    telegram_business_connection_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # The connected account's own Telegram user id — messages the owner sends
+    # themselves (from their phone) arrive on the same update stream as a
+    # customer's; this is how the two are told apart.
+    telegram_business_owner_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Telegram sets is_enabled=false if the owner turns the chatbot off from
+    # their Business settings without fully disconnecting it.
+    telegram_business_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
     # ── Team groups ──
     # Chat ids, not invite links: an invite link (t.me/+hash) carries no chat_id,
     # so the bot must be added to the group and paired from inside it.
@@ -341,6 +356,14 @@ class TenantSettings(Base):
     temperature: Mapped[float] = mapped_column(Float, default=0.7)
     bot_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     sheets_sync_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Owner pastes a normal share link; we convert it to the sheet's CSV export
+    # URL ourselves — no Google API credentials, no OAuth, just "anyone with
+    # the link can view". Only ever written by the sync endpoint itself, after
+    # a fetch has proven the link actually works — never by the generic
+    # settings save, which would let a bad link overwrite a working one.
+    google_sheet_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    google_sheet_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    google_sheet_product_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # AI persona (AI Agent → Persona tab)
     ai_name: Mapped[str] = mapped_column(String(64), default="Sotuvchi AI")
@@ -371,6 +394,11 @@ class TenantSettings(Base):
     return_policy: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     working_hours: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     faq: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # The number a customer is given when no human can pick the chat up.
+    # Deliberately NOT Tenant.phone: that one is the owner's own line, kept for
+    # the platform's support team, and is edited from /boshqaruv — reusing it
+    # would mean a platform admin silently changing what customers are told.
+    contact_phone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     # Where operator alerts are delivered. The owner pairs their own Telegram by
     # sending "/operator <pairing_code>" to the bot — without this, a handoff
@@ -622,6 +650,11 @@ class Conversation(Base):
     # can forward it to the team without re-uploading the image.
     last_photo_file_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     customer_username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Set when this conversation arrived via Telegram Business (a business_message
+    # update), so a later reply — AI or a human's from the Inbox — knows to send
+    # with this id and appear as the owner's own account. Null for a chat that
+    # only ever talked to the bot directly.
+    telegram_business_connection_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="ai")  # ai | operator | closed
     assigned_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     assigned_user_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)

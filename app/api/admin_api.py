@@ -372,6 +372,57 @@ async def import_products(
         raise HTTPException(status_code=500, detail=f"Import xatosi: {e}")
 
 
+@router.post("/products/import-sheet")
+async def import_from_google_sheet(
+    url: str = Body(..., embed=True),
+    dry_run: bool = False,
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+):
+    """Same import pipeline as /products/import, fed from a public Google Sheet
+    instead of an uploaded file — see import_service.fetch_google_sheet_csv."""
+    if not rate_limit.allow(f"import:{user.tenant_id}", max_calls=10, window_seconds=300):
+        raise HTTPException(status_code=429, detail="Juda ko'p import so'rovi. Bir necha daqiqadan so'ng urinib ko'ring.")
+
+    tenant_id = user.tenant_id  # read before any dry-run rollback expires `user`
+
+    try:
+        content = await import_service.fetch_google_sheet_csv(url)
+
+        preview = await import_service.import_products(
+            session, tenant_id, "google-sheet.csv", content, dry_run=True
+        )
+        tenant = await tenant_service.get_tenant(session, tenant_id)
+        if preview.get("success") and preview.get("added"):
+            try:
+                await quota_service.check_products(session, tenant, adding=preview["added"])
+            except quota_service.QuotaExceeded as e:
+                raise HTTPException(status_code=402, detail=e.message)
+
+        if dry_run:
+            return preview
+
+        result = await import_service.import_products(
+            session, tenant_id, "google-sheet.csv", content, dry_run=False
+        )
+        if result.get("success"):
+            # Only recorded once the link has actually proven itself — a bad
+            # paste must never overwrite a link that was working.
+            cfg = await repo.get_settings(session, tenant_id)
+            cfg.google_sheet_url = url.strip()
+            cfg.google_sheet_synced_at = datetime.now(timezone.utc)
+            cfg.google_sheet_product_count = result.get("added", 0) + result.get("updated", 0)
+            await session.commit()
+        return result
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(status_code=500, detail=f"Sinxronlash xatosi: {e}")
+
+
 @router.post("/products/auto-categorize")
 async def auto_categorize(
     only_uncategorized: bool = True,

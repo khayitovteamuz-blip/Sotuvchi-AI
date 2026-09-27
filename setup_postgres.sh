@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Sotuvchi AI — Postgres + pgvector setup (macOS / Homebrew)
+# Sotuvchi AI — Postgres setup (macOS / Homebrew)
 # Homebrew allaqachon o'rnatilgan bo'lishi kerak (u parol so'raydi, alohida qadamda).
 # Bu skript sudo TALAB QILMAYDI.
 #
@@ -22,16 +22,16 @@ fi
 BREW_PREFIX="$(brew --prefix)"
 echo "✅ Homebrew: $BREW_PREFIX"
 
-# 2) postgresql@16 + pgvector o'rnatish
-echo "→ postgresql@16 va pgvector o'rnatilyapti (bir necha daqiqa)..."
-brew install postgresql@16 pgvector
+# 2) postgresql@17 o'rnatish
+echo "→ postgresql@17 o'rnatilyapti (bir necha daqiqa)..."
+brew install postgresql@17
 
-# 3) postgresql@16 keg-only — PATH ga qo'shamiz (shu sessiya uchun)
-export PATH="$BREW_PREFIX/opt/postgresql@16/bin:$PATH"
+# 3) postgresql@17 keg-only — PATH ga qo'shamiz (shu sessiya uchun)
+export PATH="$BREW_PREFIX/opt/postgresql@17/bin:$PATH"
 
 # 4) Serverni ishga tushirish
 echo "→ Postgres server ishga tushirilyapti..."
-brew services start postgresql@16 || true
+brew services start postgresql@17 || true
 
 # 5) Server tayyor bo'lguncha kutamiz
 echo "→ Server tayyor bo'lishini kutyapmiz..."
@@ -55,11 +55,7 @@ else
   echo "✅ '$DB_NAME' bazasi yaratildi."
 fi
 
-# 7) pgvector kengaytmasini yoqish
-psql "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null
-echo "✅ pgvector kengaytmasi yoqildi."
-
-# 8) Tekshirish + connection URL
+# 7) Tekshirish + connection URL
 PG_USER="$(whoami)"
 echo ""
 echo "──────────────────────────────────────────────"
@@ -71,5 +67,5 @@ echo " .env fayliga qo'shiladigan qator (men qo'shaman):"
 echo "   DATABASE_URL=postgresql+asyncpg://$PG_USER@localhost:5432/$DB_NAME"
 echo ""
 echo " PATH ga doimiy qo'shish uchun (ixtiyoriy):"
-echo "   echo 'export PATH=\"$BREW_PREFIX/opt/postgresql@16/bin:\$PATH\"' >> ~/.zshrc"
+echo "   echo 'export PATH=\"$BREW_PREFIX/opt/postgresql@17/bin:\$PATH\"' >> ~/.zshrc"
 echo "──────────────────────────────────────────────"

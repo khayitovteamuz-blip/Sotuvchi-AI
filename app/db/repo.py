@@ -489,7 +489,8 @@ async def save_settings(session: AsyncSession, tenant_id: str, data: dict) -> Te
     # otherwise a business could never remove a rule it no longer offers.
     kb = ("delivery_info", "delivery_fee_city", "delivery_fee_regions",
           "free_delivery_from", "delivery_days_city", "delivery_days_regions",
-          "payment_info", "warranty_info", "return_policy", "working_hours", "faq")
+          "payment_info", "warranty_info", "return_policy", "working_hours", "faq",
+          "contact_phone")
     for field in kb:
         if field in data:
             val = data[field]
@@ -863,6 +864,44 @@ async def analytics(session: AsyncSession, tenant_id: str, period: str = periods
         )
     ).first()
 
+    # Of the orders the AI sourced this period, how many did it close without
+    # any human ever stepping into that conversation — the number that answers
+    # "is the AI actually selling on its own", separate from escalation_rate
+    # (which counts conversations, not the sales that came out of them).
+    ai_sourced, ai_alone = (
+        await session.execute(
+            select(
+                func.count().filter(and_(o_cur, Order.status != "Bekor qilindi")),
+                func.count().filter(
+                    and_(o_cur, Order.status != "Bekor qilindi", Conversation.handoff_reason.is_(None))
+                ),
+            )
+            .select_from(Order)
+            .join(Conversation, Conversation.id == Order.conversation_id)
+            .where(Order.tenant_id == tenant_id, Order.conversation_id.isnot(None))
+        )
+    ).first()
+
+    # Free-text handoff reasons (the model can call handoff_to_human with any
+    # wording) collapse into a handful of buckets a shop owner can act on —
+    # a raw GROUP BY on the text would fragment into dozens of near-duplicates.
+    reason_bucket = case(
+        (Conversation.handoff_reason.like("Oylik AI limiti tugadi%"), "Tarif limiti tugadi"),
+        (Conversation.handoff_reason == "Mijoz operator tugmasini bosdi", "Mijoz o'zi so'radi"),
+        (Conversation.handoff_reason.like("Mijoz o'zini xodim deb%"), "Suiiste'mol/imtiyoz talabi"),
+        (Conversation.handoff_reason.like("AI ketma-ket%"), "AI javob topolmadi"),
+        (Conversation.handoff_reason == "AI operatorni va'da qildi (avtomatik uzatildi)", "AI va'dasini bajarmadi"),
+        else_="AI qarori bilan",
+    )
+    reason_rows = (
+        await session.execute(
+            select(reason_bucket, func.count())
+            .where(Conversation.tenant_id == tenant_id, c_cur, handed)
+            .group_by(reason_bucket)
+            .order_by(func.count().desc())
+        )
+    ).all()
+
     out = {
         "period": period,
         "period_label": periods.PERIODS[period],
@@ -886,6 +925,9 @@ async def analytics(session: AsyncSession, tenant_id: str, period: str = periods
         "conversion_rate": round(converted / total_conv * 100, 1) if total_conv else 0.0,
         "order_count": orders or 0,
         "revenue": float(revenue or 0),
+        # Share of the AI's own sales it closed with no human in the loop.
+        "ai_alone_rate": round(ai_alone / ai_sourced * 100, 1) if ai_sourced else 0.0,
+        "handoff_reasons": [{"reason": r, "count": n} for r, n in reason_rows],
     }
     out["cost"] = _cost(out["prompt_tokens"], out["output_tokens"], out["total_tokens"])
 
@@ -962,25 +1004,35 @@ async def activity_series(session: AsyncSession, tenant_id: str, span: str = "oy
                        (SELECT count(*) FROM orders o
                          WHERE o.tenant_id = :t
                            AND o.created_at + interval '{off} hours' >= b.bucket
-                           AND o.created_at + interval '{off} hours' <  b.bucket + interval '1 {unit}') AS orders
+                           AND o.created_at + interval '{off} hours' <  b.bucket + interval '1 {unit}') AS orders,
+                       -- ai_revenue bilan bir xil ta'rif: bekor qilinmagan va
+                       -- AI suhbatidan kelgan buyurtmalar — dashboard_stats'dagi
+                       -- yashil kartochka bilan mos bo'lishi uchun.
+                       (SELECT coalesce(sum(o.total_amount), 0) FROM orders o
+                         WHERE o.tenant_id = :t
+                           AND o.status != 'Bekor qilindi'
+                           AND o.conversation_id IS NOT NULL
+                           AND o.created_at + interval '{off} hours' >= b.bucket
+                           AND o.created_at + interval '{off} hours' <  b.bucket + interval '1 {unit}') AS revenue
                 FROM b ORDER BY b.bucket
             """),
             {"t": tenant_id},
         )
     ).all()
 
-    labels, convs, orders = [], [], []
-    for bucket, n_conv, n_ord in rows:
+    labels, convs, orders, revenue = [], [], [], []
+    for bucket, n_conv, n_ord, n_rev in rows:
         labels.append(str(bucket.day) if unit == "day" else UZ_MONTHS[bucket.month - 1])
         convs.append(int(n_conv))
         orders.append(int(n_ord))
+        revenue.append(float(n_rev))
 
     # Fokus — oxirgi ustun, ya'ni bugungi kun (yillik ko'rinishda shu oy).
     # `generate_series` hozirgacha yuritilgani uchun oxirgi ustun har doim
     # joriy davr bo'ladi. Ilgari eng baland ustun ajratilardi, lekin do'kon
     # egasi grafikka "bugun qanday ketyapti?" deb qaraydi — o'tgan haftadagi
     # eng yaxshi kunni emas.
-    return {"labels": labels, "values": convs, "orders": orders,
+    return {"labels": labels, "values": convs, "orders": orders, "revenue": revenue,
             "focus": len(labels) - 1 if labels else None,
             "span": span if span in _SPANS else "oy",
             "unit": unit_name}

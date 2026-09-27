@@ -6,7 +6,7 @@ Tizim bitta deploy ichida uchta aniq qatlamdan iborat:
 
 1. **Kirish kanallari** — biznes paneli, platforma paneli va Telegram.
 2. **Biznes logikasi** — AI, katalog, buyurtma, billing, Inbox va bildirishnomalar.
-3. **Infratuzilma** — PostgreSQL/pgvector, S3 va tashqi AI/Telegram API'lari.
+3. **Infratuzilma** — PostgreSQL, S3 va tashqi AI/Telegram API'lari.
 
 HTTP router faqat autentifikatsiya, validatsiya va javob formatiga javob beradi.
 Biznes qarorlari `app/services`, tenant-scoped ma'lumot amallari `app/db/repo.py`

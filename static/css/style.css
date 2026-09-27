@@ -871,6 +871,11 @@ textarea.form-control {
     border: 1px solid var(--card-border);
     border-radius: var(--radius-lg);
     width: 90%;
+    /* No modal had content tall enough to hit the viewport edge until the
+       Telegram wizard's 3rd step (a full notification table) — without a cap
+       the card just overflowed with no way to scroll to its own close button. */
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
     padding: 28px 32px;
     color: var(--text-main);
 }
@@ -1054,7 +1059,7 @@ textarea.form-control {
     background: var(--card-bg);
     border: 1px solid var(--card-border);
     border-radius: var(--radius-lg);
-    padding: 28px;
+    padding: 18px;
     box-shadow: var(--shadow-1);
 }
 .settings-note {
@@ -1115,28 +1120,7 @@ textarea.form-control {
 .onboard-step-title { font-size: 13px; font-weight: 500; color: var(--text-main); }
 .onboard-step.is-done .onboard-step-title { text-decoration: line-through; color: var(--text-muted); }
 
-/* KPI panjarasi: uchta kartochka.
-   Eslatma: bu yerda ilgari eski olti plitkali tizimning qoidalari qolib
-   ketgan edi. Ular 1180px dan tor ekranda panjarani olti ustunga bo'lardi,
-   yangi kartochkalar esa span olmagani uchun 1/6 enига siqilib, matni
-   chetdan chiqib ketardi. */
-.kpi-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 16px;
-}
-
-/* Uchtasi bitta qatorga sig'may qolganda: daromad tepada to'liq kenglikda,
-   qolgan ikkitasi ostida yonma-yon. */
-@media (max-width: 1180px) {
-    .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .kpi-hero { grid-column: 1 / -1; }
-}
-
 @media (max-width: 680px) {
-    .kpi-grid { grid-template-columns: 1fr; }
-    .kpi-hero { grid-column: auto; }
-
     /* A dashboard preview, not the full order record — on a narrow screen it
        keeps only what's needed at a glance (who, how much, what state) and
        drops phone/date rather than forcing a sideways scroll to see them. */
@@ -1338,6 +1322,10 @@ textarea.form-control {
 .modal-head {
     display: flex; justify-content: space-between; align-items: center;
     margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--card-border);
+    /* Pinned so the ✕ stays reachable however far a tall modal's body
+       scrolls — a scrollable card is no fix if its own close button scrolls
+       out of view with the content. */
+    position: sticky; top: 0; background: var(--card-bg); z-index: 2;
 }
 .modal-head h3 { font-size: 18px; font-weight: 800; }
 .modal-close {
@@ -1347,6 +1335,7 @@ textarea.form-control {
 .modal-actions {
     display: flex; justify-content: flex-end; gap: 12px;
     margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--card-border);
+    position: sticky; bottom: 0; background: var(--card-bg); z-index: 2;
 }
 .btn-cancel {
     background: transparent; border: 1px solid var(--card-border); color: var(--text-main);
@@ -1375,6 +1364,15 @@ textarea.form-control {
     font-size: 13px; font-weight: 700; color: var(--primary-text); text-decoration: none;
 }
 .template-link:hover { text-decoration: underline; }
+
+.import-divider {
+    display: flex; align-items: center; gap: 10px; margin: 18px 0 14px;
+    font-size: 11.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--text-muted);
+}
+.import-divider::before, .import-divider::after {
+    content: ""; flex: 1; height: 1px; background: var(--card-border);
+}
 
 .import-summary { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 .import-stat {
@@ -1498,7 +1496,6 @@ textarea.form-control {
 
 @media (max-width: 420px) {
     .main-content { padding: 70px 11px 20px; }
-    .kpi-grid { gap: 11px; }
 }
 
 /* ═══ Catalog: product table is the screen, categories are a filter ═══ */
@@ -1554,27 +1551,36 @@ textarea.form-control {
 .cust-conv:hover { border-color: var(--primary); }
 
 /* ═══ Dashboard: status + cost panels (folded in from Analitika) ═══ */
-/* Yuqoridagi KPI qatori bilan bir xil panjara: shuning uchun "Suhbatlar
-   holati" aynan yashil kartochka enida turadi, "AI Faoliyati" esa qolgan
-   ikki ustunni egallab chapga kengayadi. Bir xil gap ham shart, aks holda
-   chetlar bir chiziqqa tushmaydi. */
+/* Uchta teng ustun: AI daromadi yolg'iz qolganda butun enini egallab bo'sh
+   ko'rinar edi — endi "Suhbatlar holati" va "AI Faoliyati" bilan bir qatorda,
+   bir xil balandlikda turadi. */
 .dash-split {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 16px;
-    margin-top: 16px;
+    gap: 10px;
+    margin-top: 10px;
 }
-.dash-split > :nth-child(2) { grid-column: span 2; }
+/* Ikkinchi qator: "AI samaradorligi" (ko'proq tarkib — 3 plitka + sabab
+   ro'yxati) "Tarif sarfi"ga qaraganda kengroq joy oladi. */
+.dash-split--2col { grid-template-columns: 3fr 2fr; }
 @media (max-width: 900px) {
-    .dash-split { grid-template-columns: 1fr; }
-    .dash-split > :nth-child(2) { grid-column: auto; }
+    .dash-split,
+    .dash-split--2col { grid-template-columns: 1fr; }
 }
+/* Qatordagi eng baland karta panjara orqali ikkalasini ham cho'zadi, lekin
+   bu cho'zilish avtomatik ichkariga o'tmaydi — bitta karta plitkalari toʻliq
+   balandlikni egallab, ikkinchisiniki qisqa qolib ostida boʻsh joy qolardi.
+   Endi ikkalasi ham flex ustun: sarlavha oʻz oʻlchamida, plitka panjarasi
+   qolgan barcha joyni egallaydi — plitkalar shu bilan bir xil balandlikda. */
+.dash-top-card { display: flex; flex-direction: column; }
+.dash-top-card > #dashboard-status-bars,
+.dash-top-card > .activity-summary { flex: 1; }
 .panel-card-title {
-    font-size: 14px; font-weight: 800; color: var(--text-main); margin-bottom: 14px;
+    font-size: 13px; font-weight: 800; color: var(--text-main); margin-bottom: 10px;
 }
 .cost-row {
     display: flex; justify-content: space-between; align-items: center;
-    padding: 9px 0; border-bottom: 1px solid var(--card-border);
+    padding: 7px 0; border-bottom: 1px solid var(--card-border);
     font-size: 13px; color: var(--text-muted);
 }
 .cost-row:last-of-type { border-bottom: none; }
@@ -1612,6 +1618,65 @@ textarea.form-control {
     margin: 12px 0 0 18px; font-size: 12.5px; color: var(--text-muted); line-height: 1.9;
 }
 .group-steps code { font-size: 11.5px; }
+
+/* ═══ Telegram sozlash — 3 qadamli oyna ═══
+   Har biri <details>: qaysi biri tugallanmagan bo'lsa, JS uni ochiq holda
+   ko'rsatadi — "keyingi nima qilish kerak" savolini o'zi hal qiladi, qolganlari
+   yopiq turadi va oyna uzun ro'yxatga aylanmaydi. 2-qadam 1-qadamsiz ma'nosiz
+   (Business ulanish botga bog'liq), shuning uchun u bajarilmaguncha qulflangan
+   — ko'rinadi, lekin ochilmaydi, .is-locked shuni bildiradi. */
+.tg-progress { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+.tg-progress-track {
+    flex: 1; height: 5px; border-radius: 100px; background: var(--surface-2);
+    overflow: hidden;
+}
+.tg-progress-fill {
+    height: 100%; background: var(--primary); border-radius: 100px;
+    transition: width 200ms ease;
+}
+.tg-progress-text {
+    font-size: 11.5px; font-weight: 700; color: var(--text-muted); white-space: nowrap;
+}
+
+.tg-steps { display: flex; flex-direction: column; gap: 8px; }
+.tg-step {
+    border: 1px solid var(--card-border); border-radius: var(--radius-md);
+    background: var(--surface-2); transition: border-color 150ms ease;
+}
+.tg-step.is-done { border-color: var(--primary-border); }
+.tg-step summary {
+    list-style: none; cursor: pointer; display: flex; align-items: center;
+    gap: 10px; padding: 12px 14px;
+}
+.tg-step summary::-webkit-details-marker { display: none; }
+.tg-step[open] summary { padding-bottom: 8px; }
+
+.tg-step-badge {
+    position: relative; width: 22px; height: 22px; flex-shrink: 0;
+    border-radius: 50%; background: var(--card-bg); border: 1px solid var(--card-border);
+    display: grid; place-items: center;
+}
+.tg-step-num { font-size: 11.5px; font-weight: 700; color: var(--text-muted); }
+.tg-step-check { display: none; width: 12px; height: 12px; color: var(--on-primary); }
+.tg-step[open] .tg-step-badge, .tg-step.is-done .tg-step-badge {
+    background: var(--primary); border-color: transparent;
+}
+.tg-step[open] .tg-step-num { color: var(--on-primary); }
+.tg-step.is-done .tg-step-num { display: none; }
+.tg-step.is-done .tg-step-check { display: block; }
+
+.tg-step-title { flex: 1; font-size: 13.5px; font-weight: 700; }
+.tg-step-opt { font-weight: 600; font-style: normal; color: var(--text-muted); font-size: 12px; }
+.tg-step-state { font-size: 11.5px; color: var(--text-muted); font-weight: 600; }
+.tg-step.is-done .tg-step-state { color: var(--primary-text); }
+.tg-step-arrow { color: var(--text-muted); transition: transform 150ms ease; }
+.tg-step[open] .tg-step-arrow { transform: rotate(180deg); }
+
+.tg-step.is-locked summary { cursor: not-allowed; }
+.tg-step.is-locked .tg-step-title,
+.tg-step.is-locked .tg-step-arrow { opacity: 0.45; }
+
+.tg-step-body { padding: 0 14px 16px; }
 
 /* ═══ Hisobim ═══
    Balans va obuna holati birinchi ekranda: do'kon egasi bu bo'limga bitta
@@ -1759,7 +1824,7 @@ textarea.form-control {
 #dashboard-status-bars {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
+    gap: 8px;
 }
 @media (max-width: 520px) {
     #dashboard-status-bars { grid-template-columns: 1fr; }
@@ -1773,18 +1838,24 @@ textarea.form-control {
     width: 100%; height: 100%; color: var(--text-dim); font-size: 13px;
 }
 .activity-summary {
-    display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
-    margin-top: 16px;
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+    margin-top: 10px;
 }
 .activity-tile {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--r-lg); padding: 14px; text-align: center;
+    border-radius: var(--r-lg); padding: 10px; text-align: center;
+    /* Qo'shni kartaning plitkasi balandroq bo'lganda (grid stretch orqali)
+       ortiqcha joy TEPADA qolsin — "Suhbatlar holati" plitkalarida ham
+       yorliq+son pastda, tepasida nishon turadi; shu bilan ikkalasining
+       matni bir chiziqqa tushadi. */
+    display: flex; flex-direction: column; justify-content: flex-end;
 }
 .activity-tile-value {
-    font-family: var(--font-display); font-size: 22px; font-weight: 700;
+    font-family: var(--font-display); font-size: 18px; font-weight: 700;
     color: var(--text-main);
 }
-.activity-tile-label { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.activity-tile-label { font-size: 10.5px; color: var(--text-muted); margin-top: 3px; }
+.activity-summary--3col { grid-template-columns: repeat(3, 1fr); }
 @media (max-width: 420px) {
     .activity-summary { grid-template-columns: 1fr; }
 }
@@ -2306,6 +2377,11 @@ textarea.form-control {
     white-space: nowrap;
 }
 .cat-tools-list button:hover { background: var(--surface-2); }
+.cat-tools-group {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--text-muted); padding: 8px 10px 2px;
+}
+.cat-tools-group:first-child { padding-top: 2px; }
 .catalog-add .ico { font-size: 18px; }
 
 .cat-filter-row {
@@ -2578,10 +2654,16 @@ textarea.form-control {
 /* ── Daromad kartochkasi ─────────────────────────────────────────────────── */
 .kpi-hero {
     position: relative; overflow: hidden; isolation: isolate;
-    padding: 24px; border-radius: var(--r-xl); color: #fff;
+    padding: 16px 18px; border-radius: var(--r-xl); color: #fff;
     /* Tekis to'ldirish o'rniga diagonal gradient: yuza yassi ko'rinmaydi. */
     background: linear-gradient(135deg, #00b87c 0%, #006c47 100%);
     box-shadow: 0 14px 34px rgba(0, 184, 124, 0.18);
+    /* #dashboard-kpis panjara katagi sifatida qatordagi eng baland kartaga
+       cho'ziladi, lekin bu ichki .kpi-hero'ga avtomatik o'tmaydi — shuning
+       uchun balandlik aniq 100% qilinadi va tarkib tepa/pastga taqsimlanadi,
+       aks holda o'ng tomondagi kartalardan pastroq va bo'sh ko'rinardi. */
+    height: 100%; box-sizing: border-box;
+    display: flex; flex-direction: column; justify-content: space-between;
 }
 /* Mayda nuqtali naqsh - yuzaga tekstura beradi, matnga xalaqit qilmaydi. */
 .kpi-hero-pattern {
@@ -2617,7 +2699,7 @@ textarea.form-control {
 }
 
 /* ── Oddiy kartochkalar ──────────────────────────────────────────────────── */
-.kpi-tile, .panel-card, .prod-card, .bill-plan, .ai-acc, .integration-card {
+.panel-card, .prod-card, .bill-plan, .ai-acc, .integration-card {
     position: relative;
     background: var(--card-bg);
     border: 1px solid var(--border);
@@ -2627,20 +2709,16 @@ textarea.form-control {
     transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s;
 }
 /* Sichqoncha tekkanda sezilarli, lekin bezovta qilmaydigan javob. */
-.kpi-tile::after, .prod-card::after {
+.prod-card::after {
     content: ''; position: absolute; inset: 0; border-radius: inherit;
     background: linear-gradient(135deg, var(--sheen), transparent 60%);
     opacity: 0; transition: opacity 0.25s; pointer-events: none;
 }
-.kpi-tile:hover::after, .prod-card:hover::after { opacity: 1; }
-.kpi-tile:hover {
-    border-color: var(--primary-border);
-    box-shadow: inset 0 1px 0 var(--edge-light), var(--shadow-2);
-}
+.prod-card:hover::after { opacity: 1; }
 
 @media (prefers-reduced-motion: reduce) {
-    .kpi-tile, .panel-card, .prod-card,
-    .kpi-tile::after, .prod-card::after { transition: none; }
+    .panel-card, .prod-card,
+    .prod-card::after { transition: none; }
 }
 
 /* ── Import natijasi: qaysi ustun qaysi maydonga tushdi ─────────────────────

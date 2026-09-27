@@ -160,6 +160,51 @@ def read_rows(
     raise ValueError("Faqat .xlsx yoki .csv fayllar qabul qilinadi.")
 
 
+_SHEET_ID_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9_-]+)")
+_GID_RE = re.compile(r"[#&?]gid=(\d+)")
+
+
+async def fetch_google_sheet_csv(url: str) -> bytes:
+    """Turn a normal Google Sheets share link into its CSV export and fetch it.
+
+    No Google API key or OAuth: Sheets serves any tab as CSV over plain HTTP
+    at .../export?format=csv, as long as the sheet is shared "anyone with the
+    link can view" — the one step a non-technical shop owner can actually do
+    themselves. A private sheet returns 200 with an HTML sign-in page instead
+    of CSV, which is why the content-type is checked, not just the status.
+    """
+    m = _SHEET_ID_RE.search(url or "")
+    if not m:
+        raise ValueError(
+            "Bu Google Sheets havolasiga o'xshamayapti. Jadvalni brauzerda oching va "
+            "manzil qatoridagi (docs.google.com/spreadsheets/d/... bilan boshlanadigan) "
+            "havolani to'liq nusxalang."
+        )
+    sheet_id = m.group(1)
+    gid_m = _GID_RE.search(url)
+    gid = gid_m.group(1) if gid_m else "0"
+    export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            resp = await client.get(export_url)
+    except httpx.HTTPError as e:
+        raise ValueError(f"Google Sheets'ga ulanib bo'lmadi: {e}")
+
+    if resp.status_code == 404:
+        raise ValueError("Jadval topilmadi — havola noto'g'ri yoki jadval o'chirilgan.")
+    if resp.status_code != 200:
+        raise ValueError(f"Google Sheets xato qaytardi (kod {resp.status_code}).")
+    if "text/csv" not in resp.headers.get("content-type", ""):
+        raise ValueError(
+            "Jadval hali ochiq emas. Google Sheets'da: yuqori o'ngdagi Ulashish "
+            "(Share) tugmasi → \"Havolaga ega har kim\" (Anyone with the link) → "
+            "\"Ko'ruvchi\" (Viewer) qilib qo'ying, keyin qayta urinib ko'ring."
+        )
+    return resp.content
+
+
 def _read_xlsx(
     content: bytes,
 ) -> Tuple[List[str], List[List[Any]], Dict[int, List[bytes]]]:

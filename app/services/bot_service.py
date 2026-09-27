@@ -3,9 +3,26 @@ Telegram bot service — tenant-scoped.
 
 Each business connects its OWN bot token (stored on the tenant). Updates arrive
 at /api/bot/webhook/{tenant_id}; replies are sent with that tenant's token.
+
+The AI answers customers over two paths, and the same conversation logic
+serves both (_process_customer_message):
+
+  • the bot's own chat — an ordinary `message` update, reply sent as the bot.
+    This always works and needs nothing but a token.
+  • the owner's personal account — the owner connects this bot from their
+    Telegram app (Settings → Chat Automation, or Settings → Telegram Business
+    → Chatbots on older versions), customer messages then arrive as
+    `business_message`, and a reply carrying that business_connection_id shows
+    up as coming from the owner's own account rather than a bot.
+
+The connection therefore upgrades WHO the reply appears to come from; it is
+not what turns the AI on. A shop that has not connected a personal account
+still sells — it just sells as a bot.
 """
+import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -14,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import repo
 from app.db.models import Tenant
-from app.services.ai_agent import ai_agent
+from app.services.ai_agent import ai_agent, contact_fallback_text
 from app.services.storage_service import local_path as _local_photo
 
 logger = logging.getLogger("bot_service")
@@ -23,6 +40,10 @@ TELEGRAM_API = "https://api.telegram.org/bot{token}"
 # Inline media must fit in the model request; Telegram voice/photos are far
 # smaller than this in practice, so the cap only guards against odd uploads.
 MAX_MEDIA_BYTES = 15 * 1024 * 1024
+
+# Telegram clears "typing…" after about five seconds, so it has to be resent
+# while a slow turn is still being generated.
+TYPING_REFRESH_SECONDS = 4.0
 
 
 def _is_markup_error(data: dict) -> bool:
@@ -67,6 +88,7 @@ class TelegramBotService:
     async def _post_message(
         self, token: str, chat_id: str, text: str,
         reply_markup: Optional[Dict[str, Any]], parse_mode: Optional[str], timeout: float,
+        business_connection_id: Optional[str] = None,
     ) -> Optional[dict]:
         """Send one message, and if Markdown is what broke it, send it plain.
 
@@ -81,6 +103,10 @@ class TelegramBotService:
             payload["parse_mode"] = parse_mode
         if reply_markup:
             payload["reply_markup"] = reply_markup
+        if business_connection_id:
+            # Sent on behalf of the owner's own account instead of the bot —
+            # this is the entire point of the Business integration.
+            payload["business_connection_id"] = business_connection_id
 
         url = f"{TELEGRAM_API.format(token=token)}/sendMessage"
         try:
@@ -107,29 +133,38 @@ class TelegramBotService:
     async def send_message(
         self, token: str, chat_id: str, text: str,
         reply_markup: Optional[Dict[str, Any]] = None, parse_mode: str = "Markdown",
+        business_connection_id: Optional[str] = None,
     ) -> bool:
         if not token:
             return False
-        return await self._post_message(token, chat_id, text, reply_markup, parse_mode, 10.0) is not None
+        return await self._post_message(
+            token, chat_id, text, reply_markup, parse_mode, 10.0, business_connection_id
+        ) is not None
 
     async def send_message_full(
         self, token: str, chat_id: str, text: str,
         reply_markup: Optional[Dict[str, Any]] = None, parse_mode: str = "Markdown",
+        business_connection_id: Optional[str] = None,
     ) -> Optional[dict]:
         """Like send_message but returns the sent message — we need its id to
         edit the receipt once someone confirms."""
         if not token:
             return None
-        return await self._post_message(token, chat_id, text, reply_markup, parse_mode, 15.0)
+        return await self._post_message(
+            token, chat_id, text, reply_markup, parse_mode, 15.0, business_connection_id
+        )
 
     async def edit_message(
         self, token: str, chat_id: str, message_id: str, text: str,
         reply_markup: Optional[Dict[str, Any]] = None, parse_mode: str = "Markdown",
+        business_connection_id: Optional[str] = None,
     ) -> bool:
         payload = {"chat_id": chat_id, "message_id": int(message_id),
                    "text": text, "parse_mode": parse_mode}
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
+        if business_connection_id:
+            payload["business_connection_id"] = business_connection_id
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(f"{TELEGRAM_API.format(token=token)}/editMessageText", json=payload)
@@ -141,12 +176,15 @@ class TelegramBotService:
     async def edit_caption(
         self, token: str, chat_id: str, message_id: str, caption: str,
         reply_markup: Optional[Dict[str, Any]] = None,
+        business_connection_id: Optional[str] = None,
     ) -> bool:
         """A photo message carries a caption, not text — editMessageText fails on it."""
         payload = {"chat_id": chat_id, "message_id": int(message_id),
                    "caption": caption[:1024], "parse_mode": "Markdown"}
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
+        if business_connection_id:
+            payload["business_connection_id"] = business_connection_id
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(f"{TELEGRAM_API.format(token=token)}/editMessageCaption", json=payload)
@@ -170,6 +208,50 @@ class TelegramBotService:
             logger.error(f"Telegram answerCallbackQuery error: {e}")
             return False
 
+    async def send_chat_action(
+        self, token: str, chat_id: str, action: str = "typing",
+        business_connection_id: Optional[str] = None,
+    ) -> bool:
+        """Show "typing…" in the customer's chat."""
+        payload: Dict[str, Any] = {"chat_id": chat_id, "action": action}
+        if business_connection_id:
+            payload["business_connection_id"] = business_connection_id
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{TELEGRAM_API.format(token=token)}/sendChatAction", json=payload
+                )
+                return resp.json().get("ok", False)
+        except Exception as e:
+            logger.info(f"sendChatAction skipped: {e}")
+            return False
+
+    @asynccontextmanager
+    async def typing(self, token: str, chat_id: str, business_connection_id: Optional[str] = None):
+        """Keep "typing…" alive for as long as the block runs.
+
+        A turn can take a minute when the model is busy, and a chat that shows
+        nothing at all reads as a dead bot — customers gave up and left before
+        the answer arrived. The indicator expires after ~5s, so it is refreshed
+        until the reply is ready.
+
+        Every failure here is swallowed on purpose: this is decoration, and it
+        must never be the reason a customer does not get their answer.
+        """
+        async def refresh():
+            while True:
+                await self.send_chat_action(token, chat_id, "typing", business_connection_id)
+                await asyncio.sleep(TYPING_REFRESH_SECONDS)
+
+        task = asyncio.create_task(refresh())
+        try:
+            yield
+        finally:
+            task.cancel()
+            # Let the cancellation settle so a half-sent request cannot outlive
+            # the turn and stamp "typing…" onto an already-answered chat.
+            await asyncio.gather(task, return_exceptions=True)
+
     async def send_location(self, token: str, chat_id: str, lat: float, lon: float) -> bool:
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
@@ -183,14 +265,18 @@ class TelegramBotService:
             return False
 
     async def send_photo(
-        self, token: str, chat_id: str, photo_url: str, caption: Optional[str] = None
+        self, token: str, chat_id: str, photo_url: str, caption: Optional[str] = None,
+        business_connection_id: Optional[str] = None,
     ) -> bool:
         """Send a product image, by URL or from our own disk."""
-        return await self.send_photo_full(token, chat_id, photo_url, caption) is not None
+        return await self.send_photo_full(
+            token, chat_id, photo_url, caption, business_connection_id=business_connection_id
+        ) is not None
 
     async def send_photo_full(
         self, token: str, chat_id: str, photo: str,
         caption: Optional[str] = None, reply_markup: Optional[Dict[str, Any]] = None,
+        business_connection_id: Optional[str] = None,
     ) -> Optional[dict]:
         """Send a photo and return the sent message.
 
@@ -206,6 +292,8 @@ class TelegramBotService:
         if caption:
             payload["caption"] = caption[:1024]
             payload["parse_mode"] = "Markdown"
+        if business_connection_id:
+            payload["business_connection_id"] = business_connection_id
 
         local = _local_photo(photo)
         files = None
@@ -232,7 +320,10 @@ class TelegramBotService:
             logger.error(f"Telegram sendPhoto error: {e}")
             return None
 
-    async def send_media_group(self, token: str, chat_id: str, items: list) -> bool:
+    async def send_media_group(
+        self, token: str, chat_id: str, items: list,
+        business_connection_id: Optional[str] = None,
+    ) -> bool:
         """Send 2-10 product images as one album.
 
         Locally stored pictures ride along as multipart parts referenced by
@@ -256,17 +347,19 @@ class TelegramBotService:
                 entry["parse_mode"] = "Markdown"
             media.append(entry)
 
+        base: Dict[str, Any] = {"chat_id": chat_id, "media": media}
+        if business_connection_id:
+            base["business_connection_id"] = business_connection_id
+
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 url = f"{TELEGRAM_API.format(token=token)}/sendMediaGroup"
                 if files:
-                    resp = await client.post(
-                        url,
-                        data={"chat_id": chat_id, "media": json.dumps(media)},
-                        files=files,
-                    )
+                    form = dict(base)
+                    form["media"] = json.dumps(media)
+                    resp = await client.post(url, data=form, files=files)
                 else:
-                    resp = await client.post(url, json={"chat_id": chat_id, "media": media})
+                    resp = await client.post(url, json=base)
                 if resp.status_code != 200:
                     logger.warning(f"sendMediaGroup failed: {resp.text[:180]}")
                 return resp.status_code == 200
@@ -310,7 +403,11 @@ class TelegramBotService:
         try:
             payload = {
                 "url": url,
-                "allowed_updates": ["message", "channel_post", "callback_query", "my_chat_member"],
+                "allowed_updates": [
+                    "message", "channel_post", "callback_query", "my_chat_member",
+                    "business_connection", "business_message",
+                    "edited_business_message", "deleted_business_messages",
+                ],
             }
             if secret:
                 # Telegram sends this back on every update as the
@@ -338,7 +435,17 @@ class TelegramBotService:
     # ── incoming update ──
     async def handle_update(self, session: AsyncSession, tenant: Tenant, update: Dict[str, Any]):
         token = tenant.telegram_bot_token
-        if "message" in update:
+        if "business_connection" in update:
+            await self._handle_business_connection(session, tenant, update["business_connection"])
+        elif "business_message" in update:
+            await self._handle_business_message(
+                session, tenant, token, update["business_message"], update.get("update_id")
+            )
+        elif "edited_business_message" in update or "deleted_business_messages" in update:
+            # An edit or delete in the customer's chat — the AI already replied
+            # to the original text; there is nothing useful to do with either.
+            pass
+        elif "message" in update:
             await self._handle_message(
                 session, tenant, token, update["message"], update.get("update_id")
             )
@@ -348,6 +455,45 @@ class TelegramBotService:
             await self._handle_channel_post(session, tenant, token, update["channel_post"])
         elif "callback_query" in update:
             await self._handle_callback(session, tenant, token, update["callback_query"])
+
+    async def _handle_business_connection(self, session, tenant: Tenant, conn: Dict[str, Any]):
+        """The owner just connected (or reconfigured) this bot as their Business chatbot."""
+        tenant.telegram_business_connection_id = conn.get("id")
+        owner = conn.get("user") or {}
+        tenant.telegram_business_owner_id = str(owner["id"]) if owner.get("id") is not None else None
+        tenant.telegram_business_enabled = bool(conn.get("is_enabled"))
+        await session.commit()
+        logger.info(
+            "Telegram Business ulanish: tenant=%s enabled=%s",
+            tenant.id, tenant.telegram_business_enabled,
+        )
+
+    async def _handle_business_message(self, session, tenant: Tenant, token, msg, source_update_id=None):
+        """A message in a chat the owner's connected personal account is part of.
+
+        This fires for BOTH sides of the conversation — the customer's messages
+        and any the owner types themselves from their own phone. Only the
+        customer's should ever reach the AI; replying to the owner's own words
+        would have it talk to itself.
+        """
+        if not tenant.telegram_business_enabled or not tenant.telegram_business_connection_id:
+            return
+        if msg.get("chat", {}).get("type") != "private":
+            return  # AI faqat mijoz bilan shaxsiy suhbatda javob beradi
+
+        sender_id = str((msg.get("from") or {}).get("id") or "")
+        if tenant.telegram_business_owner_id and sender_id == tenant.telegram_business_owner_id:
+            return  # Egasi mijozga o'zi (telefonidan) yozdi — AI aralashmaydi
+
+        bc_id = msg.get("business_connection_id") or tenant.telegram_business_connection_id
+        chat_id = str(msg["chat"]["id"])
+        user_name = msg.get("from", {}).get("first_name", "Mijoz")
+        text = msg.get("text") or msg.get("caption") or ""
+
+        await self._process_customer_message(
+            session, tenant, token, msg, chat_id, user_name, text,
+            source_update_id=source_update_id, business_connection_id=bc_id,
+        )
 
     async def _handle_channel_post(self, session, tenant, token, post):
         """A channel is a destination, not a conversation.
@@ -375,6 +521,13 @@ class TelegramBotService:
         )
 
     async def _handle_message(self, session, tenant, token, msg, source_update_id=None):
+        """A message sent straight to the bot's own chat.
+
+        The AI answers here too, as the bot itself. Connecting a personal
+        account (Telegram Business) upgrades WHO the reply comes from, it is
+        not what switches the AI on — a shop that has not connected one, or
+        cannot, must still have a working salesperson rather than silence.
+        """
         chat_id = str(msg["chat"]["id"])
         user_name = msg.get("from", {}).get("first_name", "Mijoz")
         # A photo's text arrives as "caption", not "text"
@@ -409,6 +562,26 @@ class TelegramBotService:
             )
             return
 
+        # Same conversation logic as the business path; no connection id, so
+        # the reply goes out as the bot. A message here and one to a connected
+        # personal account are different chats, so nothing is answered twice.
+        await self._process_customer_message(
+            session, tenant, token, msg, chat_id, user_name, text,
+            source_update_id=source_update_id, business_connection_id=None,
+        )
+
+    async def _process_customer_message(
+        self, session, tenant, token, msg, chat_id, user_name, text,
+        source_update_id=None, business_connection_id=None,
+    ):
+        """The AI sales conversation — reached only via Telegram Business now.
+
+        Everything here used to run straight off the bot's own chat; it moved
+        wholesale onto the business_message path so a reply always carries
+        business_connection_id and arrives as the owner's own account.
+        """
+        cfg = await repo.get_settings(session, tenant.id)
+
         # Flood guard: one chat sending messages faster than a person can type
         # is either a script or a bug on the customer's side, and every one of
         # these messages would otherwise reach the AI call further down.
@@ -422,12 +595,14 @@ class TelegramBotService:
         conv = await repo.get_or_create_conversation(
             session, tenant.id, "telegram", chat_id, customer_name=user_name
         )
+        if business_connection_id and conv.telegram_business_connection_id != business_connection_id:
+            conv.telegram_business_connection_id = business_connection_id
         # Keep the Telegram handle: the team needs a way back to the customer
         # when a phone number is wrong or unreachable.
         uname = msg.get("from", {}).get("username")
         if uname and conv.customer_username != uname:
             conv.customer_username = uname
-            await session.commit()
+        await session.commit()
 
         # Bloklangan suhbat — hech qanday javob yo'q, hatto /start ga ham.
         # Jim turish ataylab: har xabarga "siz bloklangansiz" deb javob berish
@@ -445,7 +620,10 @@ class TelegramBotService:
                 [{"text": "🛍 Katalog", "callback_data": "btn_catalog"},
                  {"text": "📞 Operator", "callback_data": "btn_operator"}],
             ]}
-            await self.send_message(token, chat_id, greeting, reply_markup=keyboard)
+            await self.send_message(
+                token, chat_id, greeting, reply_markup=keyboard,
+                business_connection_id=business_connection_id,
+            )
             return
 
         # A pinned location is the delivery address — keep it on the conversation
@@ -473,7 +651,8 @@ class TelegramBotService:
             # that guards a payment cannot depend on the model's mood.
             if slip.get("not_receipt"):
                 await self.send_message(
-                    token, chat_id, _not_a_receipt_text(cfg.ai_language, user_name)
+                    token, chat_id, _not_a_receipt_text(cfg.ai_language, user_name),
+                    business_connection_id=business_connection_id,
                 )
                 await repo.add_message(session, tenant.id, conv, "user", text or "📷 [rasm yubordi]")
                 await repo.add_message(
@@ -514,7 +693,7 @@ class TelegramBotService:
             await repo.add_message(session, tenant.id, conv, "user", text)
             await repo.add_message(session, tenant.id, conv, "assistant", reply)
             await session.commit()
-            await self.send_message(token, chat_id, reply)
+            await self.send_message(token, chat_id, reply, business_connection_id=business_connection_id)
             if not first:
                 # Blok — pul yo'qotilishi mumkin bo'lgan qaror, jamoa buni
                 # ko'rib, kerak bo'lsa paneldan bekor qilsin.
@@ -535,7 +714,7 @@ class TelegramBotService:
             reply = guard.reply_for(threat, cfg.ai_language)
             await repo.add_message(session, tenant.id, conv, "user", text)
             await repo.add_message(session, tenant.id, conv, "assistant", reply)
-            await self.send_message(token, chat_id, reply)
+            await self.send_message(token, chat_id, reply, business_connection_id=business_connection_id)
 
             reason = guard.handoff_reason(threat)
             # Bir suhbatda bir marta: qayta-qayta urinish jamoani ko'mib
@@ -551,22 +730,25 @@ class TelegramBotService:
             logger.warning("Manipulyatsiya urinishi (%s): tenant=%s conv=%s", threat, tenant.id, conv.id)
             return
 
-        resp = await ai_agent.generate_response(
-            session,
-            tenant,
-            conv,
-            text,
-            user_name,
-            media=media,
-            source_update_id=source_update_id,
-        )
+        # This is the slow part — tool rounds plus retries when the model is
+        # busy — so it is the only part worth showing "typing…" for.
+        async with self.typing(token, chat_id, business_connection_id):
+            resp = await ai_agent.generate_response(
+                session,
+                tenant,
+                conv,
+                text,
+                user_name,
+                media=media,
+                source_update_id=source_update_id,
+            )
         if resp.suppress_send:
             # 2-marta ketma-ket mavzudan tashqari savol — Inboxda ko'rinadi
             # (generate_response saqlab qo'ygan), lekin mijozga yuborilmaydi.
             logger.info("Mavzudan chiqish, javob yuborilmadi: tenant=%s conv=%s", tenant.id, conv.id)
             return
-        await self.send_message(token, chat_id, resp.reply_text)
-        await self._send_requested_photos(session, tenant, token, chat_id, resp)
+        await self.send_message(token, chat_id, resp.reply_text, business_connection_id=business_connection_id)
+        await self._send_requested_photos(session, tenant, token, chat_id, resp, business_connection_id)
 
     async def _handle_group_message(self, session, tenant, token, msg, chat_id, text):
         """Only the pairing command matters in a group; the AI stays out."""
@@ -612,19 +794,25 @@ class TelegramBotService:
 
         return [], ""
 
-    async def _send_requested_photos(self, session, tenant, token, chat_id, resp):
+    async def _send_requested_photos(self, session, tenant, token, chat_id, resp, business_connection_id=None):
         """Deliver any product images the agent asked for."""
         photos = getattr(resp, "photos", None) or []
         if not photos:
             return
         if len(photos) == 1:
             p = photos[0]
-            await self.send_photo(token, chat_id, p["url"], p.get("caption"))
+            await self.send_photo(
+                token, chat_id, p["url"], p.get("caption"),
+                business_connection_id=business_connection_id,
+            )
         else:
-            ok = await self.send_media_group(token, chat_id, photos)
+            ok = await self.send_media_group(token, chat_id, photos, business_connection_id=business_connection_id)
             if not ok:                      # album can fail on a bad URL — fall back
                 for p in photos[:4]:
-                    await self.send_photo(token, chat_id, p["url"], p.get("caption"))
+                    await self.send_photo(
+                        token, chat_id, p["url"], p.get("caption"),
+                        business_connection_id=business_connection_id,
+                    )
 
     async def _handle_callback(self, session, tenant, token, query):
         chat_id = str(query["message"]["chat"]["id"])
@@ -646,22 +834,30 @@ class TelegramBotService:
             await self.answer_callback(token, callback_id, message, alert=not ok)
             return
 
+        # A button tapped inside a business chat: Telegram doesn't add a top-level
+        # business_connection_id to CallbackQuery, but the message it's attached
+        # to (a Message) carries one — same field used everywhere else.
+        bc_id = (query.get("message") or {}).get("business_connection_id")
+
         conv = await repo.get_or_create_conversation(
             session, tenant.id, "telegram", chat_id, customer_name=user_name
         )
+        if bc_id and conv.telegram_business_connection_id != bc_id:
+            conv.telegram_business_connection_id = bc_id
+            await session.commit()
         if callback_id:
             await self.answer_callback(token, callback_id)
 
         if data == "btn_catalog":
             products = await repo.list_products(session, tenant.id)
             if not products:
-                await self.send_message(token, chat_id, "Katalog hozircha bo'sh.")
+                await self.send_message(token, chat_id, "Katalog hozircha bo'sh.", business_connection_id=bc_id)
                 return
             reply = "🛍 **Katalog:**\n\n"
             for p in products[:15]:
                 reply += f"• **{p.name}** — {p.price:,.0f} {p.currency}\n"
             reply += "\nXarid uchun mahsulot nomini yozing!"
-            await self.send_message(token, chat_id, reply)
+            await self.send_message(token, chat_id, reply, business_connection_id=bc_id)
 
         elif data == "btn_operator":
             conv.status = "operator"
@@ -673,12 +869,17 @@ class TelegramBotService:
             notified = await notify_service.notify_handoff(
                 session, tenant, cfg, conv, conv.handoff_reason
             )
-            await self.send_message(
-                token, chat_id,
+            # Nobody was reached: do not promise a call back that no one will
+            # make — hand over the shop's own number instead. Same wording the
+            # AI path appends, so the customer gets one answer either way.
+            reply = (
                 "👨‍💼 Operatorga xabar berdim! Tez orada javob berishadi."
                 if notified else
-                "👨‍💼 So'rovingiz qabul qilindi. Operatorimiz tez orada bog'lanadi."
+                "👨‍💼 So'rovingiz qabul qilindi."
+                + (contact_fallback_text(cfg.contact_phone, cfg.ai_language)
+                   or " Operatorimiz tez orada bog'lanadi.")
             )
+            await self.send_message(token, chat_id, reply, business_connection_id=bc_id)
 
 
 bot_service = TelegramBotService()

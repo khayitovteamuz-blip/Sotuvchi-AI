@@ -541,7 +541,7 @@ function initPeriodPicker() {
 function showDashboardSkeleton() {
     const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
 
-    set('dashboard-kpis', Array.from({ length: 3 }, () => `
+    set('dashboard-kpis', `
         <div class="skel-kpi">
             <div class="skel-kpi-top">
                 <span class="skel skel-ico"></span>
@@ -549,7 +549,7 @@ function showDashboardSkeleton() {
             </div>
             <span class="skel skel-val"></span>
             <span class="skel skel-foot"></span>
-        </div>`).join(''));
+        </div>`);
 
     set('dashboard-status-bars', Array.from({ length: 3 }, () => `
         <div class="skel-row">
@@ -563,6 +563,8 @@ function showDashboardSkeleton() {
             <span class="skel skel-line" style="width:${[120, 96, 132, 110][i]}px"></span>
             <span class="skel skel-line" style="width:64px"></span>
         </div>`).join(''));
+
+    set('revenue-chart', '<div class="skel" style="height:140px; border-radius:12px;"></div>');
 
     set('recent-orders-tbody', Array.from({ length: 4 }, () => `
         <tr>${Array.from({ length: 6 }, () =>
@@ -595,61 +597,27 @@ async function loadDashboardStats() {
             return `<span style="font-size:12px; font-weight:600; color:${up ? 'var(--primary)' : 'var(--accent-danger)'}; display:flex; align-items:center; gap:2px;">${icon} ${text}</span>`;
         };
 
-        const todayRevenue = data.ai_revenue; // Using ai_revenue for now as placeholder for today
+        const aiRevenue = data.ai_revenue;
         const kpisHTML = `
-            <!-- Bugungi Daromad -->
+            <!-- AI daromadi -->
             <div class="kpi-hero">
                 <span class="kpi-hero-pattern" aria-hidden="true"></span>
                 <span class="kpi-hero-glow" aria-hidden="true"></span>
-                <div class="kpi-hero-layer" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
-                    <div style="display:flex; align-items:center; gap:12px;">
-                        <div style="width:40px; height:40px; background:rgba(255,255,255,0.18); border:1px solid rgba(255,255,255,0.12); border-radius:12px; display:flex; align-items:center; justify-content:center;">
-                            <span class="ico ico-wallet" style="font-size:20px; color:#fff;"></span>
+                <div class="kpi-hero-layer" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <div style="width:32px; height:32px; background:rgba(255,255,255,0.18); border:1px solid rgba(255,255,255,0.12); border-radius:10px; display:flex; align-items:center; justify-content:center;">
+                            <span class="ico ico-wallet" style="font-size:16px; color:#fff;"></span>
                         </div>
                         <div>
-                            <div style="font-family:var(--font-display); font-size:15px; font-weight:600;">Bugungi Daromad</div>
-                            <div style="font-size:12px; opacity:0.8;">Daily Revenue</div>
+                            <div style="font-family:var(--font-display); font-size:13px; font-weight:800;">AI daromadi</div>
+                            <div style="font-size:11px; opacity:0.8;">${escapeHtml(data.period_label || '')}</div>
                         </div>
                     </div>
-                    <button style="background:transparent; border:none; color:#fff; cursor:pointer;"><span class="ico ico-ellipsis" style="font-size:20px;"></span></button>
+                    <button style="background:transparent; border:none; color:#fff; cursor:pointer;"><span class="ico ico-ellipsis" style="font-size:18px;"></span></button>
                 </div>
-                <div class="kpi-hero-layer" style="display:flex; align-items:baseline; gap:12px;">
-                    <div style="font-family:var(--font-mono); font-size:28px; font-weight:700;">${fmtNum(todayRevenue)} <span style="font-size:16px; font-weight:500; font-family:var(--font-body); opacity:0.9;">so'm</span></div>
+                <div class="kpi-hero-layer" style="display:flex; align-items:baseline; gap:10px;">
+                    <div style="font-family:var(--font-mono); font-size:22px; font-weight:700;">${fmtNum(aiRevenue)} <span style="font-size:14px; font-weight:500; font-family:var(--font-body); opacity:0.9;">so'm</span></div>
                     ${growthBadgeHTML(g.ai_revenue, true)}
-                </div>
-            </div>
-
-            <!-- Shu Oy Buyurtmalar -->
-            <div class="kpi-tile" style="padding:24px; display:flex; flex-direction:column; justify-content:space-between;">
-                <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
-                    <div style="width:40px; height:40px; background:var(--surface); border:1px solid var(--border); border-radius:12px; display:flex; align-items:center; justify-content:center;">
-                        <span class="ico ico-shopping-bag" style="font-size:20px; color:var(--text-muted);"></span>
-                    </div>
-                    <div>
-                        <div style="font-family:var(--font-display); font-size:15px; font-weight:600; color:var(--text-main);">Shu Oy Buyurtmalar</div>
-                        <div style="font-size:12px; color:var(--text-muted);">Monthly Orders</div>
-                    </div>
-                </div>
-                <div style="display:flex; align-items:baseline; justify-content:space-between;">
-                    <div style="font-family:var(--font-mono); font-size:28px; font-weight:700; color:var(--text-main);">${fmtNum(data.ai_order_count)}</div>
-                    ${growthBadgeHTML(g.ai_order_count)}
-                </div>
-            </div>
-
-            <!-- AI Suhbatlar -->
-            <div class="kpi-tile" style="padding:24px; display:flex; flex-direction:column; justify-content:space-between;">
-                <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
-                    <div style="width:40px; height:40px; background:var(--surface); border:1px solid var(--border); border-radius:12px; display:flex; align-items:center; justify-content:center;">
-                        <span class="ico ico-messages-square" style="font-size:20px; color:var(--text-muted);"></span>
-                    </div>
-                    <div>
-                        <div style="font-family:var(--font-display); font-size:15px; font-weight:600; color:var(--text-main);">AI Suhbatlar</div>
-                        <div style="font-size:12px; color:var(--text-muted);">Total Interactions</div>
-                    </div>
-                </div>
-                <div style="display:flex; align-items:baseline; justify-content:space-between;">
-                    <div style="font-family:var(--font-mono); font-size:28px; font-weight:700; color:var(--text-main);">${fmtNum(an.total_conversations)}</div>
-                    ${growthBadgeHTML((an.growth || {}).total_conversations)}
                 </div>
             </div>
         `;
@@ -661,43 +629,28 @@ async function loadDashboardStats() {
            bosqichlarini ko'rsatadi va bunday sanoq API da hali yo'q.
            Shuning uchun bu blok mavjud HAQIQIY ma'lumotni ko'rsatadi. */
         const bs = an.by_status || {};
-        const statusHTML = `
-            <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px; display:flex; flex-direction:column; justify-content:space-between; height:100px;">
+        const statusHTML = [
+            ['status-delivered', 'ico-bot', 'AI hal qilgan', bs.ai ?? 0, 'var(--status-delivered)'],
+            ['status-confirmed', 'ico-headphones', 'Operatorda', bs.operator ?? 0, 'var(--text-main)'],
+            ['status-new', 'ico-check-check', 'Yopilgan', bs.closed ?? 0, 'var(--text-main)'],
+        ].map(([dotVar, icon, label, val, valColor]) => `
+            <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:11px; display:flex; flex-direction:column; justify-content:space-between; gap:8px;">
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                    <div style="width:8px; height:8px; border-radius:50%; background:var(--status-delivered);"></div>
-                    <span class="ico ico-bot" style="font-size:16px; color:var(--text-muted);"></span>
+                    <div style="width:7px; height:7px; border-radius:50%; background:var(--${dotVar});"></div>
+                    <span class="ico ${icon}" style="font-size:14px; color:var(--text-muted);"></span>
                 </div>
                 <div>
-                    <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">AI hal qilgan</div>
-                    <div style="font-family:var(--font-display); font-size:20px; font-weight:700; color:var(--status-delivered);">${bs.ai ?? 0}</div>
+                    <div style="font-size:11px; color:var(--text-muted); margin-bottom:2px;">${label}</div>
+                    <div style="font-family:var(--font-display); font-size:17px; font-weight:700; color:${valColor};">${val}</div>
                 </div>
-            </div>
-            <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px; display:flex; flex-direction:column; justify-content:space-between; height:100px;">
-                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                    <div style="width:8px; height:8px; border-radius:50%; background:var(--status-confirmed);"></div>
-                    <span class="ico ico-headphones" style="font-size:16px; color:var(--text-muted);"></span>
-                </div>
-                <div>
-                    <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Operatorda</div>
-                    <div style="font-family:var(--font-display); font-size:20px; font-weight:700; color:var(--text-main);">${bs.operator ?? 0}</div>
-                </div>
-            </div>
-            <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px; display:flex; flex-direction:column; justify-content:space-between; height:100px;">
-                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                    <div style="width:8px; height:8px; border-radius:50%; background:var(--status-new);"></div>
-                    <span class="ico ico-check-check" style="font-size:16px; color:var(--text-muted);"></span>
-                </div>
-                <div>
-                    <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Yopilgan</div>
-                    <div style="font-family:var(--font-display); font-size:20px; font-weight:700; color:var(--text-main);">${bs.closed ?? 0}</div>
-                </div>
-            </div>
-        `;
+            </div>`).join('');
         document.getElementById('dashboard-status-bars').innerHTML = statusHTML;
 
         renderRecentOrders(data.recent_orders);
-        loadActivitySummary();
+        loadActivitySummary(an);
         renderUsagePanel(data);   // "Tarif sarfi" bloki: ilgari hech qachon chaqirilmasdi
+        renderAiEffectiveness(an);
+        loadRevenueChart();
     } catch (e) {
         console.error('Stats yuklashda xatolik:', e);
         document.getElementById('dashboard-kpis').innerHTML = `
@@ -750,43 +703,137 @@ function dismissOnboarding() {
 }
 
 // ════════════════════════════════════════════════════════
-// AI FAOLIYATI — shu oy uchun jami ko'rsatkichlar
+// AI FAOLIYATI — tanlangan davr bo'yicha suhbatlar soni.
+// Ilgari bu kartochka doim "shu oy"ni ko'rsatardi, tepada esa alohida
+// "AI Suhbatlar" KPI kartochkasi davr tanlagichga mos raqamni takrorlardi —
+// ikkalasi birlashtirildi: davrga mos son shu yerda, "Bugun" esa doimiy
+// solishtirish nuqtasi sifatida qoladi (davr "Bugun" bo'lmasa).
 // ════════════════════════════════════════════════════════
-async function loadActivitySummary() {
+async function loadActivitySummary(an) {
     const el = document.getElementById('ai-activity-summary');
     if (!el) return;
     try {
         const d = await (await fetch('/api/admin/analytics/series?span=oy')).json();
-        const convs = d.values.reduce((a, v) => a + v, 0);
         const today = d.focus != null ? d.values[d.focus] : 0;
-        // "Bu oy buyurtma" ataylab yo'q: u yuqoridagi "Shu Oy Buyurtmalar"
-        // KPI kartochkasi bilan bir xil raqamni takrorlar edi.
-        el.innerHTML = [
-            ['Bu oy suhbat', convs],
-            ['Bugun suhbat', today],
-        ].map(([label, val]) => `
-            <div class="activity-tile">
-                <div class="activity-tile-value">${fmtNum(val)}</div>
+        const periodLabel = an.period_label || 'Suhbat';
+        const tiles = [[`${periodLabel} suhbat`, fmtNum(an.total_conversations)]];
+        if (dashPeriod !== 'today') tiles.push(['Bugun suhbat', fmtNum(today)]);
+        // "Suhbatlar holati" doimo 3 ta plitka — bu karta 2 tasi bilan
+        // qolsa, ustunlar notekis kenglikda ko'rinardi. "Butun davr"da
+        // taqqoslanadigan oldingi davr yo'q, o'shanda 2 tada qoladi.
+        const gr = (an.growth || {}).total_conversations;
+        if (gr !== null && gr !== undefined) {
+            const up = gr >= 0;
+            const color = up ? 'var(--status-delivered)' : 'var(--accent-danger)';
+            tiles.push(['O\'sish', `<span style="color:${color}">${up ? '+' : ''}${gr}%</span>`]);
+        }
+        el.className = 'activity-summary' + (tiles.length === 3 ? ' activity-summary--3col' : '');
+        const wide = tiles.length === 1 ? ' style="grid-column:1/-1;"' : '';
+        el.innerHTML = tiles.map(([label, val]) => `
+            <div class="activity-tile"${wide}>
+                <div class="activity-tile-value">${val}</div>
                 <div class="activity-tile-label">${label}</div>
             </div>`).join('');
+        syncActivityCardHeights();
     } catch (e) {
         el.innerHTML = '<div class="chart-empty">Ma\'lumotni yuklab bo\'lmadi</div>';
     }
 }
 
-/** Google Sheets state. The card used to read "tez orada" while the integration
- *  was in fact built — so a silent misconfiguration looked like a missing
- *  feature, and the owner had no way to tell which of the two it was. */
+/** "Suhbatlar holati" va "AI Faoliyati" plitkalari tarkibi turlicha (biri
+ *  nishon qatoriga ega, ikkinchisi yo'q), shuning uchun CSS'dagi grid
+ *  cho'zilishiga suyanish o'rniga aniq balandlikni o'lchab tenglashtiramiz —
+ *  bu ikkala holatda ham ishonchli ishlaydi. */
+function syncActivityCardHeights() {
+    const a = document.getElementById('dashboard-status-bars');
+    const b = document.getElementById('ai-activity-summary');
+    if (!a || !b) return;
+    a.style.minHeight = '';
+    b.style.minHeight = '';
+    requestAnimationFrame(() => {
+        const h = Math.max(a.offsetHeight, b.offsetHeight);
+        a.style.minHeight = h + 'px';
+        b.style.minHeight = h + 'px';
+    });
+}
+
+// ════════════════════════════════════════════════════════
+// AI DAROMADI DINAMIKASI — shu oy, kun kesimida. Tashqi kutubxonasiz,
+// inline SVG (build-step yo'q loyihada bog'liqlik qo'shmaslik uchun).
+// Ma'lumot activity_series() dan — dashboard_stats.ai_revenue bilan bir
+// xil ta'rif (bekor qilinmagan, AI suhbatidan kelgan buyurtmalar).
+// ════════════════════════════════════════════════════════
+async function loadRevenueChart() {
+    const box = document.getElementById('revenue-chart');
+    const periodEl = document.getElementById('revenue-chart-period');
+    if (!box) return;
+    if (periodEl) periodEl.textContent = 'Shu oy, kun kesimida';
+    try {
+        const d = await (await fetch('/api/admin/analytics/series?span=oy')).json();
+        renderRevenueChart(d);
+    } catch (e) {
+        box.innerHTML = '<div class="chart-empty" style="height:140px;">Ma\'lumotni yuklab bo\'lmadi</div>';
+    }
+}
+
+function renderRevenueChart(d) {
+    const box = document.getElementById('revenue-chart');
+    if (!box) return;
+    const values = d.revenue || [];
+    const labels = d.labels || [];
+    if (values.length < 2) {
+        box.innerHTML = '<div class="chart-empty" style="height:140px;">Grafik uchun ma\'lumot hali yetarli emas</div>';
+        return;
+    }
+
+    const W = 600, H = 140, PAD = 10;
+    const max = Math.max(...values, 1);
+    const n = values.length;
+    const stepX = W / (n - 1);
+    const points = values.map((v, i) => [
+        i * stepX,
+        H - PAD - (v / max) * (H - PAD * 2),
+    ]);
+
+    const line = points.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+    const area = `${line} L${points[n - 1][0].toFixed(1)},${H} L0,${H} Z`;
+    const focus = d.focus != null && d.focus < n ? d.focus : n - 1;
+    const [fx, fy] = points[focus];
+
+    box.innerHTML = `
+        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%; height:140px; display:block;">
+            <defs>
+                <linearGradient id="revChartGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#00b87c" stop-opacity="0.3"/>
+                    <stop offset="100%" stop-color="#00b87c" stop-opacity="0"/>
+                </linearGradient>
+            </defs>
+            <path d="${area}" fill="url(#revChartGrad)" stroke="none"/>
+            <path d="${line}" fill="none" stroke="#00b87c" stroke-width="2"/>
+            <circle cx="${fx.toFixed(1)}" cy="${fy.toFixed(1)}" r="3.5" fill="#00b87c" stroke="#fff" stroke-width="1.5"/>
+        </svg>
+        <div style="display:flex; justify-content:space-between; margin-top:4px; font-size:10.5px; color:var(--text-muted);">
+            <span>${escapeHtml(labels[0] || '')}-kun</span>
+            <span>${escapeHtml(labels[n - 1] || '')}-kun</span>
+        </div>`;
+}
+
+/** Google Sheets state. Syncing itself happens from the Katalog bo'limi's
+ *  import modal — this card only reports whether a link is connected and,
+ *  clicked, sends the owner there instead of duplicating the input here. */
 async function loadSheetsStatus() {
     const label = document.getElementById('sheets-status');
     const reason = document.getElementById('sheets-reason');
     const card = document.getElementById('sheets-card');
     if (!label) return;
     try {
-        const d = await (await fetch('/api/admin/integrations/status')).json();
-        label.textContent = d.google_sheets ? '🟢 Ulangan' : '⚪️ Ulanmagan';
-        reason.textContent = d.google_sheets ? '' : (d.google_sheets_reason || '');
-        card.classList.toggle('disabled', !d.google_sheets);
+        const d = await (await fetch('/api/admin/settings')).json();
+        const connected = !!d.google_sheet_url;
+        label.textContent = connected ? '🟢 Ulangan' : '⚪️ Ulanmagan';
+        reason.textContent = connected
+            ? `${fmtNum(d.google_sheet_product_count)} ta mahsulot · oxirgi sinxronlash: ${fmtDateShort((d.google_sheet_synced_at || '').slice(0, 10))}`
+            : 'Ulash uchun Katalog bo\'limiga o\'ting';
+        card.classList.toggle('disabled', !connected);
     } catch (e) {
         label.textContent = 'Holatni aniqlab bo\'lmadi';
     }
@@ -828,6 +875,42 @@ async function renderUsagePanel(data) {
         ${row('Mahsulot', u.products)}
         <div class="cost-row"><span>AI yopgan savdo</span><b>${fmtNum(data.ai_order_count)} ta</b></div>
         <p class="cost-hint">Limit tugasa AI javob bermay qo'yadi va suhbat operatorga uzatiladi.</p>`;
+}
+
+/** "AI qanchalik yaxshi ishlayapti" savoliga javob — Inbox'ni bitta-bitta o'qish
+ *  o'rniga, tarixiy sabab yig'indisidan chiqarilgan haqiqiy ko'rsatkichlar.
+ *  Ma'lumot /api/admin/analytics'dan keladi (allaqachon loadDashboardStats'da
+ *  bir marta so'ralgan — bu yerda qayta so'rov yubormaydi). */
+function renderAiEffectiveness(an) {
+    const periodEl = document.getElementById('ai-effectiveness-period');
+    const tilesEl = document.getElementById('ai-effectiveness-tiles');
+    const reasonsEl = document.getElementById('ai-handoff-reasons');
+    if (!tilesEl) return;
+
+    if (periodEl) periodEl.textContent = an.period_label || '';
+
+    const latency = an.avg_latency_ms ? `${(an.avg_latency_ms / 1000).toFixed(1)}s` : '—';
+    tilesEl.innerHTML = [
+        ['Operatorga uzatildi', `${fmtNum(an.escalation_rate)}%`],
+        ["AI yolg'iz yopdi", `${fmtNum(an.ai_alone_rate)}%`],
+        ['Javob tezligi', latency],
+    ].map(([label, val]) => `
+        <div class="activity-tile">
+            <div class="activity-tile-value">${val}</div>
+            <div class="activity-tile-label">${label}</div>
+        </div>`).join('');
+
+    if (!reasonsEl) return;
+    const reasons = an.handoff_reasons || [];
+    if (!reasons.length) {
+        reasonsEl.innerHTML = '<p class="cost-hint">Bu davrda operatorga uzatilgan suhbat bo\'lmagan.</p>';
+        return;
+    }
+    const top = Math.max(...reasons.map((r) => r.count));
+    reasonsEl.innerHTML = reasons.map((r) => `
+        <div class="cost-row"><span>${escapeHtml(r.reason)}</span><b>${fmtNum(r.count)} ta</b></div>
+        <div class="usage-bar"><i style="width:${top ? Math.round(r.count / top * 100) : 0}%"></i></div>
+    `).join('');
 }
 
 const RECENT_ORDERS_AVATAR_COLORS = ['#388BFD', '#A371F7', '#00b87c', '#f59e0b', '#f0883e', '#e11d48'];
@@ -1584,6 +1667,7 @@ async function loadSettings() {
         setVal('kb-warranty', data.warranty_info);
         setVal('kb-return', data.return_policy);
         setVal('kb-hours', data.working_hours);
+        setVal('kb-phone', data.contact_phone);
         setVal('kb-faq', data.faq);
         renderKbStatus(data);
     } catch (e) {
@@ -1597,7 +1681,8 @@ function renderKbStatus(d) {
     if (!el) return;
     const fields = [d.delivery_fee_city, d.delivery_fee_regions, d.free_delivery_from,
                     d.delivery_days_city, d.delivery_days_regions, d.delivery_info,
-                    d.payment_info, d.warranty_info, d.return_policy, d.working_hours, d.faq];
+                    d.payment_info, d.warranty_info, d.return_policy, d.working_hours, d.faq,
+                    d.contact_phone];
     const filled = fields.filter(v => v !== null && v !== undefined && v !== '').length;
     el.classList.remove('is-ok', 'is-warn');
     if (filled === fields.length) {
@@ -1651,6 +1736,7 @@ async function saveSettings() {
                 warranty_info: gv('kb-warranty') || null,
                 return_policy: gv('kb-return') || null,
                 working_hours: gv('kb-hours') || null,
+                contact_phone: gv('kb-phone') || null,
                 faq: gv('kb-faq') || null
             })
         });
@@ -2297,6 +2383,74 @@ function renderImportResult(d, dryRun) {
         ${errs}`;
 }
 
+// ════════════════════════════════════════════════════════
+// GOOGLE SHEETS — bitta havola, bitta tugma.
+// Excel importdan ataylab sodda: oldindan ko'rish bosqichi yo'q, chunki
+// jadval istalgan payt qayta "Ulash" bosib tuzatiladi — xato bo'lsa ham
+// hech narsa yo'qolmaydi, faqat qayta urinasiz.
+// ════════════════════════════════════════════════════════
+function openSheetsModal() {
+    document.getElementById('sheets-result').innerHTML = '';
+    document.getElementById('sheets-sync-btn').disabled = false;
+    document.getElementById('sheets-modal').style.display = 'flex';
+
+    // Ulangan havola bo'lsa, uni qayta terib o'tirmasin.
+    fetch('/api/admin/settings').then((r) => r.json()).then((d) => {
+        if (d.google_sheet_url) document.getElementById('sheets-url-input').value = d.google_sheet_url;
+    }).catch(() => {});
+}
+
+function closeSheetsModal() {
+    document.getElementById('sheets-modal').style.display = 'none';
+}
+
+async function syncGoogleSheet() {
+    const url = document.getElementById('sheets-url-input').value.trim();
+    if (!url) { toast('Jadval havolasini kiriting', true); return; }
+
+    const box = document.getElementById('sheets-result');
+    const btn = document.getElementById('sheets-sync-btn');
+    btn.disabled = true;
+    box.innerHTML = '<p style="font-size:13px;color:var(--text-muted);margin-top:12px;">Ulanmoqda...</p>';
+
+    try {
+        const resp = await fetch('/api/admin/products/import-sheet?dry_run=false', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url }),
+        });
+        const d = await resp.json();
+
+        if (!resp.ok) {
+            box.innerHTML = `<div class="import-errors" style="margin-top:12px;">${escapeHtml(d.detail || 'Xatolik')}</div>`;
+            btn.disabled = false;
+            return;
+        }
+        if (d.success === false) {
+            box.innerHTML = `
+                <div class="import-errors" style="margin-top:12px;">
+                    <b>${escapeHtml(d.error)}</b><br>
+                    Jadvalda topilgan ustunlar: ${(d.found_columns || []).map(escapeHtml).join(', ') || '—'}
+                </div>`;
+            btn.disabled = false;
+            return;
+        }
+
+        box.innerHTML = `
+            <div class="import-summary" style="margin-top:12px;">
+                <div class="import-stat ok"><b>${d.added}</b><span>yangi</span></div>
+                <div class="import-stat"><b>${d.updated}</b><span>yangilandi</span></div>
+                <div class="import-stat ${d.skipped ? 'warn' : ''}"><b>${d.skipped}</b><span>o'tkazildi</span></div>
+            </div>`;
+        btn.disabled = false;
+        toast(`✅ Google Sheets bilan ulandi: ${d.added} ta qo'shildi, ${d.updated} ta yangilandi`);
+        await Promise.all([loadProducts(), loadCategories()]);
+    } catch (err) {
+        box.innerHTML = '<div class="import-errors" style="margin-top:12px;">Serverga ulanishda xatolik.</div>';
+        btn.disabled = false;
+    }
+}
+
 // ── AI auto-categorisation ──
 async function autoCategorize(onlyUncategorized = true) {
     const btn = document.getElementById('ai-cat-btn');
@@ -2457,11 +2611,12 @@ async function openCustomer(id) {
         } catch (e) { toast(e.message, true); }
     });
 
-    // Jumping straight into the chat is the whole point of seeing the history
+    // Jumping straight into the chat is the whole point of seeing the history.
+    // Inbox has no sidebar entry of its own — switchToTab opens it directly.
     body.querySelectorAll('[data-conv]').forEach((el) =>
         el.addEventListener('click', () => {
             closeCustomerModal();
-            document.querySelector('[data-tab="tab-inbox"]').click();
+            switchToTab('tab-inbox');
             setTimeout(() => openConversation(el.dataset.conv), 300);
         }));
 }
@@ -2470,33 +2625,102 @@ async function openCustomer(id) {
 // INTEGRATSIYALAR — Telegram
 // ════════════════════════════════════════════════════════
 async function loadIntegrations() {
-    loadNotifications();
     loadSheetsStatus();
+    let d = null;
     try {
         const resp = await fetch('/api/integrations/telegram');
-        const d = await resp.json();
+        d = await resp.json();
         const tgState = document.getElementById('tg-status-text');
         tgState.textContent = d.connected ? 'Ulangan' : 'Ulanmagan';
         /* Yorliq rangi ham holatga ergashsin, faqat matn emas. */
         tgState.classList.toggle('is-on', !!d.connected);
         document.getElementById('tg-connected').style.display = d.connected ? 'block' : 'none';
         document.getElementById('tg-disconnected').style.display = d.connected ? 'none' : 'block';
+
+        // Sozlamalar sahifasidagi qisqa qator — oynani ochmasdan holat ko'rinsin.
+        const summary = document.getElementById('tg-summary');
+        if (summary) {
+            summary.textContent = !d.connected
+                ? 'Bot hali ulanmagan — mijozlar bilan gaplasha olishi uchun ulang.'
+                : d.business_connected
+                    ? `@${d.username} ulangan · AI shaxsiy profilingiz nomidan javob beradi`
+                    : `@${d.username} ulangan · AI bot nomidan javob beradi`;
+        }
+
+        // 1-qadam holati
+        setTgStepState('tg-step-1', d.connected, d.connected ? 'Ulangan' : 'Ulanmagan');
+
+        // 2-qadam: bot ulanmasa, Business haqida gapirishning ma'nosi yo'q —
+        // ulanmagan holatda instructionlar o'rniga "avval 1-qadam" ko'rsatiladi,
+        // va qadamning o'zi ochilmaydigan qilib qulflanadi (is-locked).
+        document.getElementById('tg-business-off').style.display = (d.connected && !d.business_connected) ? '' : 'none';
+        document.getElementById('tg-business-on').style.display = (d.connected && d.business_connected) ? '' : 'none';
+        document.getElementById('tg-step-2-locked').style.display = d.connected ? 'none' : '';
+        document.getElementById('tg-step-2').classList.toggle('is-locked', !d.connected);
+        if (!d.connected) document.getElementById('tg-step-2').open = false;
+        setTgStepState('tg-step-2', d.business_connected, !d.connected
+            ? 'Avval botni ulang' : d.business_connected ? 'Ulangan' : 'Ixtiyoriy');
+
         if (d.connected) {
             document.getElementById('tg-username').textContent = '@' + (d.username || '—');
             const note = document.getElementById('tg-note');
             if (d.polling_enabled) {
                 note.innerHTML = d.polling_active
-                    ? "🟢 <b>Localhost rejimi faol</b> — Telegram'da botga yozing, xabar shu Inbox'ga tushadi."
+                    ? "🟢 <b>Localhost rejimi faol</b> — bot Telegramdan xabar olishga tayyor."
                     : "🟡 Localhost rejimi yoqilgan, ulanish tayyorlanmoqda (~30 soniya)...";
             } else if (d.public_url_configured) {
-                note.textContent = "🟢 Webhook faol — mijozlar xabarlari Inbox'ga tushadi.";
+                note.textContent = "🟢 Webhook faol.";
             } else {
                 note.textContent = "⚠️ Na polling na public URL yoqilgan — xabarlar kelmaydi.";
+            }
+            if (!d.business_connected) {
+                document.getElementById('tg-business-botname').textContent = '@' + (d.username || 'bot');
             }
         }
     } catch (e) {
         console.error('Integratsiyalarni yuklashda xatolik:', e);
     }
+    await loadNotifications();
+    updateTgProgress();
+    return d;
+}
+
+/** <details> ustidagi belgi va matn — qaysi qadam bajarilgan, qaysi qolgan. */
+function setTgStepState(stepId, done, text) {
+    const step = document.getElementById(stepId);
+    const state = document.getElementById(stepId + '-state');
+    if (!step || !state) return;
+    step.classList.toggle('is-done', !!done);
+    state.textContent = text;
+}
+
+/** Progress faqat MAJBURIY qadamlarni sanaydi (1 va 3). 2-qadam — ixtiyoriy
+    yaxshilanish: ulamagan do'kon ham to'liq ishlaydi, shuning uchun uni
+    hisoblash "nimadir buzuq" degan tuyg'u berardi. */
+function updateTgProgress() {
+    const required = ['tg-step-1', 'tg-step-3'];
+    const done = required.filter((id) => document.getElementById(id)?.classList.contains('is-done')).length;
+    const fill = document.getElementById('tg-progress-fill');
+    const text = document.getElementById('tg-progress-text');
+    if (fill) fill.style.width = `${Math.round((done / required.length) * 100)}%`;
+    if (text) text.textContent = `${done}/${required.length} qadam`;
+}
+
+/** Uchala qadam ham DOM'ga yozilgandan keyin — birinchi tugallanmaganini ochadi,
+    qolganini yopadi, shunda oyna "keyingi nima qilish kerak"ni o'zi ko'rsatadi. */
+function focusFirstIncompleteTgStep() {
+    const ids = ['tg-step-1', 'tg-step-2', 'tg-step-3'];
+    // Ixtiyoriy qadam o'zini "qilinmagan ish" qilib ko'rsatmasin: ochiladigani
+    // faqat majburiylar orasidan tanlanadi, hammasi tugagan bo'lsa — hech biri.
+    const firstOpen = ['tg-step-1', 'tg-step-3']
+        .find((id) => !document.getElementById(id).classList.contains('is-done'));
+    ids.forEach((id) => { document.getElementById(id).open = (id === firstOpen); });
+}
+
+async function openTelegramModal() {
+    document.getElementById('telegram-modal').style.display = 'flex';
+    await loadIntegrations();
+    focusFirstIncompleteTgStep();
 }
 
 // ── Bildirishnomalar: qaysi xabar qayerga ──
@@ -2567,6 +2791,17 @@ async function loadNotifications() {
 
     document.getElementById('notif-channels').querySelectorAll('[data-unpair]').forEach((b) =>
         b.addEventListener('click', () => unpairChannel(b.dataset.unpair, b.dataset.title)));
+
+    setTgStepState('tg-step-3', hasChannels,
+        hasChannels ? `${d.channels.length} ta ulangan` : 'Ulanmagan');
+
+    // Integratsiyalar bo'limidagi ko'rsatkich — oynani ochmasdan holat ko'rinsin.
+    const cardStatus = document.getElementById('notif-card-status');
+    if (cardStatus) {
+        cardStatus.textContent = hasChannels
+            ? `${d.channels.length} ta manzil ulangan`
+            : "Qaysi xabar qayerga borishini o'zingiz tanlaysiz";
+    }
 }
 
 async function saveNotifyRoutes() {
@@ -2608,6 +2843,10 @@ async function unpairChannel(chatId, title) {
         toast('Manzil uzildi');
         loadNotifications();
     } catch (e) { toast(e.message, true); }
+}
+
+function closeTelegramModal() {
+    document.getElementById('telegram-modal').style.display = 'none';
 }
 
 async function connectTelegram() {

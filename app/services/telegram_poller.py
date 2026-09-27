@@ -24,7 +24,12 @@ logger = logging.getLogger("telegram_poller")
 
 POLL_TIMEOUT = 25       # seconds Telegram holds the request open
 # Every update type the bot acts on. Missing one here means it never arrives.
-ALLOWED_UPDATES = ["message", "channel_post", "callback_query", "my_chat_member"]
+# business_* is how the AI hears customers on Telegram Business — see bot_service.
+ALLOWED_UPDATES = [
+    "message", "channel_post", "callback_query", "my_chat_member",
+    "business_connection", "business_message",
+    "edited_business_message", "deleted_business_messages",
+]
 ERROR_BACKOFF = 5       # seconds to wait after a failure
 REFRESH_INTERVAL = 30   # seconds between tenant-list refreshes
 

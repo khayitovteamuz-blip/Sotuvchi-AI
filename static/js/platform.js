@@ -22,6 +22,20 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
 const cap = (v) => (v === null || v === undefined ? '∞' : fmt(v));
 const initials = (s) => (s || '?').trim().charAt(0).toUpperCase();
 
+/** "98 / 99" as plain text reads the same as "1 / 1000" — the bar is what
+    makes "basically full" visible without doing the division yourself.
+    No limit (unlimited plan) draws no bar, just the number. */
+function usageBar(label, used, limit, pct) {
+    const cls = pct == null ? '' : pct >= 100 ? 'bad' : pct >= 85 ? 'warn' : '';
+    const track = limit == null ? '' : `
+        <div class="usage-track"><div class="usage-fill ${cls}" style="width:${Math.min(pct, 100)}%"></div></div>`;
+    return `
+        <div class="usage">
+            <div class="usage-row"><span>${esc(label)}</span><b class="num">${fmt(used)} / ${cap(limit)}</b></div>
+            ${track}
+        </div>`;
+}
+
 /** Long sums are unreadable in a card: 51 600 000 becomes 51.6M. */
 function short(n) {
     const v = Number(n) || 0;
@@ -179,6 +193,9 @@ const SUB_STATE = {
     active: 'Faol', trial: 'Sinov davri', grace: 'Muddat tugadi (imtiyoz)',
     frozen: 'Muzlatilgan', expired: 'To\'xtatilgan', free: 'Bepul tarif',
 };
+// Bir xil holat so'zi biznes ro'yxatida ham, profilida ham bir xil rangda
+// bo'lsin — statusni ikki joyda ikki xil bo'yamaslik uchun.
+const SUB_STATE_CLS = { active: 'ok', trial: 'ok', grace: 'warn', frozen: 'idle', expired: 'bad', free: 'idle' };
 const PAY_STATE = { pending: ['warn', 'Kutilmoqda'], confirmed: ['ok', 'Tasdiqlangan'], rejected: ['bad', 'Rad etilgan'] };
 
 /** Pending count on the sidebar, so money waiting to be confirmed is visible
@@ -644,11 +661,50 @@ async function openTenant(id) {
     const opts = PLANS.map((p) =>
         `<option value="${esc(p.name)}" ${p.name === d.plan ? 'selected' : ''}>${esc(p.title)}</option>`).join('');
 
+    // Kontakt yoki bilimlar bazasi umuman to'ldirilmagan bo'lsa, karta
+    // shunchaki bo'sh emas — "hali hech kim qaramagan" deb ochiq aytadi.
+    const contactEmpty = !d.contact.owner_name && !d.contact.phone
+        && !d.contact.telegram_contact && !d.contact.address;
+    const kbEmpty = !d.knowledge_base.working_hours && !d.knowledge_base.payment_info
+        && !d.knowledge_base.warranty_info && !d.knowledge_base.return_policy;
+
+    const daysLeft = d.billing.days_left;
+    const daysCls = daysLeft == null ? 'ok' : daysLeft <= 3 ? 'bad' : daysLeft <= 7 ? 'warn' : 'ok';
+    const subCls = SUB_STATE_CLS[d.billing.status] || 'idle';
+
+    // Holat qatori va tablar drawer-head bilan bir xil qatlamda (flex-shrink:0)
+    // — pastga aylanganda ham "kim, qaysi holatda" doim ko'rinib tursin.
+    $('drawer-subhead').innerHTML = `
+        <div class="drawer-status-row">
+            <span class="state ${subCls}">${esc(SUB_STATE[d.billing.status] || d.billing.status)}</span>
+            <span class="pill">${esc(u.plan_title || d.plan)} tarifi</span>
+            ${daysLeft != null ? `<span class="state ${daysCls}">${daysLeft} kun qoldi${
+                d.billing.expires_at ? ' · ' + esc(d.billing.expires_at) : ''}</span>` : ''}
+            ${d.telegram.connected
+                ? `<span class="state ok">Telegram ulangan · @${esc(d.telegram.username || '')}</span>`
+                : `<span class="state idle">Telegram ulanmagan</span>`}
+        </div>
+        <nav class="drawer-tabs">
+            <button class="drawer-tab active" data-tab="overview">Umumiy</button>
+            <button class="drawer-tab" data-tab="telegram">Telegram va AI</button>
+            <button class="drawer-tab" data-tab="kb">Bilimlar bazasi</button>
+            <button class="drawer-tab" data-tab="team">Jamoa</button>
+            <button class="drawer-tab" data-tab="payments">To'lovlar</button>
+            <button class="drawer-tab drawer-tab-danger" data-tab="danger">Xavfli hudud</button>
+        </nav>`;
+
+    // Har olti tab ham DOMga bir yo'la yoziladi (faqat "overview" ochiq) —
+    // shu bilan pastdagi eventlar ro'yxati o'zgarmasdan, ular faqat ko'rinish/
+    // yashirinishni almashtiradi, qayta so'rov yubormaydi.
     $('drawer-body').innerHTML = `
-      <div class="prof">
-        <div class="prof-col">
-        <div class="block">
-            <div class="block-t">Egasining kontakti</div>
+      <div class="tab-panel" data-tab="overview">
+        <div class="tab-grid-3">
+        <div class="block${contactEmpty ? ' card-incomplete' : ''}">
+            <div class="card-head">
+                <div class="block-t">Egasining kontakti</div>
+                ${contactEmpty ? '<span class="flag-warn">To\'ldirilmagan</span>' : ''}
+            </div>
+            ${contactEmpty ? '<p class="empty-hint">Egasi bilan bog\'lanish uchun kerak — hali hech kim to\'ldirmagan.</p>' : ''}
             <label class="field"><span>Ism</span>
                 <input type="text" id="dr-owner" value="${esc(d.contact.owner_name || '')}"></label>
             <label class="field"><span>Telefon</span>
@@ -671,9 +727,9 @@ async function openTenant(id) {
         <div class="block">
             <div class="block-t">Tarif va sarf</div>
             <label class="field"><span>Tarif</span><select id="dr-plan">${opts}</select></label>
-            <div class="kv"><span>Mahsulot</span><b>${fmt(u.products.used)} / ${cap(u.products.limit)}</b></div>
-            <div class="kv"><span>AI xabar, shu oy</span><b>${fmt(u.ai_messages.used)} / ${cap(u.ai_messages.limit)}</b></div>
-            <div class="kv"><span>Operator</span><b>${fmt(u.operators.used)} / ${cap(u.operators.limit)}</b></div>
+            ${usageBar('Mahsulot', u.products.used, u.products.limit, u.products.pct)}
+            ${usageBar('AI xabar, shu oy', u.ai_messages.used, u.ai_messages.limit, u.ai_messages.pct)}
+            ${usageBar('Operator', u.operators.used, u.operators.limit, u.operators.pct)}
             <div class="acts">
                 <button class="btn btn-green" id="dr-save-plan">Tarifni saqlash</button>
                 <button class="btn ${d.is_active ? 'btn-red' : ''}" id="dr-toggle-active">
@@ -685,20 +741,20 @@ async function openTenant(id) {
         <div class="block">
             <div class="block-t">Hisob va obuna</div>
             <div class="kv"><span>Balans</span><b>${fmt(d.billing.balance)} so'm</b></div>
-            <div class="kv"><span>Holat</span><b>${esc(SUB_STATE[d.billing.status] || d.billing.status)}</b></div>
+            <div class="kv"><span>Holat</span><span class="state ${subCls}">${esc(SUB_STATE[d.billing.status] || d.billing.status)}</span></div>
             <div class="kv"><span>Tugaydi</span><b>${esc(d.billing.expires_at || '—')}</b></div>
-            <div class="kv"><span>Qolgan kun</span><b>${
-                d.billing.days_left != null ? d.billing.days_left : '—'}</b></div>
+            <div class="kv"><span>Qolgan kun</span><b>${daysLeft != null ? daysLeft : '—'}</b></div>
             <div class="kv"><span>Avtomatik yangilash</span><b>${d.billing.auto_renew ? 'yoqilgan' : 'o\'chirilgan'}</b></div>
             <div class="acts">
                 <button class="btn" id="dr-balance">Balansni tuzatish</button>
                 <button class="btn" id="dr-extend">Muddatni uzaytirish</button>
             </div>
         </div>
-
         </div>
+      </div>
 
-        <div class="prof-col">
+      <div class="tab-panel" data-tab="telegram" hidden>
+        <div class="tab-grid-2">
         <div class="block">
             <div class="block-t">Telegram</div>
             <div class="kv"><span>Bot</span><b>${d.telegram.connected ? '@' + esc(d.telegram.username || '') : 'ulanmagan'}</b></div>
@@ -722,9 +778,16 @@ async function openTenant(id) {
                 <button class="btn btn-ghost" id="dr-bot">${d.ai.bot_enabled ? 'Botni o\'chirish' : 'Botni yoqish'}</button>
             </div>
         </div>
+        </div>
+      </div>
 
-        <div class="block">
-            <div class="block-t">Bilimlar bazasi</div>
+      <div class="tab-panel" data-tab="kb" hidden>
+        <div class="block${kbEmpty ? ' card-incomplete' : ''}" style="max-width:640px">
+            <div class="card-head">
+                <div class="block-t">Bilimlar bazasi</div>
+                ${kbEmpty ? '<span class="flag-warn">To\'ldirilmagan</span>' : ''}
+            </div>
+            ${kbEmpty ? '<p class="empty-hint">AI mijozga ish vaqti, to\'lov va kafolat haqida shu ma\'lumotdan javob beradi — hali bo\'sh.</p>' : ''}
             <label class="field"><span>Ish vaqti</span>
                 <input type="text" id="dr-hours" value="${esc(d.knowledge_base.working_hours || '')}"></label>
             <label class="field"><span>To'lov</span>
@@ -735,17 +798,15 @@ async function openTenant(id) {
                 <input type="text" id="dr-return" value="${esc(d.knowledge_base.return_policy || '')}"></label>
             <div class="acts"><button class="btn btn-green" id="dr-save-kb">Bilimlar bazasini saqlash</button></div>
         </div>
-
-        </div>
       </div>
 
-      <div class="prof-wide">
-        <div class="block">
+      <div class="tab-panel" data-tab="team" hidden>
+        <div class="block" style="max-width:640px">
             <div class="block-t">Foydalanuvchilar</div>
             ${d.users.map((x) => `
                 <div class="kv">
                     <span>${esc(x.email)} · ${esc(x.role)}${x.is_active ? '' : ' · o\'chirilgan'}</span>
-                    <span style="display:flex;gap:6px">
+                    <span class="row-acts">
                         <button class="btn btn-ghost" data-login="${esc(x.id)}"
                                 data-email="${esc(x.email)}">Login</button>
                         <button class="btn btn-ghost" data-reset="${esc(x.id)}">Parol</button>
@@ -759,8 +820,10 @@ async function openTenant(id) {
                 <button class="btn btn-ghost" id="dr-logout-all">Barcha sessiyani yopish</button>
             </div>
         </div>
+      </div>
 
-        <div class="block">
+      <div class="tab-panel" data-tab="payments" hidden>
+        <div class="block" style="max-width:900px">
             <div class="block-t">To'lovlar va tarif tarixi</div>
             ${d.payments.length ? `<div class="paylog">${d.payments.map((p) => `
                 <div class="paylog-row">
@@ -777,9 +840,11 @@ async function openTenant(id) {
                 </div>`).join('')}</div>`
               : '<p class="empty">Hali to\'lov yo\'q.</p>'}
         </div>
+      </div>
 
+      <div class="tab-panel danger-panel" data-tab="danger" hidden>
         <div class="block">
-            <div class="block-t">Xavfli hudud</div>
+            <div class="block-t" style="color:var(--red)">Xavfli hudud</div>
             <p style="font-size:12.5px;color:var(--fg-3);line-height:1.6">
                 Biznes va unga tegishli barcha narsa — mahsulotlar, buyurtmalar, suhbatlar —
                 butunlay o'chadi. Qaytarib bo'lmaydi.
@@ -787,6 +852,12 @@ async function openTenant(id) {
             <div class="acts"><button class="btn btn-red" id="dr-delete">Biznesni o'chirish</button></div>
         </div>
       </div>`;
+
+    $('drawer-subhead').querySelectorAll('.drawer-tab').forEach((t) =>
+        t.addEventListener('click', () => {
+            $('drawer-subhead').querySelectorAll('.drawer-tab').forEach((x) => x.classList.toggle('active', x === t));
+            $('drawer-body').querySelectorAll('.tab-panel').forEach((p) => { p.hidden = p.dataset.tab !== t.dataset.tab; });
+        }));
 
     $('dr-save-plan').addEventListener('click', () =>
         patchTenant(id, { plan: $('dr-plan').value }, 'Tarif saqlandi'));

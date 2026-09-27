@@ -98,6 +98,11 @@ class SystemSettings(BaseModel):
     temperature: float = 0.7
     bot_enabled: bool = True
     sheets_sync_enabled: bool = True
+    # Read-only here: set only by POST /products/import-sheet, never by this
+    # endpoint's own save — see the ORM column's comment.
+    google_sheet_url: Optional[str] = None
+    google_sheet_synced_at: Optional[datetime] = None
+    google_sheet_product_count: Optional[int] = None
     # persona (optional in responses)
     ai_name: Optional[str] = None
     ai_tone: Optional[str] = None
@@ -117,6 +122,7 @@ class SystemSettings(BaseModel):
     return_policy: Optional[str] = None
     working_hours: Optional[str] = None
     faq: Optional[str] = None
+    contact_phone: Optional[str] = None
 
 
 class DashboardStats(BaseModel):

@@ -314,7 +314,7 @@ def _row_brief(r) -> Dict[str, Any]:
     return {
         "product_id": r["id"],
         "name": r["name"],
-        "price": r["price"],
+        "price": float(r["price"]),
         "currency": r["currency"],
         "category": r["category"],
         "available": bool(r["in_stock"] and r["stock_quantity"] > 0),
@@ -394,7 +394,7 @@ async def _check_stock(session, tenant_id: str, product_id: str) -> Dict[str, An
         "name": p.name,
         "in_stock": p.in_stock and p.stock_quantity > 0,
         "stock_quantity": p.stock_quantity,
-        "price": p.price,
+        "price": float(p.price),
         "currency": p.currency,
         "category": p.category,
         "description": p.description,  # full text lives here, not in search results
@@ -525,7 +525,7 @@ async def _create_order(session, tenant_id: str, conversation, args: Dict[str, A
                     "error": f"'{p.name}' omborda yetarli emas (qoldiq: {p.stock_quantity}). Sotib bo'lmaydi."}
         items.append({"product_id": p.id, "product_name": p.name,
                       "quantity": qty, "unit_price": p.price})
-        summary.append({"product_name": p.name, "quantity": qty, "unit_price": p.price})
+        summary.append({"product_name": p.name, "quantity": qty, "unit_price": float(p.price)})
 
     currency = (await repo.get_product(session, tenant_id, items[0]["product_id"])).currency
 
@@ -562,7 +562,7 @@ async def _create_order(session, tenant_id: str, conversation, args: Dict[str, A
         "success": True,
         "already_created": not created,
         "order_id": order.id,
-        "total_amount": order.total_amount,
+        "total_amount": float(order.total_amount),
         "currency": currency,
         "items": summary,
         "customer_phone": phone,

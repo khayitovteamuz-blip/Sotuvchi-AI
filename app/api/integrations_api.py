@@ -27,6 +27,10 @@ async def telegram_status(user: User = Depends(require_auth), session: AsyncSess
         "public_url_configured": bool(settings.PUBLIC_BASE_URL),
         "polling_enabled": settings.TELEGRAM_POLLING,
         "polling_active": telegram_poller.is_polling(tenant.id),
+        # Ixtiyoriy yaxshilanish: yoqilgan bo'lsa AI javoblari egasining shaxsiy
+        # profili nomidan boradi, aks holda bot nomidan. Ikkala holatda ham AI
+        # ishlaydi — bu ulanish kimning nomidan yozilishini o'zgartiradi, xolos.
+        "business_connected": bool(tenant.telegram_business_connection_id and tenant.telegram_business_enabled),
     }
 
 
@@ -52,8 +56,9 @@ async def telegram_connect(token: str = Body(..., embed=True), user: User = Depe
     note = None
     if settings.TELEGRAM_POLLING:
         # Localhost mode: the poller picks the bot up within ~30s. No public URL,
-        # and no webhook (Telegram allows only one of the two).
-        note = "Bot ulandi ✅ Localhost rejimi (polling) — telefoningizdan hoziroq yozib ko'ring."
+        # and no webhook (Telegram allows only one of the two). This alone does
+        # NOT make the AI answer anyone yet — see the business_connected note.
+        note = "Bot ulandi ✅ Localhost rejimi (polling) faol."
     elif settings.PUBLIC_BASE_URL:
         url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}/api/bot/webhook/{tenant.id}"
         webhook_set = await bot_service.set_webhook(token, url, tenant.telegram_webhook_secret)

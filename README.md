@@ -7,7 +7,7 @@ boshqaradi; servis operatori esa `/boshqaruv` panelida barcha bizneslarni ko'rad
 
 - **Biznes paneli** — `/`
 - **Platforma boshqaruvi** — `/boshqaruv`
-- Texnologiya: FastAPI · PostgreSQL (pgvector) · Gemini · Telegram Bot API
+- Texnologiya: FastAPI · PostgreSQL · Gemini · Telegram Bot API
 
 ---
 
@@ -40,7 +40,6 @@ Ishlaydigan variantlar — hammasi shu Dockerfile bilan:
 ### 1. Supabase
 
 Loyiha yarating va connection string'ni oling (Session pooler, port `5432`).
-`pgvector` kengaytmasi kerak — migratsiya uni o'zi yoqadi.
 
 ### 2. Platformada muhit o'zgaruvchilari
 

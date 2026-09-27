@@ -92,7 +92,13 @@ async def operator_reply(conv_id: str, text: str = Body(..., embed=True), user: 
     if conv.channel == "telegram" and conv.external_id:
         tenant = await tenant_service.get_tenant(session, user.tenant_id)
         if tenant and tenant.telegram_bot_token:
-            await bot_service.send_message(tenant.telegram_bot_token, conv.external_id, text)
+            # A conversation that arrived over Telegram Business must reply the
+            # same way — the bot has no direct chat history with this customer,
+            # only the owner's connected account does.
+            await bot_service.send_message(
+                tenant.telegram_bot_token, conv.external_id, text,
+                business_connection_id=conv.telegram_business_connection_id,
+            )
 
     return {"status": "success", "conversation_status": conv.status}
 
