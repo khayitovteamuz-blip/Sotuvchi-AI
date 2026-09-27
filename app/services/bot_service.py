@@ -31,7 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import repo
 from app.db.models import Tenant
-from app.services.ai_agent import ai_agent, contact_fallback_text
+from app.services.ai_agent import (ai_agent, contact_fallback_text,
+                                   contact_reminder_due)
 from app.services.storage_service import local_path as _local_photo
 
 logger = logging.getLogger("bot_service")
@@ -673,6 +674,19 @@ class TelegramBotService:
             await repo.add_message(session, tenant.id, conv, "user", text or label)
             from app.services import notify_service
             await notify_service.notify_customer_waiting(session, tenant, cfg, conv, text or label)
+
+            # Uzatilgan, lekin hech kim javob bermayapti: mijoz jim chatda
+            # kutib qolmasin. Faqat bir marta — raqam berilgandan keyin har
+            # xabarga takrorlash mijozni haydab yuborish bilan barobar.
+            if conv.status == "operator":
+                history = await repo.recent_messages(session, tenant.id, conv.id, limit=10)
+                if contact_reminder_due(history, cfg.contact_phone, datetime.now(timezone.utc)):
+                    note = contact_fallback_text(cfg.contact_phone, cfg.ai_language).strip()
+                    await self.send_message(
+                        token, chat_id, note, business_connection_id=business_connection_id
+                    )
+                    await repo.add_message(session, tenant.id, conv, "assistant", note)
+                    logger.info("Operator jim: aloqa raqami berildi, conv=%s", conv.id)
             return
 
         if not text and not media:

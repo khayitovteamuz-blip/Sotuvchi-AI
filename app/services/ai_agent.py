@@ -12,6 +12,7 @@ import asyncio
 import logging
 import re
 import time
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,6 +66,44 @@ def handoff_left_unanswered(trace: List[Dict[str, Any]]) -> bool:
         and not (t.get("result") or {}).get("operator_notified")
         for t in (trace or [])
     )
+
+
+# How long a customer may sit in an escalated chat before the shop's number is
+# offered. Long enough that a working operator is not undercut mid-reply, short
+# enough that the customer has not already given up and gone elsewhere.
+CONTACT_REMINDER_MINUTES = 10
+
+
+def contact_reminder_due(
+    messages: List[Any],
+    phone: Optional[str],
+    now: datetime,
+    after_minutes: int = CONTACT_REMINDER_MINUTES,
+) -> bool:
+    """Has an escalated chat gone unanswered long enough to hand over the number?
+
+    `messages` is that conversation's recent history, oldest first. The clock
+    runs from the last thing WE said — an operator who replies resets it, so a
+    conversation someone is actually working never triggers this.
+
+    Checked when the waiting customer writes again rather than on a timer: a
+    timer would live in one worker and fire once per worker in a multi-worker
+    deploy, which is how a customer ends up with the same number three times.
+    Expiry is evaluated the same lazy way for the same reason.
+    """
+    if not (phone or "").strip():
+        return False
+
+    ours = [m for m in messages if getattr(m, "sender", None) in ("assistant", "operator")]
+    if not ours:
+        return False
+
+    # Already handed over — repeating it every message reads as a brush-off.
+    if any((phone or "").strip() in (getattr(m, "text", "") or "") for m in ours):
+        return False
+
+    last = max(m.created_at for m in ours)
+    return (now - last) >= timedelta(minutes=after_minutes)
 
 
 def contact_fallback_text(phone: Optional[str], lang: Optional[str]) -> str:
