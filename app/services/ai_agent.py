@@ -71,7 +71,7 @@ def handoff_left_unanswered(trace: List[Dict[str, Any]]) -> bool:
 # How long a customer may sit in an escalated chat before the shop's number is
 # offered. Long enough that a working operator is not undercut mid-reply, short
 # enough that the customer has not already given up and gone elsewhere.
-CONTACT_REMINDER_MINUTES = 10
+CONTACT_REMINDER_MINUTES = 30
 
 
 def contact_reminder_due(
@@ -86,10 +86,11 @@ def contact_reminder_due(
     runs from the last thing WE said — an operator who replies resets it, so a
     conversation someone is actually working never triggers this.
 
-    Checked when the waiting customer writes again rather than on a timer: a
-    timer would live in one worker and fire once per worker in a multi-worker
-    deploy, which is how a customer ends up with the same number three times.
-    Expiry is evaluated the same lazy way for the same reason.
+    Two things ask this question: the sweeper in contact_reminder.py, which
+    catches customers who go quiet, and this rule on the customer's next
+    message, which catches them sooner. Sending twice is prevented in the
+    database, not here — both paths must claim the conversation first
+    (repo.claim_contact_reminder).
     """
     if not (phone or "").strip():
         return False

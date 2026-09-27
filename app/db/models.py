@@ -655,6 +655,13 @@ class Conversation(Base):
     # with this id and appear as the owner's own account. Null for a chat that
     # only ever talked to the bot directly.
     telegram_business_connection_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # When the shop's phone number was handed to this customer because nobody
+    # answered. Doubles as the claim that keeps a multi-worker deploy from
+    # sending it once per worker: the sweeper only acts on rows where a
+    # conditional UPDATE of this column actually matched (see repo.claim_contact_reminder).
+    contact_reminded_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     status: Mapped[str] = mapped_column(String(16), default="ai")  # ai | operator | closed
     assigned_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     assigned_user_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)

@@ -676,11 +676,14 @@ class TelegramBotService:
             await notify_service.notify_customer_waiting(session, tenant, cfg, conv, text or label)
 
             # Uzatilgan, lekin hech kim javob bermayapti: mijoz jim chatda
-            # kutib qolmasin. Faqat bir marta — raqam berilgandan keyin har
-            # xabarga takrorlash mijozni haydab yuborish bilan barobar.
+            # kutib qolmasin. Fon vazifasi ham shuni kuzatadi (contact_reminder),
+            # bu yerda esa mijoz o'zi yozganda tezroq ishlaydi — ikki marta
+            # yuborilmasligi bazadagi claim bilan kafolatlanadi.
             if conv.status == "operator":
+                now = datetime.now(timezone.utc)
                 history = await repo.recent_messages(session, tenant.id, conv.id, limit=10)
-                if contact_reminder_due(history, cfg.contact_phone, datetime.now(timezone.utc)):
+                if (contact_reminder_due(history, cfg.contact_phone, now)
+                        and await repo.claim_contact_reminder(session, conv.id, now)):
                     note = contact_fallback_text(cfg.contact_phone, cfg.ai_language).strip()
                     await self.send_message(
                         token, chat_id, note, business_connection_id=business_connection_id

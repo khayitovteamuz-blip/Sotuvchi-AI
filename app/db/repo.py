@@ -734,6 +734,73 @@ async def get_conversation(session: AsyncSession, tenant_id: str, conv_id: str) 
     return c
 
 
+_STRANDED_SQL = text("""
+SELECT c.id, c.tenant_id, c.external_id, c.telegram_business_connection_id,
+       s.contact_phone, s.ai_language
+FROM conversations c
+JOIN tenant_settings s ON s.tenant_id = c.tenant_id
+JOIN tenants t ON t.id = c.tenant_id
+WHERE c.status = 'operator'
+  AND c.contact_reminded_at IS NULL
+  AND c.blocked_at IS NULL
+  AND c.channel = 'telegram'
+  AND t.is_active
+  AND t.telegram_bot_token IS NOT NULL
+  AND coalesce(btrim(s.contact_phone), '') <> ''
+  -- Soat biz oxirgi yozgan narsadan yuradi: operator javob bersa, qayta
+  -- boshlanadi va ishlanayotgan suhbat bezovta qilinmaydi.
+  AND (
+        SELECT max(m.created_at) FROM messages m
+        WHERE m.conversation_id = c.id AND m.sender IN ('assistant', 'operator')
+      ) < :cutoff
+LIMIT :limit
+""")
+
+
+async def stranded_conversations(session: AsyncSession, cutoff, limit: int = 50) -> List[dict]:
+    """Escalated chats nobody has answered since `cutoff`, with the shop's number.
+
+    Cross-tenant on purpose: this is the sweeper's list, the same way the
+    Telegram poller reads every tenant with a bot token. Tenants with no number
+    to give are filtered out here rather than fetched and discarded.
+    """
+    res = await session.execute(_STRANDED_SQL, {"cutoff": cutoff, "limit": limit})
+    return [dict(r) for r in res.mappings().all()]
+
+
+async def claim_contact_reminder(session: AsyncSession, conv_id: str, at) -> bool:
+    """Take the right to send this conversation its number, exactly once.
+
+    Conditional UPDATE, so in a multi-worker deploy only the worker whose
+    statement matched a row proceeds — the others see no row and skip. Same
+    reasoning as the (tenant_id, update_id) claim on Telegram updates: without
+    it every worker sends the customer the same message.
+    """
+    res = await session.execute(
+        text("""UPDATE conversations SET contact_reminded_at = :at
+                WHERE id = :id AND contact_reminded_at IS NULL
+                RETURNING id"""),
+        {"id": conv_id, "at": at},
+    )
+    claimed = res.first() is not None
+    await session.commit()
+    return claimed
+
+
+async def release_contact_reminder(session: AsyncSession, conv_id: str) -> None:
+    """Give the claim back when the send did not go through.
+
+    Without this a single failed Telegram call would mark the conversation as
+    reminded for ever and the customer would never get the number at all —
+    the opposite of what the claim is there to protect.
+    """
+    await session.execute(
+        text("UPDATE conversations SET contact_reminded_at = NULL WHERE id = :id"),
+        {"id": conv_id},
+    )
+    await session.commit()
+
+
 async def conversation_messages(session: AsyncSession, tenant_id: str, conv_id: str) -> List[Message]:
     res = await session.execute(
         select(Message)

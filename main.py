@@ -29,6 +29,7 @@ from app.api.platform import auth_router as platform_auth_router
 from app.api.platform import router as platform_router
 from app.core.config import settings
 from app.db.base import AsyncSessionLocal, engine
+from app.services.contact_reminder import contact_reminder
 from app.services.telegram_poller import telegram_poller
 
 logging.basicConfig(
@@ -105,7 +106,11 @@ async def lifespan(app: FastAPI):
         # are otherwise left wherever they were last registered — which after
         # any local run is nowhere, because the poller deletes the webhook.
         await telegram_poller.register_webhooks()
+    # Runs in both modes: a customer stranded in an escalated chat must get the
+    # shop's number whether the bot is polling locally or on a webhook.
+    await contact_reminder.start()
     yield
+    await contact_reminder.stop()
     if polling:
         await telegram_poller.stop()
     # Return pooled connections before the process exits, so a redeploy does
