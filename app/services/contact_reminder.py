@@ -84,7 +84,7 @@ class ContactReminder:
         async with AsyncSessionLocal() as session:
             # Avval huquqni olamiz — yuborib, keyin belgilash xatosi mijozga
             # bir xil xabarni qayta yuborish bilan tugaydi.
-            if not await repo.claim_contact_reminder(session, row["id"], now):
+            if not await repo.claim_contact_reminder(session, row["tenant_id"], row["id"], now):
                 return False
 
             # Quyidagi har bir chiqishda claim qaytariladi: yuborilmagan xabar
@@ -92,12 +92,12 @@ class ContactReminder:
             # raqamdan butunlay mahrum qilish demakdir.
             tenant = await session.get(Tenant, row["tenant_id"])
             if not tenant or not tenant.telegram_bot_token:
-                await repo.release_contact_reminder(session, row["id"])
+                await repo.release_contact_reminder(session, row["tenant_id"], row["id"])
                 return False
 
             note = contact_fallback_text(row["contact_phone"], row["ai_language"]).strip()
             if not note:
-                await repo.release_contact_reminder(session, row["id"])
+                await repo.release_contact_reminder(session, row["tenant_id"], row["id"])
                 return False
 
             ok = await bot_service.send_message(
@@ -109,7 +109,7 @@ class ContactReminder:
                 # yubormasligi uchun), lekin yuborilmasa uni qaytarib
                 # qo'yamiz — aks holda bitta tarmoq uzilishi mijozni raqamdan
                 # butunlay mahrum qilardi.
-                await repo.release_contact_reminder(session, row["id"])
+                await repo.release_contact_reminder(session, row["tenant_id"], row["id"])
                 logger.warning("Raqam yuborilmadi, qayta uriniladi: conv=%s", row["id"])
                 return False
 

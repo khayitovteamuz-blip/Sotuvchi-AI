@@ -30,7 +30,7 @@ def stub(monkeypatch):
     async def stranded(session, cutoff, limit=50):
         return state["rows"]
 
-    async def claim(session, conv_id, at):
+    async def claim(session, tenant_id, conv_id, at):
         if conv_id in state["claimed"]:
             return False
         state["claimed"].add(conv_id)
@@ -42,7 +42,7 @@ def stub(monkeypatch):
     async def add_message(session, tenant_id, conv, sender, text, **kw):
         state["stored"].append((sender, text))
 
-    async def release(session, conv_id):
+    async def release(session, tenant_id, conv_id):
         state["released"].append(conv_id)
         state["claimed"].discard(conv_id)
 
@@ -113,7 +113,7 @@ async def test_raqam_bosh_bolsa_yuborilmaydi(stub):
 async def test_bitta_suhbatdagi_xato_qolganini_toxtatmaydi(stub, monkeypatch):
     stub["rows"] = [dict(ROW, id="conv-a"), dict(ROW, id="conv-b", external_id="666")]
 
-    async def yarim_ishlaydi(session, conv_id, at):
+    async def yarim_ishlaydi(session, tenant_id, conv_id, at):
         if conv_id == "conv-a":
             raise RuntimeError("baza yiqildi")
         return True

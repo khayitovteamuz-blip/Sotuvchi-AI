@@ -482,12 +482,17 @@ class TelegramBotService:
         if msg.get("chat", {}).get("type") != "private":
             return  # AI faqat mijoz bilan shaxsiy suhbatda javob beradi
 
+        chat_id = str(msg["chat"]["id"])
         sender_id = str((msg.get("from") or {}).get("id") or "")
         if tenant.telegram_business_owner_id and sender_id == tenant.telegram_business_owner_id:
-            return  # Egasi mijozga o'zi (telefonidan) yozdi — AI aralashmaydi
+            # Egasi mijozga o'zi (telefonidan) javob berdi. AI aralashmaydi,
+            # lekin bu javob yozib olinadi: aks holda Inboxda suhbat javobsiz
+            # ko'rinadi va "operator jim" soati yurishda davom etib, eslatma
+            # ega ishlayotgan suhbatga bostirib kirardi.
+            await self._record_owner_reply(session, tenant, chat_id, msg)
+            return
 
         bc_id = msg.get("business_connection_id") or tenant.telegram_business_connection_id
-        chat_id = str(msg["chat"]["id"])
         user_name = msg.get("from", {}).get("first_name", "Mijoz")
         text = msg.get("text") or msg.get("caption") or ""
 
@@ -570,6 +575,23 @@ class TelegramBotService:
             session, tenant, token, msg, chat_id, user_name, text,
             source_update_id=source_update_id, business_connection_id=None,
         )
+
+    async def _record_owner_reply(self, session, tenant, chat_id: str, msg: dict) -> None:
+        """Store what the owner typed to the customer from their own phone.
+
+        Two things depend on it: the Inbox shows the full conversation rather
+        than only the AI's half, and the "nobody answered" clock restarts —
+        a shop that is answering by hand must never be interrupted by our
+        "call us instead" message.
+        """
+        text = msg.get("text") or msg.get("caption") or ""
+        conv = await repo.get_or_create_conversation(
+            session, tenant.id, "telegram", chat_id,
+            customer_name=msg.get("chat", {}).get("first_name") or "Mijoz",
+        )
+        await repo.add_message(session, tenant.id, conv, "operator", text or "[media]")
+        # Yangi jimlik boshlansa, raqam qaytadan berilishi mumkin bo'lsin.
+        await repo.release_contact_reminder(session, tenant.id, conv.id)
 
     async def _process_customer_message(
         self, session, tenant, token, msg, chat_id, user_name, text,
@@ -683,7 +705,7 @@ class TelegramBotService:
                 now = datetime.now(timezone.utc)
                 history = await repo.recent_messages(session, tenant.id, conv.id, limit=10)
                 if (contact_reminder_due(history, cfg.contact_phone, now)
-                        and await repo.claim_contact_reminder(session, conv.id, now)):
+                        and await repo.claim_contact_reminder(session, tenant.id, conv.id, now)):
                     note = contact_fallback_text(cfg.contact_phone, cfg.ai_language).strip()
                     await self.send_message(
                         token, chat_id, note, business_connection_id=business_connection_id
@@ -889,14 +911,21 @@ class TelegramBotService:
             # Nobody was reached: do not promise a call back that no one will
             # make — hand over the shop's own number instead. Same wording the
             # AI path appends, so the customer gets one answer either way.
-            reply = (
-                "👨‍💼 Operatorga xabar berdim! Tez orada javob berishadi."
-                if notified else
-                "👨‍💼 So'rovingiz qabul qilindi."
-                + (contact_fallback_text(cfg.contact_phone, cfg.ai_language)
-                   or " Operatorimiz tez orada bog'lanadi.")
-            )
+            # Claim first, so a second tap (and the sweeper half an hour later)
+            # do not each repeat the number.
+            reply = "👨‍💼 Operatorga xabar berdim! Tez orada javob berishadi."
+            if not notified:
+                reply = "👨‍💼 So'rovingiz qabul qilindi."
+                note = contact_fallback_text(cfg.contact_phone, cfg.ai_language)
+                if note and await repo.claim_contact_reminder(
+                    session, tenant.id, conv.id, datetime.now(timezone.utc)
+                ):
+                    reply += note
+                else:
+                    reply += " Operatorimiz tez orada bog'lanadi."
             await self.send_message(token, chat_id, reply, business_connection_id=bc_id)
+            # Inboxda mijoz ko'rgan narsaning o'zi tursin.
+            await repo.add_message(session, tenant.id, conv, "assistant", reply)
 
 
 bot_service = TelegramBotService()

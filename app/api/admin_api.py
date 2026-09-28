@@ -388,6 +388,12 @@ async def import_from_google_sheet(
 
     try:
         content = await import_service.fetch_google_sheet_csv(url)
+        # Fayl yuklash yo'lidagi bilan bir xil chegara: jadval havola orqali
+        # kelgani uni kichikroq qilmaydi, u ham xotiraga to'liq o'qiladi.
+        if not content:
+            raise HTTPException(status_code=400, detail="Jadval bo'sh.")
+        if len(content) > MAX_IMPORT_BYTES:
+            raise HTTPException(status_code=400, detail="Jadval 10 MB dan katta.")
 
         preview = await import_service.import_products(
             session, tenant_id, "google-sheet.csv", content, dry_run=True

@@ -12,7 +12,7 @@ import asyncio
 import logging
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -96,15 +96,22 @@ def contact_reminder_due(
         return False
 
     ours = [m for m in messages if getattr(m, "sender", None) in ("assistant", "operator")]
-    if not ours:
-        return False
 
     # Already handed over — repeating it every message reads as a brush-off.
     if any((phone or "").strip() in (getattr(m, "text", "") or "") for m in ours):
         return False
 
-    last = max(m.created_at for m in ours)
-    return (now - last) >= timedelta(minutes=after_minutes)
+    if ours:
+        waiting_since = max(m.created_at for m in ours)
+    elif messages:
+        # Biz hali hech narsa yozmagan bo'lsak ham mijoz kutayotgani rost —
+        # o'sha suhbatdagi eng eski xabardan hisoblaymiz. Sweeper ham shunday
+        # qiladi (repo._STRANDED_SQL dagi coalesce).
+        waiting_since = min(m.created_at for m in messages)
+    else:
+        return False
+
+    return (now - waiting_since) >= timedelta(minutes=after_minutes)
 
 
 def contact_fallback_text(phone: Optional[str], lang: Optional[str]) -> str:
@@ -368,9 +375,14 @@ class AISalesAgent:
 
         # Uzatildi-yu, hech kimga xabar bormadi: mijozga aloqa raqamini shu
         # yerda qo'shamiz. Yozilgan xabarga ham shu matn tushadi — Inboxda
-        # mijoz ko'rgan javobning aynan o'zi turishi kerak.
-        if handoff_left_unanswered(tool_trace):
-            reply_text += contact_fallback_text(cfg.contact_phone, cfg.ai_language)
+        # mijoz ko'rgan javobning aynan o'zi turishi kerak. Claim ham shu
+        # yerda olinadi: aks holda fon vazifasi 30 daqiqadan keyin xuddi shu
+        # raqamni ikkinchi marta yuborardi.
+        if handoff_left_unanswered(tool_trace) and (cfg.contact_phone or "").strip():
+            if await repo.claim_contact_reminder(
+                session, tenant_id, conversation.id, datetime.now(timezone.utc)
+            ):
+                reply_text += contact_fallback_text(cfg.contact_phone, cfg.ai_language)
 
         # 2-marta ketma-ket mavzudan tashqari savol — javob Inboxda ko'rinadi,
         # lekin mijozga yuborilmaydi. Bloklash emas: mavzuga qaytishi bilan

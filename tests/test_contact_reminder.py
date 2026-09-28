@@ -50,10 +50,16 @@ def test_raqam_allaqachon_berilgan_bolsa_takrorlanmaydi():
     assert contact_reminder_due(history, PHONE, NOW) is False
 
 
-def test_biz_hali_hech_narsa_yozmagan_bolsak_berilmaydi():
-    # Faqat mijoz xabarlari bor — bu holatda "kim javob bermayapti" degan
-    # hisoblash uchun boshlang'ich nuqta yo'q.
+def test_biz_hali_hech_narsa_yozmagan_bolsak_ham_beriladi():
+    # Faqat mijoz xabarlari bor: masalan /start dan keyin darhol "Operator"
+    # tugmasi bosilgan. Bunday mijoz ham kutmoqda, shuning uchun eng eski
+    # xabardan hisoblanadi — aks holda u butunlay unutilib qolardi.
     history = [Msg("user", 90), Msg("user", 2)]
+    assert contact_reminder_due(history, PHONE, NOW) is True
+
+
+def test_yaqinda_boshlangan_suhbat_hali_kutmaydi():
+    history = [Msg("user", 5), Msg("user", 1)]
     assert contact_reminder_due(history, PHONE, NOW) is False
 
 

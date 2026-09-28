@@ -748,10 +748,14 @@ WHERE c.status = 'operator'
   AND t.telegram_bot_token IS NOT NULL
   AND coalesce(btrim(s.contact_phone), '') <> ''
   -- Soat biz oxirgi yozgan narsadan yuradi: operator javob bersa, qayta
-  -- boshlanadi va ishlanayotgan suhbat bezovta qilinmaydi.
-  AND (
-        SELECT max(m.created_at) FROM messages m
-        WHERE m.conversation_id = c.id AND m.sender IN ('assistant', 'operator')
+  -- boshlanadi va ishlanayotgan suhbat bezovta qilinmaydi. Biz hali hech
+  -- narsa yozmagan bo'lsak (mijoz /start dan keyin darhol "Operator"
+  -- tugmasini bosgan holat) — suhbat ochilgan vaqtdan yuradi, aks holda
+  -- NULL solishtiruv tufayli bunday mijoz umuman topilmasdi.
+  AND coalesce(
+        (SELECT max(m.created_at) FROM messages m
+         WHERE m.conversation_id = c.id AND m.sender IN ('assistant', 'operator')),
+        c.created_at
       ) < :cutoff
 LIMIT :limit
 """)
@@ -768,26 +772,31 @@ async def stranded_conversations(session: AsyncSession, cutoff, limit: int = 50)
     return [dict(r) for r in res.mappings().all()]
 
 
-async def claim_contact_reminder(session: AsyncSession, conv_id: str, at) -> bool:
+async def claim_contact_reminder(session: AsyncSession, tenant_id: str, conv_id: str, at) -> bool:
     """Take the right to send this conversation its number, exactly once.
 
     Conditional UPDATE, so in a multi-worker deploy only the worker whose
     statement matched a row proceeds — the others see no row and skip. Same
     reasoning as the (tenant_id, update_id) claim on Telegram updates: without
     it every worker sends the customer the same message.
+
+    tenant_id is in the WHERE clause like every other conversation query here:
+    both callers derive the id internally today, but a bare-id write into a
+    tenant-owned table is exactly the shape that turns into a cross-tenant bug
+    the first time someone passes it something from a request.
     """
     res = await session.execute(
         text("""UPDATE conversations SET contact_reminded_at = :at
-                WHERE id = :id AND contact_reminded_at IS NULL
+                WHERE id = :id AND tenant_id = :tenant_id AND contact_reminded_at IS NULL
                 RETURNING id"""),
-        {"id": conv_id, "at": at},
+        {"id": conv_id, "tenant_id": tenant_id, "at": at},
     )
     claimed = res.first() is not None
     await session.commit()
     return claimed
 
 
-async def release_contact_reminder(session: AsyncSession, conv_id: str) -> None:
+async def release_contact_reminder(session: AsyncSession, tenant_id: str, conv_id: str) -> None:
     """Give the claim back when the send did not go through.
 
     Without this a single failed Telegram call would mark the conversation as
@@ -795,8 +804,9 @@ async def release_contact_reminder(session: AsyncSession, conv_id: str) -> None:
     the opposite of what the claim is there to protect.
     """
     await session.execute(
-        text("UPDATE conversations SET contact_reminded_at = NULL WHERE id = :id"),
-        {"id": conv_id},
+        text("UPDATE conversations SET contact_reminded_at = NULL "
+             "WHERE id = :id AND tenant_id = :tenant_id"),
+        {"id": conv_id, "tenant_id": tenant_id},
     )
     await session.commit()
 
