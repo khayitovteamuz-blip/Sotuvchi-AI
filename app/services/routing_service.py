@@ -174,6 +174,30 @@ async def send(
     return ok
 
 
+async def send_tracked(
+    session: AsyncSession, tenant: Tenant, cfg: Optional[TenantSettings], event: str,
+    text: str,
+) -> List[Dict[str, str]]:
+    """Like send(), but reports where each copy of the alert landed.
+
+    The caller keeps those (chat_id, message_id) pairs so that a staff member
+    replying to one of them inside Telegram can be matched back to the customer
+    it was about — that reply is how a shop answers without opening the panel.
+    """
+    if not tenant.telegram_bot_token:
+        return []
+    from app.services.bot_service import bot_service
+
+    refs: List[Dict[str, str]] = []
+    for chat_id in targets_for(cfg, event):
+        sent = await bot_service.send_message_full(tenant.telegram_bot_token, chat_id, text)
+        if sent and sent.get("message_id") is not None:
+            refs.append({"chat_id": str(chat_id), "message_id": str(sent["message_id"])})
+    if not refs and targets_for(cfg, event):
+        logger.warning(f"Tenant {tenant.id}: '{event}' alert reached nobody")
+    return refs
+
+
 def default_routes(tenant: Tenant, cfg: TenantSettings) -> Dict[str, List[str]]:
     """Reproduce exactly where alerts went before routing existed.
 

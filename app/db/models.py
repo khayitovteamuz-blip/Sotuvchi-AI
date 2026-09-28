@@ -662,6 +662,11 @@ class Conversation(Base):
     contact_reminded_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Where this conversation's "operator kerak" alert landed:
+    # [{"chat_id": "-100…", "message_id": "42"}, …] — one entry per routed
+    # destination. A staff member who replies to one of those messages inside
+    # Telegram is answering THIS customer, and that is how we know which.
+    handoff_alert_refs: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
     status: Mapped[str] = mapped_column(String(16), default="ai")  # ai | operator | closed
     assigned_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     assigned_user_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)

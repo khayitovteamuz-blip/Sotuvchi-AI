@@ -796,6 +796,30 @@ async def claim_contact_reminder(session: AsyncSession, tenant_id: str, conv_id:
     return claimed
 
 
+async def conversation_by_alert(
+    session: AsyncSession, tenant_id: str, chat_id: str, message_id: str
+) -> Optional[Conversation]:
+    """Which customer is this staff reply about?
+
+    Matched on the alert message the reply points at, so two customers waiting
+    at once cannot be confused with each other. Newest first: an alert id is
+    only reused if Telegram ever repeats one, and then the recent chat is the
+    one a person is answering.
+    """
+    res = await session.execute(
+        select(Conversation)
+        .where(
+            Conversation.tenant_id == tenant_id,
+            Conversation.handoff_alert_refs.contains(
+                [{"chat_id": str(chat_id), "message_id": str(message_id)}]
+            ),
+        )
+        .order_by(Conversation.last_message_at.desc())
+        .limit(1)
+    )
+    return res.scalars().first()
+
+
 async def release_contact_reminder(session: AsyncSession, tenant_id: str, conv_id: str) -> None:
     """Give the claim back when the send did not go through.
 

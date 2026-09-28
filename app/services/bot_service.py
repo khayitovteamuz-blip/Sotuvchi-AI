@@ -321,6 +321,29 @@ class TelegramBotService:
             logger.error(f"Telegram sendPhoto error: {e}")
             return None
 
+    async def send_document(
+        self, token: str, chat_id: str, file_id: str, caption: Optional[str] = None,
+        business_connection_id: Optional[str] = None,
+    ) -> bool:
+        """Pass a file straight through by the id Telegram already holds."""
+        payload: Dict[str, Any] = {"chat_id": chat_id, "document": file_id}
+        if caption:
+            payload["caption"] = caption[:1024]
+        if business_connection_id:
+            payload["business_connection_id"] = business_connection_id
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                resp = await client.post(
+                    f"{TELEGRAM_API.format(token=token)}/sendDocument", json=payload
+                )
+                data = resp.json()
+                if not data.get("ok"):
+                    logger.warning(f"sendDocument failed: {str(data)[:180]}")
+                return bool(data.get("ok"))
+        except Exception as e:
+            logger.error(f"Telegram sendDocument error: {e}")
+            return False
+
     async def send_media_group(
         self, token: str, chat_id: str, items: list,
         business_connection_id: Optional[str] = None,
@@ -639,9 +662,11 @@ class TelegramBotService:
                 f"Assalomu alaykum, {user_name}! 👋\nMen {cfg.ai_name or 'Sotuvchi AI'} — "
                 f"savdo bo'yicha yordamchingizman. Nima qidiryapsiz?"
             )
+            # "Operator" tugmasi ataylab yo'q: salomlashuvdayoq odam so'rash
+            # taklif qilinsa, mijoz AI bilan gaplashib ham ko'rmaydi. Kerak
+            # bo'lsa u so'z bilan so'raydi va AI uzatadi.
             keyboard = {"inline_keyboard": [
-                [{"text": "🛍 Katalog", "callback_data": "btn_catalog"},
-                 {"text": "📞 Operator", "callback_data": "btn_operator"}],
+                [{"text": "🛍 Katalog", "callback_data": "btn_catalog"}],
             ]}
             await self.send_message(
                 token, chat_id, greeting, reply_markup=keyboard,
@@ -790,7 +815,16 @@ class TelegramBotService:
         await self._send_requested_photos(session, tenant, token, chat_id, resp, business_connection_id)
 
     async def _handle_group_message(self, session, tenant, token, msg, chat_id, text):
-        """Only the pairing command matters in a group; the AI stays out."""
+        """Pairing commands, and staff answering a customer by replying here.
+
+        The AI still stays out of groups. What a group IS good for is the
+        answer itself: a shop that lives in Telegram should not have to open a
+        panel to reply, so a reply to our "operator kerak" alert is relayed to
+        the customer it was about.
+        """
+        if await self._relay_staff_reply(session, tenant, token, msg, chat_id, text):
+            return
+
         if not _is_pair_command(text):
             return
 
@@ -810,6 +844,72 @@ class TelegramBotService:
             reply or "❌ Kod noto'g'ri yoki eskirgan.\n"
                      "Panelda *Sozlamalar → Boshqa ulanishlar → Integratsiyalar* bo'limidan yangi kod oling."
         )
+
+    async def _relay_staff_reply(self, session, tenant, token, msg, chat_id, text) -> bool:
+        """A reply to our alert = an answer for that customer. Pass it on.
+
+        Telegram delivers replies to the bot's own messages even with privacy
+        mode on, so this needs nothing switched on in BotFather and the bot
+        still cannot read the rest of the group's conversation.
+
+        Media travels by file_id: Telegram already holds the file, so the same
+        id can be sent straight back out without downloading and re-uploading.
+        """
+        replied = msg.get("reply_to_message") or {}
+        if not replied.get("message_id"):
+            return False
+
+        conv = await repo.conversation_by_alert(
+            session, tenant.id, chat_id, str(replied["message_id"])
+        )
+        if not conv:
+            return False
+
+        bc_id = conv.telegram_business_connection_id
+        caption = text or ""
+        sent = False
+        kind = ""
+
+        if msg.get("photo"):
+            file_id = msg["photo"][-1]["file_id"]
+            sent = await self.send_photo(
+                token, conv.external_id, file_id, caption or None, business_connection_id=bc_id
+            )
+            kind = "📷 rasm"
+        elif msg.get("document"):
+            sent = await self.send_document(
+                token, conv.external_id, msg["document"]["file_id"], caption or None,
+                business_connection_id=bc_id,
+            )
+            kind = "📎 fayl"
+        elif caption:
+            sent = await self.send_message(
+                token, conv.external_id, caption, business_connection_id=bc_id
+            )
+        else:
+            # Ovozli xabar, stiker va boshqalar — hozircha uzatilmaydi, lekin
+            # xodim jim qolmasin: nima bo'lganini aniq aytamiz.
+            await self.send_message(
+                token, chat_id,
+                "⚠️ Bu turdagi xabar hozircha uzatilmaydi. Matn, rasm yoki fayl yuboring.",
+            )
+            return True
+
+        if not sent:
+            await self.send_message(token, chat_id, "❌ Mijozga yuborib bo'lmadi. Qayta urinib ko'ring.")
+            return True
+
+        # Inboxda ham, "operator jim" soatida ham shu javob hisobga olinsin.
+        await repo.add_message(
+            session, tenant.id, conv, "operator", (f"{kind} " if kind else "") + caption or kind
+        )
+        await repo.release_contact_reminder(session, tenant.id, conv.id)
+
+        who = " ".join(filter(None, [msg.get("from", {}).get("first_name"),
+                                     msg.get("from", {}).get("last_name")])) or "Xodim"
+        await self.send_message(token, chat_id, f"✅ *{who}*ning javobi mijozga yuborildi.")
+        logger.info("Guruhdan javob uzatildi: tenant=%s conv=%s", tenant.id, conv.id)
+        return True
 
     async def _extract_media(self, token: str, msg: dict):
         """Download a photo or voice note. Returns (parts, human label)."""

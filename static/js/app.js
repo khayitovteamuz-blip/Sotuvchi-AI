@@ -1752,7 +1752,9 @@ async function saveSettings() {
 // ════════════════════════════════════════════════════════
 // INBOX — live conversations, operator reply, handoff
 // ════════════════════════════════════════════════════════
-let inboxFilter = 'all';
+// Ochilganda faqat javob kutayotganlar: do'kon egasiga kerak bo'ladigani
+// shu, qolgan suhbatlar tarix uchun filtr orqali ochiladi.
+let inboxFilter = 'operator';
 let activeConvId = null;
 let inboxPollTimer = null;
 

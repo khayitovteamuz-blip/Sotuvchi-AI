@@ -46,9 +46,15 @@ async def notify_handoff(
     )
     if last_customer_message:
         text += f"\n💬 Oxirgi xabar:\n_{last_customer_message[:200]}_\n"
-    text += "\n➡️ Panelda *Inbox* bo'limini oching va javob yozing."
+    # Javob berishning eng qisqa yo'li — shu yerda, Telegramning o'zida.
+    text += ("\n➡️ *Shu xabarga javob yozing* — mijozga yetib boradi.\n"
+             "Rasm yoki fayl ham yuborsangiz bo'ladi.")
 
-    return await routing_service.send(session, tenant, cfg, "handoff", text)
+    refs = await routing_service.send_tracked(session, tenant, cfg, "handoff", text)
+    # Qaysi xabarga reply qilinsa, qaysi mijozga tegishli ekanini shu bog'laydi.
+    conversation.handoff_alert_refs = refs
+    await session.commit()
+    return bool(refs)
 
 
 async def notify_customer_waiting(

@@ -105,6 +105,11 @@
                  Ikonkalar Material Symbols, emoji emas. -->
             <nav class="nav-menu">
                 <div class="nav-item active" data-tab="tab-overview"><span class="ico ico-layout-dashboard"></span> Dashboard</div>
+                <!-- Inbox menyuga qaytarildi: operatorga uzatilgan mijoz javob
+                     kutib turganini egasi ko'rishi kerak, va u yagona kirish
+                     yo'li Mijozlar bo'limi ichida ko'milib qolmasligi kerak. -->
+                <div class="nav-item" data-tab="tab-inbox"><span class="ico ico-messages-square"></span> Inbox
+                    <span class="nav-badge" id="inbox-nav-badge" style="display:none;">0</span></div>
                 <div class="nav-item" data-tab="tab-orders"><span class="ico ico-shopping-cart"></span> Buyurtmalar</div>
                 <div class="nav-item" data-tab="tab-products"><span class="ico ico-boxes"></span> Katalog</div>
                 <div class="nav-item" data-tab="tab-ai-agent"><span class="ico ico-bot"></span> AI Agent</div>
@@ -186,8 +191,8 @@
                         </div>
 
                         <div class="inbox-filters">
-                            <button class="inbox-filter active" data-status="all" onclick="filterInbox('all',this)">Barchasi <b id="inbox-count-all">0</b></button>
-                            <button class="inbox-filter" data-status="operator" onclick="filterInbox('operator',this)">Operator kutmoqda <b id="inbox-count-operator">0</b></button>
+                            <button class="inbox-filter active" data-status="operator" onclick="filterInbox('operator',this)">Operator kutmoqda <b id="inbox-count-operator">0</b></button>
+                            <button class="inbox-filter" data-status="all" onclick="filterInbox('all',this)">Barchasi <b id="inbox-count-all">0</b></button>
                             <button class="inbox-filter" data-status="ai" onclick="filterInbox('ai',this)">AI hal qilgan <b id="inbox-count-ai">0</b></button>
                             <button class="inbox-filter" data-status="closed" onclick="filterInbox('closed',this)">Yopilgan <b id="inbox-count-closed">0</b></button>
                         </div>
