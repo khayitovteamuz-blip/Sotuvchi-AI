@@ -47,12 +47,17 @@ def stub(monkeypatch):
         state["sent"].append({"kind": "doc", "chat_id": chat_id, "body": file_id, "caption": caption})
         return True
 
+    async def send_voice(token, chat_id, file_id, caption=None, business_connection_id=None):
+        state["sent"].append({"kind": "voice", "chat_id": chat_id, "body": file_id})
+        return True
+
     monkeypatch.setattr(bs.repo, "conversation_by_alert", by_alert)
     monkeypatch.setattr(bs.repo, "add_message", add_message)
     monkeypatch.setattr(bs.repo, "release_contact_reminder", release)
     monkeypatch.setattr(bs.bot_service, "send_message", send_message)
     monkeypatch.setattr(bs.bot_service, "send_photo", send_photo)
     monkeypatch.setattr(bs.bot_service, "send_document", send_document)
+    monkeypatch.setattr(bs.bot_service, "send_voice", send_voice)
     return state
 
 
@@ -122,9 +127,16 @@ async def test_xodimga_tasdiq_qaytadi(stub):
     assert guruhga and "Aziza" in guruhga[0]["body"]
 
 
+async def test_ovozli_xabar_mijozga_uzatiladi(stub):
+    await _relay(stub, _msg(voice={"file_id": "AwACvoice"}), "")
+    ovoz = [s for s in stub["sent"] if s["kind"] == "voice"]
+    assert ovoz and ovoz[0]["chat_id"] == "555" and ovoz[0]["body"] == "AwACvoice"
+    assert stub["stored"][0][0] == "operator"
+
+
 async def test_qollab_quvvatlanmaydigan_tur_aytiladi(stub):
-    # Ovozli xabar: jim qolish o'rniga xodimga aniq aytiladi.
-    await _relay(stub, _msg(voice={"file_id": "x"}), "")
+    # Stiker: jim qolish o'rniga xodimga aniq aytiladi.
+    await _relay(stub, _msg(sticker={"file_id": "x"}), "")
     guruhga = [s for s in stub["sent"] if s["chat_id"] == ALERT["chat_id"]]
     assert guruhga and "uzatilmaydi" in guruhga[0]["body"]
     assert not [s for s in stub["sent"] if s["chat_id"] == "555"]

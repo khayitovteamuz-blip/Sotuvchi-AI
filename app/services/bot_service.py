@@ -81,6 +81,23 @@ def _not_a_receipt_text(lang: Optional[str], name: str) -> str:
             "Buyurtmangiz bekor qilinmadi, to'lov kutilmoqda.")
 
 
+def _media_kind_label(msg: dict) -> str:
+    """What kind of thing the customer sent, from the message alone.
+
+    Deliberately independent of downloading the file: the label must still
+    appear when the download fails, or the Inbox shows an empty bubble.
+    """
+    if msg.get("voice") or msg.get("audio"):
+        return "🎤 [ovozli xabar]"
+    if msg.get("photo"):
+        return "📷 [rasm yubordi]"
+    if msg.get("video") or msg.get("video_note"):
+        return "🎥 [video xabar]"
+    if msg.get("document"):
+        return "📎 [fayl yubordi]"
+    return ""
+
+
 def _is_pair_command(text: str) -> bool:
     return bool(text) and text.split(" ", 1)[0].split("@")[0] in PAIR_COMMANDS
 
@@ -320,6 +337,42 @@ class TelegramBotService:
         except Exception as e:
             logger.error(f"Telegram sendPhoto error: {e}")
             return None
+
+    async def send_voice_full(
+        self, token: str, chat_id: str, file_id: str, caption: Optional[str] = None,
+        business_connection_id: Optional[str] = None,
+    ) -> Optional[dict]:
+        """Pass a voice note through by file_id; returns the sent message.
+
+        The id matters: a staff member replying to this voice note in the
+        group is answering the customer who recorded it.
+        """
+        payload: Dict[str, Any] = {"chat_id": chat_id, "voice": file_id}
+        if caption:
+            payload["caption"] = caption[:1024]
+        if business_connection_id:
+            payload["business_connection_id"] = business_connection_id
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                resp = await client.post(
+                    f"{TELEGRAM_API.format(token=token)}/sendVoice", json=payload
+                )
+                data = resp.json()
+                if not data.get("ok"):
+                    logger.warning(f"sendVoice failed: {str(data)[:180]}")
+                    return None
+                return data["result"]
+        except Exception as e:
+            logger.error(f"Telegram sendVoice error: {e}")
+            return None
+
+    async def send_voice(
+        self, token: str, chat_id: str, file_id: str, caption: Optional[str] = None,
+        business_connection_id: Optional[str] = None,
+    ) -> bool:
+        return await self.send_voice_full(
+            token, chat_id, file_id, caption, business_connection_id
+        ) is not None
 
     async def send_document(
         self, token: str, chat_id: str, file_id: str, caption: Optional[str] = None,
@@ -718,9 +771,16 @@ class TelegramBotService:
         # A human owns this conversation (or the bot is off): record the message
         # and ping the operator, otherwise the customer waits on a silent chat.
         if conv.status == "operator" or not cfg.bot_enabled:
-            await repo.add_message(session, tenant.id, conv, "user", text or label)
+            # Yorliq faylni yuklab olishga bog'liq bo'lmasin: yuklab olish
+            # yiqilsa ham (tarmoq, hajm) mijoz nima yuborgani Inboxda
+            # ko'rinsin, bo'sh pufakcha emas.
+            shown = text or label or _media_kind_label(msg)
+            await repo.add_message(session, tenant.id, conv, "user", shown)
             from app.services import notify_service
-            await notify_service.notify_customer_waiting(session, tenant, cfg, conv, text or label)
+            await notify_service.notify_customer_waiting(
+                session, tenant, cfg, conv, shown,
+                voice_file_id=(msg.get("voice") or {}).get("file_id"),
+            )
 
             # Uzatilgan, lekin hech kim javob bermayapti: mijoz jim chatda
             # kutib qolmasin. Fon vazifasi ham shuni kuzatadi (contact_reminder),
@@ -882,16 +942,23 @@ class TelegramBotService:
                 business_connection_id=bc_id,
             )
             kind = "📎 fayl"
+        elif msg.get("voice"):
+            sent = await self.send_voice(
+                token, conv.external_id, msg["voice"]["file_id"], caption or None,
+                business_connection_id=bc_id,
+            )
+            kind = "🎤 ovozli xabar"
         elif caption:
             sent = await self.send_message(
                 token, conv.external_id, caption, business_connection_id=bc_id
             )
         else:
-            # Ovozli xabar, stiker va boshqalar — hozircha uzatilmaydi, lekin
-            # xodim jim qolmasin: nima bo'lganini aniq aytamiz.
+            # Stiker, video va boshqalar — hozircha uzatilmaydi, lekin xodim
+            # jim qolmasin: nima bo'lganini aniq aytamiz.
             await self.send_message(
                 token, chat_id,
-                "⚠️ Bu turdagi xabar hozircha uzatilmaydi. Matn, rasm yoki fayl yuboring.",
+                "⚠️ Bu turdagi xabar hozircha uzatilmaydi. "
+                "Matn, rasm, fayl yoki ovozli xabar yuboring.",
             )
             return True
 
@@ -901,7 +968,7 @@ class TelegramBotService:
 
         # Inboxda ham, "operator jim" soatida ham shu javob hisobga olinsin.
         await repo.add_message(
-            session, tenant.id, conv, "operator", (f"{kind} " if kind else "") + caption or kind
+            session, tenant.id, conv, "operator", " ".join(filter(None, [kind, caption]))
         )
         await repo.release_contact_reminder(session, tenant.id, conv.id)
 

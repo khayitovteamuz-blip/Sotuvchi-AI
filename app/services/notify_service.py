@@ -27,6 +27,25 @@ def generate_pairing_code() -> str:
     return secrets.token_hex(3).upper()  # e.g. "A3F91C"
 
 
+# Suhbatda saqlanadigan ogohlantirish izlari soni. Har bir mijoz xabari yangi
+# iz qo'shadi — cheksiz o'smasin, lekin xodim yaqinda tushgan istalgan xabarga
+# reply qila olishi uchun yetarlicha bo'lsin.
+MAX_ALERT_REFS = 30
+
+
+def remember_alert_refs(conversation: Conversation, refs: list) -> None:
+    """Add where new alerts landed, keeping the newest MAX_ALERT_REFS.
+
+    Appended, not replaced: staff reply to whichever message is in front of
+    them — the first alert or the customer's latest — and every one of those
+    has to lead back to the same customer.
+    """
+    if refs:
+        conversation.handoff_alert_refs = (
+            list(conversation.handoff_alert_refs or []) + list(refs)
+        )[-MAX_ALERT_REFS:]
+
+
 async def notify_handoff(
     session: AsyncSession,
     tenant: Tenant,
@@ -52,7 +71,7 @@ async def notify_handoff(
 
     refs = await routing_service.send_tracked(session, tenant, cfg, "handoff", text)
     # Qaysi xabarga reply qilinsa, qaysi mijozga tegishli ekanini shu bog'laydi.
-    conversation.handoff_alert_refs = refs
+    remember_alert_refs(conversation, refs)
     await session.commit()
     return bool(refs)
 
@@ -63,20 +82,40 @@ async def notify_customer_waiting(
     cfg: TenantSettings,
     conversation: Conversation,
     text: str,
+    voice_file_id: Optional[str] = None,
 ) -> bool:
-    """Customer wrote while a human owns the chat — the operator must know."""
+    """Customer wrote while a human owns the chat — the operator must know.
+
+    Tracked like the handoff alert, so replying to THIS message also reaches
+    the customer — it is the one in front of the staff member by then. A
+    voice note is forwarded as audio: a label saying "they sent a voice
+    message" is not something anyone can answer.
+    """
     # Don't ping a destination about its own chat: the owner's personal chat is
     # both a destination and, if they ever message the bot, a conversation.
     if str(conversation.external_id) in routing_service.targets_for(cfg, "customer_waiting"):
         return False
 
     customer = conversation.customer_name or "Mijoz"
-    body = (
-        f"💬 *{customer}* yozdi (operator kutmoqda):\n\n"
-        f"_{text[:250]}_\n\n"
-        "➡️ Panelda *Inbox* dan javob bering."
-    )
-    return await routing_service.send(session, tenant, cfg, "customer_waiting", body)
+    refs = []
+    if voice_file_id:
+        refs += await routing_service.send_voice_tracked(
+            session, tenant, cfg, "customer_waiting", voice_file_id,
+            caption=f"🎤 {customer} (operator kutmoqda) — javob uchun shu xabarga reply qiling",
+        )
+    else:
+        body = (
+            f"💬 *{customer}* yozdi (operator kutmoqda):\n\n"
+            f"_{text[:250]}_\n\n"
+            "➡️ *Shu xabarga javob yozing* — mijozga yetib boradi."
+        )
+        refs += await routing_service.send_tracked(
+            session, tenant, cfg, "customer_waiting", body
+        )
+
+    remember_alert_refs(conversation, refs)
+    await session.commit()
+    return bool(refs)
 
 
 async def notify_blocked(

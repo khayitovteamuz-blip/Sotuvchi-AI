@@ -198,6 +198,30 @@ async def send_tracked(
     return refs
 
 
+async def send_voice_tracked(
+    session: AsyncSession, tenant: Tenant, cfg: Optional[TenantSettings], event: str,
+    file_id: str, caption: Optional[str] = None,
+) -> List[Dict[str, str]]:
+    """Put a customer's voice note in front of the team, and say where it went.
+
+    A text label like "🎤 [ovozli xabar]" tells staff that something was said
+    but not what — they would have to open the panel to hear it. The voice
+    itself goes to the group, and replying to it answers the customer.
+    """
+    if not tenant.telegram_bot_token:
+        return []
+    from app.services.bot_service import bot_service
+
+    refs: List[Dict[str, str]] = []
+    for chat_id in targets_for(cfg, event):
+        sent = await bot_service.send_voice_full(
+            tenant.telegram_bot_token, chat_id, file_id, caption
+        )
+        if sent and sent.get("message_id") is not None:
+            refs.append({"chat_id": str(chat_id), "message_id": str(sent["message_id"])})
+    return refs
+
+
 def default_routes(tenant: Tenant, cfg: TenantSettings) -> Dict[str, List[str]]:
     """Reproduce exactly where alerts went before routing existed.
 
